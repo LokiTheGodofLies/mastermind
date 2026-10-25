@@ -6,13 +6,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 # Only import init_user_db
 from modules.database.user_db import init_user_db
 
-
-
 # Import handlers from our modular folders
 from modules.start.start import start_command
-from modules.help.help import help_command
-# (Assuming you have help button callback and normal text handler in your other modules)
-# from modules.help.help import help_button_callback  # Adjust if stored separately
+from modules.help_menu.help_handler import help_command, help_button_callback
 # from modules.message.message_handler import handle_normal_text
 
 # Import allowance/referral handlers
@@ -48,15 +44,15 @@ if __name__ == '__main__':
     # Build the application using the token
     application = ApplicationBuilder().token(token).build()
 
-    # Register Command Handlers
+    # Register Command Handlers & Callbacks
     application.add_handler(CommandHandler('start', start_command))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CallbackQueryHandler(help_button_callback))
     application.add_handler(CommandHandler('quota', quota_command))
     application.add_handler(CommandHandler('gift', gift_command))
     application.add_handler(CommandHandler('refer', refer_command))
     
-    # Optional callbacks / message handlers
-    # application.add_handler(CallbackQueryHandler(help_button_callback))
+    # Optional message handlers
     # application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_normal_text))
 
     print("🤖 Mastermind bot is up and running...")
@@ -70,3 +66,4 @@ if __name__ == '__main__':
 
     # Start polling for messages safely
     application.run_polling()
+    
