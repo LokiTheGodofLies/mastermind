@@ -3,7 +3,10 @@ import asyncio
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 # Import database initializers
-from modules.database.user_db import init_user_db, init_referral_db
+# Only import init_user_db
+from modules.database.user_db import init_user_db
+
+
 
 # Import handlers from our modular folders
 from modules.start.start import start_command
@@ -40,7 +43,6 @@ if __name__ == '__main__':
 
     # Initialize SQLite databases & tables on startup
     init_user_db()
-    init_referral_db()
     print("✅ Database and tables initialized successfully.")
 
     # Build the application using the token
