@@ -2,12 +2,12 @@ import logging
 import asyncio
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, 
-    CommandHandler, 
-    CallbackQueryHandler, 
-    MessageHandler, 
-    filters, 
-    ContextTypes, 
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
     ApplicationHandlerStop
 )
 
@@ -16,18 +16,20 @@ from modules.ban.ban import check_user_access
 from modules.database.user_db import init_user_db, get_user_role_db
 
 # Import handlers from our modular folders
-from modules.start.start import start_command
+from modules.start.start_handler import start_command
 from modules.help_menu.help_handler import help_command, help_button_callback
 from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command
 from modules.allowance.handlers import quota_command, gift_command, refer_command
 from modules.log.handlers import log_command
 from modules.log.logger import setup_in_memory_logger
+from modules.support.handlers import support_command, support_callback_handler
 
 # Set logging level to INFO so activity gets captured in RAM buffer
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+
 
 def load_token():
     """Reads the bot token securely from env.txt"""
@@ -40,29 +42,31 @@ def load_token():
         print("Error: env.txt file not found! Please create it.")
     return None
 
+
 async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Global middleware that intercepts all updates and blocks banned users/chats."""
     if not update.effective_user or not update.effective_chat:
         return
-        
+
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     chat_type = update.effective_chat.type  # 'private', 'group', 'supergroup', etc.
-    
+
     # Owner can never be blocked
     if get_user_role_db(user_id) == 'Owner':
         return
 
     is_allowed, warning_message = check_user_access(user_id, chat_id, chat_type)
-    
+
     if not is_allowed:
         if update.message:
             await update.message.reply_text(warning_message)
         elif update.callback_query:
             await update.callback_query.answer(warning_message, show_alert=True)
-        
+
         # Stop all subsequent handlers from executing
         raise ApplicationHandlerStop
+
 
 if __name__ == '__main__':
     token = load_token()
@@ -86,7 +90,9 @@ if __name__ == '__main__':
     # Register Command Handlers & Callbacks
     application.add_handler(CommandHandler('start', start_command))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('support', support_command))
     application.add_handler(CallbackQueryHandler(help_button_callback))
+    application.add_handler(CallbackQueryHandler(support_callback_handler))
     application.add_handler(CommandHandler('quota', quota_command))
     application.add_handler(CommandHandler('gift', gift_command))
     application.add_handler(CommandHandler('refer', refer_command))
@@ -97,7 +103,7 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('log', log_command))
 
     print("🤖 Mastermind bot is up and running...")
-    
+
     # Fix for Python 3.14 event loop compatibility in Termux
     try:
         asyncio.get_event_loop()
