@@ -6,19 +6,31 @@ from modules.ban.ban import set_ban_db, remove_ban_db, get_ban_status, get_suppo
 async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAULT_TYPE, target_arg: str):
     """Resolves target ID whether it's a numeric ID, chat ID, or @username."""
     target_arg = target_arg.strip()
+    
     if target_arg.lstrip('-').isdigit():
         return int(target_arg), target_arg
-        
+
     if target_arg.startswith('@'):
         username = target_arg[1:]
+        import sqlite3
+        conn = sqlite3.connect("mastermind_users.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return row[0], target_arg
+            
         try:
             chat = await context.bot.get_chat(target_arg)
             return chat.id, chat.title or chat.username
         except Exception:
             pass
+            
     return None, target_arg
 
 async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_type: str):
+    """Internal helper to process ban types with role validation."""
     admin_id = update.effective_user.id
     admin_role = get_user_role_db(admin_id)
     
@@ -38,32 +50,36 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
         reason = " ".join(args) if args else ""
     else:
         if not args:
-            await update.message.reply_text("⚠️ **Usage:** `/ban <id|@username> [reason]` (or `/ban_pm`, `/ban_support`)", parse_mode="Markdown")
+            await update.message.reply_text(
+                "⚠️ **Usage:** `/ban <id|@username> [reason]` (or `/ban_pm`, `/ban_support`)",
+                parse_mode="Markdown"
+            )
             return
-            
+
         resolved_id, display_str = await resolve_target_identifier(update, context, args[0])
         if not resolved_id:
             await update.message.reply_text(f"⚠️ Could not resolve target: `{args[0]}`", parse_mode="Markdown")
             return
-            
+
         target_id = resolved_id
         target_display = display_str
         reason = " ".join(args[1:]) if len(args) > 1 else ""
 
+    # Check reason requirement for Admin vs Owner
     if admin_role != 'Owner' and not reason:
         await update.message.reply_text("⚠️ **Reason Required:** Admins must provide a reason.", parse_mode="Markdown")
         return
-        
+
     if not reason:
         reason = "No reason provided (Owner action)"
-        
-    # Save ban
+
+    # Save ban configuration in database
     set_ban_db(target_id, ban_type, reason)
-    
-    # Check if target is a Group / Channel (negative ID or starts with -100)
+
+    # Check if target is a Group / Channel (negative ID)
     if str(target_id).startswith('-'):
         support_id = get_support_chat_id()
-        support_url = f"https://t.me/{context.bot.username}" # Placeholder until support invite module is ready
+        support_url = f"https://t.me/{context.bot.username}"
         
         keyboard = [[InlineKeyboardButton("💬 Contact Support", url=support_url)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -75,16 +91,20 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
         )
         
         try:
-            # Send warning message to the banned group/channel before leaving
             await context.bot.send_message(chat_id=target_id, text=warning_msg, parse_mode='HTML', reply_markup=reply_markup)
-            # Bot leaves the chat
             await context.bot.leave_chat(target_id)
         except Exception as e:
             print(f"Could not leave chat {target_id}: {e}")
 
+    type_descriptions = {
+        'all': 'Banned from everywhere',
+        'pm': 'Banned from bot private message',
+        'support': 'Banned everywhere except support chat'
+    }
+
     await update.message.reply_text(
         f"✅ Ban applied to <b>{target_display}</b> (<code>{target_id}</code>).\n"
-        f"🔒 <b>Type:</b> {ban_type.upper()}\n"
+        f"🔒 <b>Type:</b> {type_descriptions.get(ban_type, ban_type.upper())}\n"
         f"📝 <b>Reason:</b> {reason}",
         parse_mode="HTML"
     )
@@ -115,6 +135,6 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not resolved_id:
         await update.message.reply_text("⚠️ Could not resolve target ID.")
         return
-        
+
     remove_ban_db(resolved_id)
     await update.message.reply_text(f"✅ Target <b>{display_str}</b> (<code>{resolved_id}</code>) has been unbanned.", parse_mode="HTML")
