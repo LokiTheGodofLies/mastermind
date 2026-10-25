@@ -1,8 +1,18 @@
-# mastermind
+# 🤖 Mastermind Telegram Bot
 
-matermind/
+A modular Telegram bot built using Python and the `python-telegram-bot` library, featuring a clean directory layout separating each command and feature into dedicated modules.
+
+---
+
+## 📂 Project Structure
+
+<details>
+<summary><b>Click to expand directory structure</b></summary>
+
+```text
+mastermind/
 │
-├── main.py                     # The main file that starts your bot and brings all modules together (upcoming)
+├── main.py                     # The main file that starts your bot and brings all modules together
 ├── env.txt                     # Secret file storing your sensitive environment variables (like your bot token)
 ├── .gitignore                  # Git configuration file to keep secret files out of GitHub
 │
@@ -14,5 +24,5 @@ matermind/
     ├── start/                  # Folder for the /start command and welcome buttons
     │   └── start_handler.py    # Contains the welcome message, help button, and bot owner button
     │
-    └── message/                # Folder for handling regular chat messages (upcoming)
-        └── message_handler.py  # Will contain the reply for normal text with a help button
+    └── message/                # Folder for handling regular chat messages
+        └── message_handler.py  # Contains the reply for normal text with an expandable section and help button
