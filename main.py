@@ -1,66 +1,109 @@
-import os
-from datetime import datetime, timedelta
+import logging
+import asyncio
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder, 
+    CommandHandler, 
+    CallbackQueryHandler, 
+    MessageHandler, 
+    filters, 
+    ContextTypes, 
+    ApplicationHandlerStop
+)
 
-LOG_FILE_PATH = "bot_activity.log"
-MAX_LOG_LINES = 3000  # Automatically trims anything past 3000 lines to save Termux storage
+# Import ban access check and middleware
+from modules.ban.ban import check_user_access
+from modules.database.user_db import init_user_db, get_user_role_db
 
-def setup_file_logger():
-    """Ensures a log file exists for capturing activity."""
-    if not os.path.exists(LOG_FILE_PATH):
-        with open(LOG_FILE_PATH, "w") as f:
-            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Bot log initialized.\n")
+# Import handlers from our modular folders
+from modules.start.start import start_command
+from modules.help_menu.help_handler import help_command, help_button_callback
+from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command
+from modules.allowance.handlers import quota_command, gift_command, refer_command
+from modules.log.handlers import log_command
+from modules.log.logger import setup_in_memory_logger
 
-def log_event(message: str):
-    """Appends an event with a timestamp and trims old entries to prevent storage bloat."""
-    setup_file_logger()
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    new_line = f"[{timestamp}] {message}\n"
-    
+# Set logging level to INFO so activity gets captured in RAM buffer
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+def load_token():
+    """Reads the bot token securely from env.txt"""
     try:
-        with open(LOG_FILE_PATH, "r") as f:
-            lines = f.readlines()
-            
-        lines.append(new_line)
-        
-        # If lines exceed the safe limit, keep only the latest MAX_LOG_LINES
-        if len(lines) > MAX_LOG_LINES:
-            lines = lines[-MAX_LOG_LINES:]
-            
-        with open(LOG_FILE_PATH, "w") as f:
-            f.writelines(lines)
-    except Exception as e:
-        print(f"Logging error: {e}")
-
-def get_logs_by_count(n: int = 10):
-    """Retrieves the last N logs."""
-    setup_file_logger()
-    try:
-        with open(LOG_FILE_PATH, "r") as f:
-            lines = f.readlines()
-        selected = lines[-n:] if len(lines) >= n else lines
-        return "".join(selected)
-    except Exception as e:
-        return f"Error reading logs: {e}"
-
-def get_logs_by_time(minutes: int = 10):
-    """Retrieves logs from the last N minutes."""
-    setup_file_logger()
-    cutoff_time = datetime.now() - timedelta(minutes=minutes)
-    filtered_lines = []
-    
-    try:
-        with open(LOG_FILE_PATH, "r") as f:
+        with open("env.txt", "r") as f:
             for line in f:
-                if line.startswith("[") and "]" in line:
-                    try:
-                        timestamp_str = line[1:19]
-                        log_time = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
-                        if log_time >= cutoff_time:
-                            filtered_lines.append(line)
-                    except ValueError:
-                        filtered_lines.append(line)
-        if not filtered_lines:
-            return f"No logs found within the last {minutes} minutes."
-        return "".join(filtered_lines)
-    except Exception as e:
-        return f"Error reading time-based logs: {e}"
+                if line.startswith("TELEGRAM_BOT_TOKEN="):
+                    return line.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        print("Error: env.txt file not found! Please create it.")
+    return None
+
+async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Global middleware that intercepts all updates and blocks banned users/chats."""
+    if not update.effective_user or not update.effective_chat:
+        return
+        
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type  # 'private', 'group', 'supergroup', etc.
+    
+    # Owner can never be blocked
+    if get_user_role_db(user_id) == 'Owner':
+        return
+
+    is_allowed, warning_message = check_user_access(user_id, chat_id, chat_type)
+    
+    if not is_allowed:
+        if update.message:
+            await update.message.reply_text(warning_message)
+        elif update.callback_query:
+            await update.callback_query.answer(warning_message, show_alert=True)
+        
+        # Stop all subsequent handlers from executing
+        raise ApplicationHandlerStop
+
+if __name__ == '__main__':
+    token = load_token()
+    if not token:
+        print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt")
+        exit(1)
+
+    # Initialize RAM-based logging buffer (zero disk footprint)
+    setup_in_memory_logger()
+
+    # Initialize SQLite databases & tables on startup
+    init_user_db()
+    print("✅ Database and tables initialized successfully.")
+
+    # Build the application using the token
+    application = ApplicationBuilder().token(token).build()
+
+    # Register the ban enforcement middleware at group=-1 so it runs before everything else
+    application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
+
+    # Register Command Handlers & Callbacks
+    application.add_handler(CommandHandler('start', start_command))
+    application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CallbackQueryHandler(help_button_callback))
+    application.add_handler(CommandHandler('quota', quota_command))
+    application.add_handler(CommandHandler('gift', gift_command))
+    application.add_handler(CommandHandler('refer', refer_command))
+    application.add_handler(CommandHandler('ban', ban_command))
+    application.add_handler(CommandHandler('ban_pm', ban_pm_command))
+    application.add_handler(CommandHandler('ban_support', ban_support_command))
+    application.add_handler(CommandHandler('unban', unban_command))
+    application.add_handler(CommandHandler('log', log_command))
+
+    print("🤖 Mastermind bot is up and running...")
+    
+    # Fix for Python 3.14 event loop compatibility in Termux
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # Start polling for messages safely
+    application.run_polling()
