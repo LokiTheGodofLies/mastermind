@@ -10,7 +10,7 @@ from modules.database.user_db import init_user_db
 from modules.start.start import start_command
 from modules.help_menu.help_handler import help_command, help_button_callback
 # from modules.message.message_handler import handle_normal_text
-
+from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command
 # Import allowance/referral handlers
 from modules.allowance.handlers import quota_command, gift_command, refer_command
 
@@ -51,6 +51,11 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('quota', quota_command))
     application.add_handler(CommandHandler('gift', gift_command))
     application.add_handler(CommandHandler('refer', refer_command))
+    application.add_handler(CommandHandler('ban', ban_command))
+    application.add_handler(CommandHandler('ban_pm', ban_pm_command))
+    application.add_handler(CommandHandler('ban_support', ban_support_command))
+    application.add_handler(CommandHandler('unban', unban_command))
+
     
     # Optional message handlers
     # application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_normal_text))
