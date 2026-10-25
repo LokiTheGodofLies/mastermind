@@ -129,3 +129,18 @@ def add_quota_limits_db(target_user_id, search_bonus, request_bonus):
     ''', (search_bonus, request_bonus, target_user_id))
     conn.commit()
     conn.close()
+
+def get_referred_users_db(referrer_id):
+    """Retrieves a list of users (id, name, username) referred by a specific user."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        r.timestamp 
+        FROM referrals r
+        JOIN users u ON r.referred_id = u.user_id
+        WHERE r.referrer_id = ?
+        ORDER BY r.timestamp DESC
+    ''', (referrer_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows 
