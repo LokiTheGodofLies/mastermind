@@ -50,9 +50,8 @@ async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_T
 
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    chat_type = update.effective_chat.type  # 'private', 'group', 'supergroup', etc.
+    chat_type = update.effective_chat.type
 
-    # Owner can never be blocked
     if get_user_role_db(user_id) == 'Owner':
         return
 
@@ -64,7 +63,6 @@ async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_T
         elif update.callback_query:
             await update.callback_query.answer(warning_message, show_alert=True)
 
-        # Stop all subsequent handlers from executing
         raise ApplicationHandlerStop
 
 
@@ -74,20 +72,13 @@ if __name__ == '__main__':
         print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt")
         exit(1)
 
-    # Initialize RAM-based logging buffer (zero disk footprint)
     setup_in_memory_logger()
-
-    # Initialize SQLite databases & tables on startup
     init_user_db()
     print("✅ Database and tables initialized successfully.")
 
-    # Build the application using the token
     application = ApplicationBuilder().token(token).build()
-
-    # Register the ban enforcement middleware at group=-1 so it runs before everything else
     application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
 
-    # Register Command Handlers & Callbacks
     application.add_handler(CommandHandler('start', start_command))
     application.add_handler(CommandHandler('help', help_command))
     application.add_handler(CommandHandler('support', support_command))
@@ -104,12 +95,10 @@ if __name__ == '__main__':
 
     print("🤖 Mastermind bot is up and running...")
 
-    # Fix for Python 3.14 event loop compatibility in Termux
     try:
         asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    # Start polling for messages safely
     application.run_polling()
