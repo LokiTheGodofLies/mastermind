@@ -1,0 +1,131 @@
+import sqlite3
+
+DB_FILE = "mastermind_users.db"
+
+def init_user_db():
+    """Initializes the SQLite database tables for users and their quotas."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            full_name TEXT,
+            role TEXT DEFAULT 'Normal User',
+            ban_status TEXT DEFAULT 'none',
+            joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Quotas table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quotas (
+            user_id INTEGER PRIMARY KEY,
+            searches_used INTEGER DEFAULT 0,
+            searches_limit INTEGER DEFAULT 10,
+            requests_used INTEGER DEFAULT 0,
+            requests_limit INTEGER DEFAULT 10,
+            last_reset_date TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def add_or_update_user_db(user_id, username, full_name, today_str):
+    """Inserts a new user or updates their username/full name."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+    existing = cursor.fetchone()
+    
+    if not existing:
+        role = 'Owner' if user_id == 7261537212 else 'Normal User'
+        
+        # Set default limits based on initial role template
+        if role == 'Owner':
+            s_limit, r_limit = 999999, 999999
+        else:
+            s_limit, r_limit = 10, 10  # Normal User default limit
+            
+        cursor.execute('''
+            INSERT INTO users (user_id, username, full_name, role, ban_status)
+            VALUES (?, ?, ?, ?, 'none')
+        ''', (user_id, username, full_name, role))
+        
+        cursor.execute('''
+            INSERT OR IGNORE INTO quotas (user_id, searches_used, searches_limit, requests_used, requests_limit, last_reset_date)
+            VALUES (?, 0, ?, 0, ?, ?)
+        ''', (user_id, s_limit, r_limit, today_str))
+    else:
+        cursor.execute('''
+            UPDATE users SET username = ?, full_name = ? WHERE user_id = ?
+        ''', (username, full_name, user_id))
+        
+    conn.commit()
+    conn.close()
+
+def get_user_role_db(user_id):
+    """Retrieves a user's role from the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else 'Normal User'
+
+def get_quota_record_db(user_id):
+    """Retrieves raw quota tracking records for a user."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT searches_used, searches_limit, requests_used, requests_limit, last_reset_date 
+        FROM quotas WHERE user_id = ?
+    ''', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def update_quota_counts_db(user_id, searches_used, requests_used, reset_date):
+    """Updates used counts and reset timestamp."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE quotas 
+        SET searches_used = ?, requests_used = ?, last_reset_date = ? 
+        WHERE user_id = ?
+    ''', (searches_used, requests_used, reset_date, user_id))
+    conn.commit()
+    conn.close()
+
+def increment_search_used_db(user_id):
+    """Increments successful search usage by 1."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE quotas SET searches_used = searches_used + 1 WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def increment_request_used_db(user_id):
+    """Increments successful request usage by 1."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE quotas SET requests_used = requests_used + 1 WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def add_quota_limits_db(target_user_id, search_bonus, request_bonus):
+    """Increases a user's ceiling limits (used for the /gift command)."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE quotas 
+        SET searches_limit = searches_limit + ?, requests_limit = requests_limit + ? 
+        WHERE user_id = ?
+    ''', (search_bonus, request_bonus, target_user_id))
+    conn.commit()
+    conn.close()
