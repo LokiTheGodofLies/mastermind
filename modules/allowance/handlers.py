@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.allowance.allowance import get_user_quota_summary, gift_quota
 from modules.allowance.referral import get_user_referral_stats
@@ -54,7 +54,7 @@ async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, parse_mode="Markdown")
 
 async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Telegram command handler for /refer to generate link and view invite history."""
+    """Telegram command handler for /refer to generate link, view invite history, and share."""
     user = update.effective_user
     bot_username = context.bot.username
     
@@ -87,4 +87,13 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     text += f"\n\n*When a new user starts via your link, both of you get +10 searches & requests!*"
     
-    await update.message.reply_text(text, parse_mode="Markdown")
+    # Create the inline share button
+    share_text = "Join Mastermind Bot and let's earn bonus searches & requests!"
+    share_url = f"https://t.me/share/url?url={referral_link}&text={share_text}"
+    
+    keyboard = [
+        [InlineKeyboardButton("📤 Refer More & Share Link", url=share_url)]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
