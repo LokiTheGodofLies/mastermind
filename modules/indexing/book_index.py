@@ -3,10 +3,10 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Placeholder for database functions (to be implemented in user_db or index_db)
-from modules.database.user_db import (
+# Import from the separate files database module
+from modules.database.file_db import (
     get_file_by_file_id_db,
-    save_file_db,
+    save_indexed_file_db,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,6 @@ async def fetch_and_format_book_caption(file_name: str) -> str:
     Placeholder for the upcoming Book Caption Module.
     Fetches book metadata and returns a formatted caption.
     """
-    # Will be expanded in the next step
     base_name = os.path.splitext(file_name)[0]
     return f"📖 **Title:** {base_name}\n📚 **Format:** Ebook"
 
@@ -43,7 +42,13 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
     document = message.document
     file_id = document.file_id
     file_name = document.file_name or "unknown_file"
+    file_size = document.file_size or 0
+    mime_type = document.mime_type or "document"
     _, ext = os.path.splitext(file_name.lower())
+
+    user = message.from_user
+    user_id = user.id if user else 0
+    user_title = user.full_name or user.username or "Unknown"
 
     # Step 1 & 2: Check database and storage existence
     db_record = get_file_by_file_id_db(file_id)
@@ -52,11 +57,25 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
     # Check if message is coming from or being sent to the storage group
     is_in_storage_group = str(message.chat_id) == str(STORAGE_GROUP_ID)
 
+    forwarded_msg = message
+
     # Logic: Syncing DB and Storage Group
     if is_in_storage_group and not exists_in_db:
         # File exists in storage group but not in DB -> Save to DB
         logger.info(f"File found in storage group but missing in DB. Saving: {file_name}")
-        save_file_db(file_id=file_id, file_name=file_name, chat_id=message.chat_id, message_id=message.message_id, category="book")
+        save_indexed_file_db(
+            file_id=file_id,
+            storage_message_id=message.message_id,
+            file_name=file_name,
+            file_size=file_size,
+            duration=0,
+            user_id=user_id,
+            user_title=user_title,
+            caption=message.caption or "",
+            extension=ext,
+            file_type=mime_type,
+            category="book"
+        )
         exists_in_db = True
 
     elif not is_in_storage_group and not exists_in_db:
@@ -67,11 +86,17 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
             from_chat_id=message.chat_id,
             message_id=message.message_id
         )
-        save_file_db(
+        save_indexed_file_db(
             file_id=file_id,
+            storage_message_id=forwarded_msg.message_id,
             file_name=file_name,
-            chat_id=STORAGE_GROUP_ID,
-            message_id=forwarded_msg.message_id,
+            file_size=file_size,
+            duration=0,
+            user_id=user_id,
+            user_title=user_title,
+            caption=message.caption or "",
+            extension=ext,
+            file_type=mime_type,
             category="book"
         )
 
