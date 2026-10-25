@@ -42,3 +42,32 @@ if __name__ == '__main__':
     
     # Start polling for messages
     application.run_polling()
+
+import asyncio
+
+if __name__ == '__main__':
+    token = load_token()
+    if not token:
+        print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt")
+        exit(1)
+
+    # Build the application using the token
+    application = ApplicationBuilder().token(token).build()
+
+    # Register handlers
+    application.add_handler(CommandHandler('start', start_command))
+    application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CallbackQueryHandler(help_button_callback))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_normal_text))
+
+    print("Mastermind bot is up and running...")
+    
+    # Fix for Python 3.14 event loop compatibility in Termux
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    # Start polling for messages safely
+    application.run_polling()
