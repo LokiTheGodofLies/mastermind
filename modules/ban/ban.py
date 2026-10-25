@@ -1,6 +1,7 @@
 import os
 import sqlite3
 
+
 def get_support_chat_id():
     """Reads SUPPORT_CHAT_ID securely from env.txt"""
     try:
@@ -11,6 +12,7 @@ def get_support_chat_id():
     except Exception:
         pass
     return None
+
 
 def set_ban_db(target_id: int, ban_type: str, reason: str):
     """Sets a ban record for a user or chat ID in the database."""
@@ -31,11 +33,12 @@ def set_ban_db(target_id: int, ban_type: str, reason: str):
     conn.commit()
     conn.close()
 
+
 def remove_ban_db(target_id: int):
     """Removes a ban record."""
     conn = sqlite3.connect("mastermind_users.db")
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS bans") # Safe fallback or delete row
+    cursor.execute("DROP TABLE IF EXISTS bans")  # Safe fallback or delete row
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bans (
             target_id INTEGER PRIMARY KEY,
@@ -46,6 +49,7 @@ def remove_ban_db(target_id: int):
     cursor.execute("DELETE FROM bans WHERE target_id = ?", (target_id,))
     conn.commit()
     conn.close()
+
 
 def get_ban_status(target_id: int):
     """Retrieves ban status for any user or chat ID."""
@@ -61,6 +65,7 @@ def get_ban_status(target_id: int):
         pass
     return {"is_banned": False, "ban_type": "none", "reason": None}
 
+
 def check_access(user_id: int, chat_id: int, chat_type: str):
     """
     Evaluates access based on your specific rules:
@@ -70,7 +75,7 @@ def check_access(user_id: int, chat_id: int, chat_type: str):
     - Banned groups/channels are handled directly upon bot addition or message events.
     """
     support_id = get_support_chat_id()
-    
+
     # 1. Check if the chat itself (group/channel) is banned
     chat_status = get_ban_status(chat_id)
     if chat_status["is_banned"]:
@@ -80,20 +85,25 @@ def check_access(user_id: int, chat_id: int, chat_type: str):
     user_status = get_ban_status(user_id)
     if not user_status["is_banned"]:
         return True, None
-        
+
     ban_type = user_status["ban_type"]
     reason = user_status["reason"]
-    
+
     if ban_type == 'all':
         return False, f"🚫 You are banned from using this bot everywhere.\n📝 Reason: {reason}"
-        
+
     if ban_type == 'pm' and chat_type == 'private':
         return False, f"🚫 You are banned from using this bot in Private Messages.\n📝 Reason: {reason}"
-        
+
     if ban_type == 'support':
         # Can ONLY use in the support chat group
         if support_id and chat_id == support_id:
             return True, None
         return False, f"🚫 You are restricted. You can only use the bot inside the support chat.\n📝 Reason: {reason}"
-        
+
     return True, None
+
+
+def check_user_access(user_id: int, chat_id: int, chat_type: str):
+    """Backward-compatible alias used by main.py."""
+    return check_access(user_id, chat_id, chat_type)
