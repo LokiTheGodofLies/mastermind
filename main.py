@@ -19,10 +19,10 @@ from modules.database.user_db import init_user_db, get_user_role_db
 from modules.start.start_handler import start_command
 from modules.help_menu.help_handler import help_command, help_button_callback
 from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command
-from modules.allowance.handlers import quota_command, gift_command, refer_command
+from modules.allowance.allowance import quota_command, gift_command, refer_command
 from modules.log.handlers import log_command
 from modules.log.logger import setup_in_memory_logger
-from modules.support.handlers import support_command, support_callback_handler
+from modules.support.support import support_command, support_callback_handler
 
 # Set logging level to INFO so activity gets captured in RAM buffer
 logging.basicConfig(
