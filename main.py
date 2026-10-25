@@ -23,6 +23,7 @@ from modules.allowance.allowance import quota_command, gift_command, refer_comma
 from modules.log.handlers import log_command
 from modules.log.logger import setup_in_memory_logger
 from modules.support.support import support_command, support_callback_handler
+from modules.indexing.book_index import handle_book_indexing
 
 # Set logging level to INFO so activity gets captured in RAM buffer
 logging.basicConfig(
@@ -92,6 +93,9 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('ban_support', ban_support_command))
     application.add_handler(CommandHandler('unban', unban_command))
     application.add_handler(CommandHandler('log', log_command))
+    
+    # Document/File handler for book indexing pipeline
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_book_indexing))
 
     print("🤖 Mastermind bot is up and running...")
 
