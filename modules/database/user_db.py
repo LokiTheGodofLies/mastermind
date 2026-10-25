@@ -3,7 +3,7 @@ import sqlite3
 DB_FILE = "mastermind_users.db"
 
 def init_user_db():
-    """Initializes the SQLite database tables for users and their quotas."""
+    """Initializes the SQLite database tables for users, quotas, and referrals."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -29,6 +29,17 @@ def init_user_db():
             requests_limit INTEGER DEFAULT 10,
             last_reset_date TEXT,
             FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+    ''')
+
+    # Referrals table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS referrals (
+            referred_id INTEGER PRIMARY KEY,
+            referrer_id INTEGER,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (referred_id) REFERENCES users (user_id),
+            FOREIGN KEY (referrer_id) REFERENCES users (user_id)
         )
     ''')
     
@@ -130,12 +141,31 @@ def add_quota_limits_db(target_user_id, search_bonus, request_bonus):
     conn.commit()
     conn.close()
 
+def record_referral_db(referrer_id, referred_id):
+    """Records a referral relationship. Returns True if successful, False if already referred."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT referred_id FROM referrals WHERE referred_id = ?', (referred_id,))
+    if cursor.fetchone():
+        conn.close()
+        return False
+        
+    cursor.execute('''
+        INSERT INTO referrals (referred_id, referrer_id)
+        VALUES (?, ?)
+    ''', (referred_id, referrer_id))
+    
+    conn.commit()
+    conn.close()
+    return True
+
 def get_referred_users_db(referrer_id):
-    """Retrieves a list of users (id, name, username) referred by a specific user."""
+    """Retrieves a list of users (id, name, username, timestamp) referred by a specific user."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
-        r.timestamp 
+        SELECT u.user_id, u.full_name, u.username, r.timestamp 
         FROM referrals r
         JOIN users u ON r.referred_id = u.user_id
         WHERE r.referrer_id = ?
@@ -143,4 +173,4 @@ def get_referred_users_db(referrer_id):
     ''', (referrer_id,))
     rows = cursor.fetchall()
     conn.close()
-    return rows 
+    return rows
