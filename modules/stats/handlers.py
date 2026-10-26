@@ -1,12 +1,9 @@
 import os
-import psutil
 import time
 import subprocess
-from datetime import datetime
+import resource
 from telegram import Update
 from telegram.ext import ContextTypes
-from modules.database.user_db import get_total_users_db  # Adjust based on your user db function
-from modules.database.file_db import get_total_indexed_files_db  # Adjust or fallback if needed
 
 # Track bot start time for uptime
 START_TIME = time.time()
@@ -16,10 +13,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
-    # 1. RAM Usage
-    process = psutil.Process(os.getpid())
-    ram_mb = process.memory_info().rss / (1024 * 1024)
-    ram_percent = process.memory_percent()
+    # 1. RAM Usage (using resource module for cross-platform Linux/Termux compatibility)
+    try:
+        # ru_maxrss is in kilobytes on Linux/Termux
+        ram_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        ram_mb = ram_kb / 1024.0
+    except Exception:
+        ram_mb = 0.0
 
     # 2. Storage / DB Size
     db_path = "database.db"  # Adjust if your SQLite DB has a different path
@@ -51,8 +51,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         total_files = "N/A"
 
-    # 6. Groups / Channels stats (Placeholders or tracked caches if available)
-    # You can expand these depending on your chat tracking tables
+    # 6. Groups / Channels stats
     total_channels = 1
     total_groups = 2
     admin_channels = 1
@@ -60,7 +59,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats_text = (
         "📊 <b>Mastermind Bot Statistics</b>\n\n"
-        f"💻 <b>RAM Usage:</b> <code>{ram_mb:.2f} MB ({ram_percent:.1f}%)</code>\n"
+        f"💻 <b>RAM Usage:</b> <code>{ram_mb:.2f} MB</code>\n"
         f"💾 <b>Storage (DB Size):</b> <code>{db_size_mb:.2f} MB</code>\n"
         f"⏱️ <b>Uptime:</b> <code>{uptime_str}</code>\n"
         f"🚀 <b>Last Deployment:</b> <code>{deploy_time}</code>\n\n"
