@@ -41,4 +41,3 @@ def get_logs_by_time(minutes: int = 10):
     if not filtered_lines:
         return f"No logs found in memory within the last {minutes} minutes."
     return "".join(filtered_lines)
-  
