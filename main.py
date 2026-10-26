@@ -1,3 +1,4 @@
+from telegram.request import HTTPXRequest
 from modules.log.startup_log import send_startup_notification
 from modules.stats.handlers import stats_command
 from modules.id.handlers import id_command
