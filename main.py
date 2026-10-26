@@ -81,7 +81,7 @@ if __name__ == "__main__":
     print("✅ Database and tables initialized successfully.")
     print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {os.getenv("STORAGE_GROUP_ID")}")
 
-    application = ApplicationBuilder().token(token).post_init(send_startup_notification).build()
+    application = ApplicationBuilder().token(token).request(HTTPXRequest(connection_pool_size=8, read_timeout=30.0, write_timeout=30.0, connect_timeout=30.0)).post_init(send_startup_notification).build()
     application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
 
     application.add_handler(CommandHandler("start", start_command))
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("request", request_command))
     
     # Callback query handlers for search and request quizzes
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(search_start_quiz|search_ans_)"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(start_menu|search_start_quiz|search_menu|join_search_group_quiz|generate_group_invite|file_dl_|search_page_).*$"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^(request_start_quiz|request_ans_)"))
 
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -120,5 +120,5 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("editscript", editscript_command))
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern="^es_"))
 
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_handler))
     application.run_polling()

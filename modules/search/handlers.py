@@ -5,167 +5,125 @@ from modules.database.config_db import get_config
 
 DB_PATH = "configuration.db"
 ITEMS_PER_PAGE = 10
+SEARCH_GROUP_ID = -1003936877675
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
     results = []
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type=\"table\";")
-        tables = cursor.fetchall()
-        for (table_name,) in tables:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        for (tname,) in cursor.fetchall():
             try:
-                cursor.execute(f"SELECT * FROM {table_name} WHERE id LIKE ? OR key LIKE ? OR value LIKE ? OR name LIKE ? OR file_name LIKE ?",
-                               (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"))
-                rows = cursor.fetchall()
-                for row in rows:
+                cursor.execute(f"SELECT * FROM {tname}")
+                for row in cursor.fetchall():
                     row_id = row[0] if len(row) > 0 else 0
-                    label = str(row[1]) if len(row) > 1 else str(row[0])
-                    if len(label) > 35:
-                        label = label[:32] + "..."
-                    results.append((row_id, table_name, label))
+                    full_str = " ".join(str(v) for v in row if v is not None)
+                    if search_term.lower() in full_str.lower():
+                        label = str(row[1]) if len(row) > 1 else str(row[0])
+                        for v in row:
+                            if isinstance(v, str) and search_term.lower() in v.lower() and len(v) < 50:
+                                label = v
+                                break
+                        if len(label) > 35:
+                            label = label[:32] + "..."
+                        if (row_id, tname, label) not in results:
+                            results.append((row_id, tname, label))
             except Exception:
                 pass
         conn.close()
     except Exception:
         pass
 
-    storage_group_id = "-1003936877675"
-    total_results = len(results)
+    total = len(results)
     keyboard = []
-
-    if total_results > 0:
-        total_pages = (total_results + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-        page = max(1, min(page, total_pages))
-        start_idx = (page - 1) * ITEMS_PER_PAGE
-        end_idx = start_idx + ITEMS_PER_PAGE
-        page_results = results[start_idx:end_idx]
-
-        response_text = (
-            f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n"
-            f"Found {total_results} matching file(s). Page {page} of {total_pages}:"
-        )
-        for row_id, table_name, label in page_results:
-            keyboard.append([InlineKeyboardButton(f"📁 [{table_name}] {label}", callback_data=f"file_dl_{row_id}")])
-
-        nav_row = []
+    if total > 0:
+        tp = (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        page = max(1, min(page, tp))
+        for row_id, tname, lbl in results[(page-1)*ITEMS_PER_PAGE : page*ITEMS_PER_PAGE]:
+            keyboard.append([InlineKeyboardButton(f"📁 [{tname}] {lbl}", callback_data=f"file_dl_{row_id}")])
+        nav = []
         if page > 1:
-            nav_row.append(InlineKeyboardButton("« Prev", callback_data=f"search_page_{search_term}_{page-1}"))
-        nav_row.append(InlineKeyboardButton(f"📄 {page}/{total_pages}", callback_data="noop"))
-        if page < total_pages:
-            nav_row.append(InlineKeyboardButton("Next »", callback_data=f"search_page_{search_term}_{page+1}"))
-        if nav_row:
-            keyboard.append(nav_row)
+            nav.append(InlineKeyboardButton("« Prev", callback_data=f"search_page_{search_term}_{page-1}"))
+        nav.append(InlineKeyboardButton(f"📄 {page}/{tp}", callback_data="noop"))
+        if page < tp:
+            nav.append(InlineKeyboardButton("Next »", callback_data=f"search_page_{search_term}_{page+1}"))
+        if nav:
+            keyboard.append(nav)
+        txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\nFound {total} matching file(s). Page {page} of {tp}:"
     else:
-        response_text = (
-            f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n"
-            "• No matching files found in the database.\n\n"
-            f"<i>(Storage Group ID: {storage_group_id})</i>"
-        )
+        txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n• No matching files found in the database.\n\n<i>(Storage Group ID: {SEARCH_GROUP_ID})</i>"
 
-    keyboard.append([InlineKeyboardButton("🔍 New Search", callback_data="search_start_quiz")])
-    keyboard.append([InlineKeyboardButton("« Back to Start", callback_data="start_menu")])
-
+    keyboard.append([InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")])
     if update.callback_query:
-        await update.callback_query.message.edit_text(response_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         await update.callback_query.answer()
     else:
-        await update.message.reply_text(response_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message or (update.callback_query.message if update.callback_query else None)
-    if not message:
-        return
-
+    msg = update.message or (update.callback_query.message if update.callback_query else None)
+    if not msg: return
     if context.args:
-        search_term = " ".join(context.args).strip()
-        await perform_search(update, context, search_term, page=1)
+        await perform_search(update, context, " ".join(context.args).strip(), 1)
         return
-
     if update.message and update.message.reply_to_message and update.message.reply_to_message.text:
-        search_term = update.message.reply_to_message.text.strip()
-        await perform_search(update, context, search_term, page=1)
+        await perform_search(update, context, update.message.reply_to_message.text.strip(), 1)
         return
-
-    if context.user_data:
-        context.user_data.pop("waiting_for_search", None)
-
-    default_text = (
-        "🔍 <b>Mastermind Search Hub</b>\n\n"
-        "Welcome to the file and database search engine.\n"
-        "Send <code>/search &lt;keyword&gt;</code>, reply to a message with <code>/search</code>, or click below:"
-    )
-    search_text = get_config("search_script", default=default_text)
-
-    keyboard = [
-        [InlineKeyboardButton("🚀 Start Search Quiz", callback_data="search_start_quiz")],
-        [InlineKeyboardButton("« Back to Start", callback_data="start_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
+    txt = get_config("search_script", default="🔍 <b>File Search Engine</b>\n\nYou can either join our search group to search there, or search right here in private chat by providing a keyword after the search command or replying to a message with /search.")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("👥 Join Search Group", callback_data="join_search_group_quiz")], [InlineKeyboardButton("« Back to Start", callback_data="start_menu")]])
     if update.callback_query:
-        await update.callback_query.message.edit_text(text=search_text, reply_markup=reply_markup, parse_mode="HTML")
+        await update.callback_query.message.edit_text(text=txt, reply_markup=kb, parse_mode="HTML")
         await update.callback_query.answer()
     else:
-        await message.reply_text(text=search_text, reply_markup=reply_markup, parse_mode="HTML")
+        await msg.reply_text(text=txt, reply_markup=kb, parse_mode="HTML")
 
 async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query:
-        return
-    data = query.data
-
-    if data == "search_start_quiz":
-        context.user_data["waiting_for_search"] = True
-        await query.message.edit_text(
-            "🔍 <b>Search Quiz Started</b>\n\nPlease type and send the keyword or file name you want to search...",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data="search_menu")]])
-        )
-        await query.answer()
-    elif data == "search_menu":
+    q = update.callback_query
+    if not q: return
+    d = q.data
+    if d == "join_search_group_quiz":
+        await q.message.edit_text("📝 <b>Search Group Verification Quiz</b>\n\nDo you want to join our search group?", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Generate Invite Link", callback_data="generate_group_invite")], [InlineKeyboardButton("« Back", callback_data="search_menu")]]))
+        await q.answer()
+    elif d == "generate_group_invite":
+        await q.answer("Generating invite link...")
+        try:
+            link = await context.bot.create_chat_invite_link(chat_id=SEARCH_GROUP_ID, member_limit=1)
+            await q.message.edit_text(f"🎉 <b>Here is your single-use invite link:</b>\n\n{link.invite_link}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))
+        except Exception as e:
+            await q.message.edit_text(f"❌ <b>Could not generate invite link.</b>\n\nReason: {e}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))
+    elif d == "search_menu":
         await search_command(update, context)
-    elif data == "noop":
-        await query.answer("Current Page", show_alert=False)
-    elif data.startswith("search_page_"):
-        parts = data.replace("search_page_", "", 1).rsplit("_", 1)
-        if len(parts) == 2:
-            sterm, spage = parts[0], int(parts[1])
-            await perform_search(update, context, sterm, page=spage)
-        else:
-            await query.answer()
-    elif data.startswith("file_dl_"):
-        row_id = data.replace("file_dl_", "")
-        await query.answer("Fetching file...")
+    elif d == "noop":
+        await q.answer("Current Page")
+    elif d.startswith("search_page_"):
+        parts = d.replace("search_page_", "", 1).rsplit("_", 1)
+        if len(parts) == 2: await perform_search(update, context, parts[0], int(parts[1]))
+    elif d.startswith("file_dl_"):
+        row_id = d.replace("file_dl_", "")
+        await q.answer("Fetching file...")
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type=\"table\";")
-            tables = cursor.fetchall()
-            found_data = None
-            for (table_name,) in tables:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            found = None
+            for (tname,) in cursor.fetchall():
                 try:
-                    cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (row_id,))
+                    cursor.execute(f"SELECT * FROM {tname} WHERE id = ?", (row_id,))
                     row = cursor.fetchone()
                     if row:
-                        found_data = row
+                        found = row
                         break
-                except Exception:
-                    pass
+                except Exception: pass
             conn.close()
-
-            if found_data:
-                await query.message.reply_text(f"📦 <b>File Record Retrieved:</b>\n<code>{found_data}</code>", parse_mode="HTML")
+            if found:
+                await q.message.reply_text(f"📦 <b>File Record Retrieved:</b>\n<code>{found}</code>", parse_mode="HTML")
             else:
-                await query.message.reply_text("❌ File record no longer found in the database.")
+                await q.message.reply_text("❌ File record no longer found.")
         except Exception as e:
-            await query.message.reply_text(f"❌ Error retrieving file: {e}")
+            await q.message.reply_text(f"❌ Error: {e}")
 
 async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("waiting_for_search"):
-        return
-    search_term = update.message.text.strip()
-    context.user_data["waiting_for_search"] = False
-    await perform_search(update, context, search_term, page=1)
+    pass
 
 search_handler = search_command
