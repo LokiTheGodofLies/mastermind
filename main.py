@@ -26,6 +26,7 @@ from modules.search.handlers import search_command, search_callback_handler
 
 logger = logging.getLogger(__name__)
 
+
 def load_env():
     env_path = "env.txt"
     if os.path.exists(env_path):
@@ -37,6 +38,7 @@ def load_env():
         print("✅ Environment variables loaded from env.txt successfully.")
     else:
         print("⚠️ env.txt not found, relying on system environment variables.")
+
 
 async def send_startup_log(application):
     logger_group_id = os.getenv("LOGGER_GROUP_ID")
@@ -53,11 +55,13 @@ async def send_startup_log(application):
         except Exception as e:
             print(f"Failed to send startup log: {e}")
 
+
 def main():
     try:
         asyncio.get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
+
     load_env()
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -95,7 +99,6 @@ def main():
         )
     )
     application.add_handler(CallbackQueryHandler(support_callback_handler, pattern="^support_"))
-    application.add_handler(CallbackQueryHandler(help_button_callback, pattern="^(quota|bot_owner|help_button|help_menu|search_menu|stats_menu|start_menu)$"))
     application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(file_dl_|search_page_|join_search_group_quiz|generate_group_invite)"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^req_"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
@@ -109,8 +112,6 @@ def main():
             await send_startup_log(app)
         application.post_init = post_init
 
-    if not application.updater or not application.updater.running:
-        application.add_handler(CommandHandler("start", request_deeplink_handler), group=-2)
     application.run_polling()
 
 

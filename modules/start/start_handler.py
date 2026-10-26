@@ -95,3 +95,6 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
             "📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• API Status: Active",
             parse_mode="HTML"
         )
+
+
+start_handler = start_command
