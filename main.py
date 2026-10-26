@@ -1,3 +1,4 @@
+from modules.stats.handlers import stats_command
 from modules.id.handlers import id_command
 from modules.search.handlers import search_command, search_callback_handler
 from modules.request.handlers import request_command, request_callback_handler
@@ -91,6 +92,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("ban_support", ban_support_command))
     application.add_handler(CommandHandler("unban", unban_command))
     application.add_handler(CommandHandler("log", log_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("request", request_command))
