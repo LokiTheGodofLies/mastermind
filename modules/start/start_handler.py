@@ -52,3 +52,28 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
+
+
+async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    data = query.data
+
+    if data == "search_menu":
+        from modules.search.handlers import search_handler
+        update.message = query.message
+        await search_handler(update, context)
+    elif data == "stats_menu":
+        from modules.stats.handlers import stats_command
+        update.message = query.message
+        await stats_command(update, context)
+    elif data == "help_menu":
+        from modules.help.handlers import help_command
+        update.message = query.message
+        await help_command(update, context)
+    elif data == "start_menu":
+        await start_handler(update, context)
+    elif data == "quota" or data == "quota_menu":
+        await query.message.reply_text("📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• API Status: Active", parse_mode="HTML")

@@ -1,3 +1,4 @@
+from modules.start.start_handler import menu_callback_router
 from modules.help.handlers import help_command
 from modules.editscript.handlers import editscript_command, editscript_callback
 from telegram.request import HTTPXRequest
