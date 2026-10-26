@@ -1,3 +1,6 @@
+from modules.id.handlers import id_command
+from modules.search.handlers import search_command, search_callback_handler
+from modules.request.handlers import request_command, request_callback_handler
 import os
 import logging
 import asyncio
@@ -88,6 +91,13 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("ban_support", ban_support_command))
     application.add_handler(CommandHandler("unban", unban_command))
     application.add_handler(CommandHandler("log", log_command))
+    application.add_handler(CommandHandler("id", id_command))
+    application.add_handler(CommandHandler("search", search_command))
+    application.add_handler(CommandHandler("request", request_command))
+    
+    # Callback query handlers for search and request quizzes
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(search_start_quiz|search_ans_)"))
+    application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^(request_start_quiz|request_ans_)"))
 
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_book_indexing))
