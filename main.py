@@ -1,3 +1,4 @@
+from modules.utility.ping import ping_command
 from modules.start.start_handler import menu_callback_router
 from modules.help.handlers import help_command, help_button_callback
 from modules.editscript.handlers import editscript_command, editscript_callback
@@ -139,4 +140,5 @@ if __name__ == "__main__":
     
     
     
+    application.add_handler(CommandHandler("ping", ping_command))
     application.run_polling()
