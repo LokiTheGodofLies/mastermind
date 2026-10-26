@@ -138,3 +138,24 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     remove_ban_db(resolved_id)
     await update.message.reply_text(f"✅ Target <b>{display_str}</b> (<code>{resolved_id}</code>) has been unbanned.", parse_mode="HTML")
+
+from telegram.ext import ApplicationHandlerStop
+from modules.ban.ban import check_user_access
+
+async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Middleware to intercept messages and enforce user/chat bans."""
+    if not update.effective_user or not update.effective_chat:
+        return
+        
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    chat_type = update.effective_chat.type
+
+    allowed, reason = check_user_access(user_id, chat_id, chat_type)
+    if not allowed:
+        if update.message:
+            try:
+                await update.message.reply_text(reason)
+            except Exception:
+                pass
+        raise ApplicationHandlerStop()

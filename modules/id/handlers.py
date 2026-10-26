@@ -2,19 +2,19 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    if not message:
+    message = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    
+    if not message or not chat:
         return
 
-    chat = message.chat
-    user = message.from_user
     reply_to = message.reply_to_message
-
-    # Check if a username argument was passed (e.g. /id @username or /id username)
     args = context.args
+
+    # Check if a username argument was passed (e.g. /id @username)
     if args:
         target_username = args[0].lstrip("@")
-        # Try finding user via context or mention if available, else inform user
         await message.reply_text(
             f"ℹ️ <b>Username Lookup</b>\n"
             f"• <b>Target Username:</b> @{target_username}\n"
@@ -34,16 +34,18 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• <b>Message ID:</b> <code>{reply_to.message_id}</code>\n"
             f"• <b>Chat ID:</b> <code>{chat.id}</code>"
         )
-        if message.is_topic_message:
+        if message.is_topic_message and message.message_thread_id:
             response_text += f"\n• <b>Topic ID:</b> <code>{message.message_thread_id}</code>"
-        
+
         await message.reply_text(response_text, parse_mode="HTML")
         return
 
-    # Case 2: Standard /id command (no args, no reply)
+    # Case 2: Channel Post or Standard Identification
+    user_id_str = f"<code>{user.id}</code>" if user else "<i>Channel Post (No User ID)</i>"
+    
     response_text = (
-        f"📊 <b>Chat & User Identification</b>\n\n"
-        f"👤 <b>Your User ID:</b> <code>{user.id}</code>\n"
+        f"📊 <b>Chat & Identification</b>\n\n"
+        f"👤 <b>User ID:</b> {user_id_str}\n"
         f"💬 <b>Chat ID:</b> <code>{chat.id}</code>\n"
         f"🏷️ <b>Chat Type:</b> {chat.type.capitalize()}"
     )
