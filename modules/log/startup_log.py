@@ -1,26 +1,39 @@
 import os
 import logging
-import asyncio
+import subprocess
+from modules.database.config_db import get_config
 
 logger = logging.getLogger(__name__)
 
 async def send_startup_notification(application):
-    logger_group_id = os.getenv("LOGGER_GROUP_ID") or os.getenv("STORAGE_GROUP_ID")
+    logger_group_id = get_config("logger_group_id", fallback_env="LOGGER_GROUP_ID") or get_config("storage_group_id", fallback_env="STORAGE_GROUP_ID")
     if not logger_group_id:
-        print("⚠️ [STARTUP WARNING] LOGGER_GROUP_ID not set.")
+        print("⚠️ [STARTUP WARNING] Logger Group ID not set.")
         return
-
     try:
-        startup_text = (
-            "🔄 <b>Bot Restarted Successfully</b>\n\n"
-            "🤖 Mastermind Bot is now online and polling for updates.\n"
-            "⏱️ <i>System initialized and ready.</i>"
-        )
-        await application.bot.send_message(
-            chat_id=int(logger_group_id),
-            text=startup_text,
-            parse_mode="HTML"
-        )
-        print("✅ [STARTUP] Restart notification sent successfully to Logger Group!")
+        bot_info = await application.bot.get_me()
+        bot_title = bot_info.first_name or "Mastermind Bot"
+        try:
+            deploy_time = subprocess.check_output(["git", "log", "-1", "--format=%cd"]).decode("utf-8").strip()
+        except Exception:
+            deploy_time = "Unknown"
+
+        default_template = "🔄 <b>Bot Restarted Successfully</b>\n\n🤖 <b>{bot_title}</b> is now online .\n⏱️ Restarted at {deploy_time} see /stats"
+        template = get_config("startup_log_script", default=default_template)
+        startup_text = template.format(bot_title=bot_title, deploy_time=deploy_time)
+        
+        media_type = get_config("startup_log_media_type", default="none")
+        media_url = get_config("startup_log_media_url", default="")
+        chat_id = int(logger_group_id)
+
+        if media_type == "photo" and media_url:
+            await application.bot.send_photo(chat_id=chat_id, photo=media_url, caption=startup_text, parse_mode="HTML")
+        elif media_type == "video" and media_url:
+            await application.bot.send_video(chat_id=chat_id, video=media_url, caption=startup_text, parse_mode="HTML")
+        elif media_type == "animation" and media_url:
+            await application.bot.send_animation(chat_id=chat_id, animation=media_url, caption=startup_text, parse_mode="HTML")
+        else:
+            await application.bot.send_message(chat_id=chat_id, text=startup_text, parse_mode="HTML")
+        print("✅ [STARTUP] Restart notification sent successfully!")
     except Exception as e:
-        print(f"❌ [STARTUP ERROR] Failed to send restart notification: {e}")
+        print(f"❌ [STARTUP ERROR]: {e}")

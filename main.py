@@ -1,3 +1,4 @@
+from modules.editscript.handlers import editscript_command, editscript_callback
 from telegram.request import HTTPXRequest
 from modules.log.startup_log import send_startup_notification
 from modules.stats.handlers import stats_command
@@ -78,7 +79,7 @@ if __name__ == "__main__":
     print("✅ Database and tables initialized successfully.")
     print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {os.getenv("STORAGE_GROUP_ID")}")
 
-    application = ApplicationBuilder().token(token).build()
+    application = ApplicationBuilder().token(token).post_init(send_startup_notification).build()
     application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
 
     application.add_handler(CommandHandler("start", start_command))
@@ -113,5 +114,8 @@ if __name__ == "__main__":
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+
+        application.add_handler(CommandHandler("editscript", editscript_command))
+    application.add_handler(CallbackQueryHandler(editscript_callback, pattern="^es_"))
 
     application.run_polling()
