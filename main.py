@@ -5,7 +5,7 @@ from telegram.request import HTTPXRequest
 from modules.log.startup_log import send_startup_notification
 from modules.stats.handlers import stats_command
 from modules.id.handlers import id_command
-from modules.search.handlers import search_command, search_callback_handler
+from modules.search.handlers import search_command, search_callback_handler, search_text_handler
 from modules.request.handlers import request_command, request_callback_handler
 import os
 import logging
@@ -120,4 +120,5 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("editscript", editscript_command))
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern="^es_"))
 
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_handler))
     application.run_polling()
