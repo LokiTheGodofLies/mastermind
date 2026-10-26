@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -107,27 +108,46 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            found = None
-            for (tname,) in cursor.fetchall():
-                try:
-                    cursor.execute(f"SELECT * FROM {tname} WHERE id = ?", (row_id,))
-                    row = cursor.fetchone()
-                    if row:
-                        found = row
-                        break
-                except Exception: pass
+            cursor.execute("SELECT file_id, storage_message_id, file_name FROM indexed_files WHERE id = ?", (row_id,))
+            row = cursor.fetchone()
             conn.close()
-            if found:
-                file_id = found[2]
-                try:
-                    await context.bot.send_document(chat_id=q.message.chat_id, document=file_id, caption="Here is your file!")
-                except Exception as ex:
-                    await q.message.reply_text(f"📦 <b>File Record Retrieved:</b>\n<code>{found}</code>", parse_mode="HTML")
+            
+            if row:
+                file_id, storage_msg_id, file_name = row
+                storage_group_id = os.getenv("STORAGE_GROUP_ID")
+                
+                sent = False
+                # Try copying from storage group first (most reliable)
+                if storage_msg_id and storage_group_id:
+                    try:
+                        await context.bot.copy_message(
+                            chat_id=q.message.chat_id,
+                            from_chat_id=int(storage_group_id),
+                            message_id=int(storage_msg_id)
+                        )
+                        sent = True
+                    except Exception as copy_err:
+                        print(f"Copy message failed: {copy_err}")
+                
+                # Fallback to send_document using file_id
+                if not sent and file_id:
+                    try:
+                        cap_text = f"📁 {file_name}" if file_name else "📁 Here is your file!"
+                        await context.bot.send_document(
+                            chat_id=q.message.chat_id,
+                            document=file_id,
+                            caption=cap_text
+                        )
+                        sent = True
+                    except Exception as doc_err:
+                        print(f"Send document failed: {doc_err}")
+                
+                if not sent:
+                    await q.message.reply_text("❌ Failed to dispatch file. The storage message or file ID may no longer be valid.")
             else:
-                await q.message.reply_text("❌ File record no longer found.")
+                await q.message.reply_text("❌ File record no longer found in database.")
         except Exception as e:
-            await q.message.reply_text(f"❌ Error: {e}")
+            await q.message.reply_text(f"❌ Error retrieving file: {e}")
 
 async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pass

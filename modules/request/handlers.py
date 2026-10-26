@@ -1,97 +1,104 @@
-import os
 import logging
-import sqlite3
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ApplicationHandlerStop
+from modules.database.file_db import get_connection as get_db_connection
+import os
 import requests
 from bs4 import BeautifulSoup
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+import html
 
 logger = logging.getLogger(__name__)
 
-def check_database_for_book(query: str) -> bool:
-    db_path = "database/files.db"
-    if not os.path.exists(db_path):
-        return False
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = [t[0] for t in cursor.fetchall()]
-        for table in tables:
-            cursor.execute(f"PRAGMA table_info({table});")
-            columns = [col[1] for col in cursor.fetchall()]
-            for col in columns:
-                if any(k in col.lower() for k in ['title', 'name', 'filename']):
-                    cursor.execute(f"SELECT 1 FROM {table} WHERE {col} LIKE ? LIMIT 1;", (f"%{query}%",))
-                    if cursor.fetchone():
-                        conn.close()
-                        return True
-        conn.close()
-    except Exception as e:
-        logger.error(f"Database check error: {e}")
-    return False
-
-def fetch_goodreads_metadata(query: str):
+def fetch_goodreads_metadata(query):
     try:
         search_url = f"https://www.goodreads.com/search?q={requests.utils.quote(query)}"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get(search_url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            result_title = soup.find('a', class_='bookTitle')
-            result_author = soup.find('a', class_='authorName')
-            result_img = soup.find('img', class_='bookCover')
-            result_rating = soup.find('span', class_='minirating')
-            if result_title:
-                title = result_title.get_text(strip=True)
-                url = "https://www.goodreads.com" + result_title.get('href', '')
-                author = result_author.get_text(strip=True) if result_author else "Unknown Author"
-                img_url = result_img.get('src', '') if result_img else ""
-                rating = result_rating.get_text(strip=True) if result_rating else "No rating"
-                return {"title": title, "author": author, "url": url, "img_url": img_url, "rating": rating}
+        resp = requests.get(search_url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return []
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        results = []
+        rows = soup.select("tr[itemtype='http://schema.org/Book']")[:5]
+        for row in rows:
+            title_tag = row.select_one("span[itemprop='name']")
+            author_tag = row.select_one("span[itemprop='author']")
+            link_tag = row.select_one("a.bookTitle")
+            rating_tag = row.select_one("span.minirating")
+            
+            if title_tag and link_tag:
+                title = title_tag.get_text(strip=True)
+                author = author_tag.get_text(strip=True) if author_tag else "Unknown Author"
+                url = "https://www.goodreads.com" + link_tag["href"]
+                rating = rating_tag.get_text(strip=True) if rating_tag else ""
+                results.append({"title": title, "author": author, "url": url, "rating": rating})
+        return results
     except Exception as e:
-        logger.error(f"Goodreads fetch error: {e}")
-    return None
+        logger.error(f"Error fetching Goodreads metadata: {e}")
+        return []
 
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     if not message:
         return
-    query = ""
-    if context.args:
-        query = " ".join(context.args)
-    elif message.reply_to_message and message.reply_to_message.text:
-        query = message.reply_to_message.text.strip()
+    
+    query = " ".join(context.args).strip()
     if not query:
-        text = "📥 <b>Mastermind Request Center</b>\n\nTo keep requests orderly and spam-free, would you like to join our dedicated request group?"
-        keyboard = [
-            [InlineKeyboardButton("✅ Yes, Join", callback_data="req_join_yes"),
-             InlineKeyboardButton("❌ No", callback_data="req_join_no")]
-        ]
-        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await message.reply_text("📖 Please provide a book title or keyword. Usage: <code>/request [book name]</code>", parse_mode="HTML")
         return
-    status_msg = await message.reply_text(f"🔍 Searching database for <i>\"{query}\"</i>...", parse_mode="HTML")
-    if check_database_for_book(query):
-        await status_msg.edit_text(
-            f"📚 <b>Book Already Available!</b>\n\n<i>\"{query}\"</i> is already in our library. You can search and download it directly in our Search Group or via Bot PM.",
-            parse_mode="HTML"
-        )
-        return
-    await status_msg.edit_text(f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{query}\"</i>...", parse_mode="HTML")
-    book_data = fetch_goodreads_metadata(query)
-    if book_data:
-        text = f"📖 <b>Goodreads Book Match Found</b>\n\n📌 <b>Title:</b> <a href=\"{book_data['url']}\">{book_data['title']}</a>\n✍️ <b>Author:</b> {book_data['author']}\n⭐ <b>Rating:</b> {book_data['rating']}\n\nWould you like to submit this book request to the Request Group?"
-        encoded_title = book_data['title'][:40]
-        keyboard = [
-            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_submit_{encoded_title}")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
-        ]
-        await status_msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=False, reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    q_esc = html.escape(query)
+    status_msg = await message.reply_text(f"🔎 Searching local database for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_id, file_name FROM indexed_files WHERE file_name LIKE ? LIMIT 5", (f"%{query}%",))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if rows:
+        header = f"📁 <b>Local Database Matches for:</b> <i>\"{q_esc}\"</i>\n"
+        lines = [header]
+        for row in rows:
+            file_id, file_name = row
+            lines.append(f"• {html.escape(file_name)}")
+        text = "\n".join(lines)
+        await status_msg.edit_text(text, parse_mode="HTML")
     else:
-        text = f"📖 <b>Book Request:</b> <i>{query}</i>\n\nWould you like to submit this request directly to the Request Group?"
+        await process_goodreads_or_request(status_msg, query, context)
+
+async def process_goodreads_or_request(status_msg, query, context):
+    q_esc = html.escape(query)
+    await status_msg.edit_text(f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
+    matches = fetch_goodreads_metadata(query)
+    if matches:
+        bot_username = context.bot.username or (await context.bot.get_me()).username
+        if "goodreads_cache" not in context.bot_data:
+            context.bot_data["goodreads_cache"] = {}
+        context.bot_data["goodreads_cache"][status_msg.chat_id] = matches
+        context.bot_data["goodreads_last_matches"] = matches
+        context.bot_data["goodreads_last_query"] = query
+
+        header = f"📖 <b>Goodreads Book Matches Found for:</b> <i>\"{q_esc}\"</i>"
+        lines = [header, "", "Tap any book title below to select and request it:"]
+        for idx, book in enumerate(matches):
+            title = html.escape(book["title"])
+            author = html.escape(book["author"])
+            url = book["url"]
+            rating = html.escape(book.get("rating", ""))
+            cmd_link = f"https://t.me/{bot_username}?start=req_pick_{idx}"
+            lines.append(f'{idx + 1}. <a href="{cmd_link}">📚 <b>{title}</b> ({author})</a> — {rating} [<a href="{url}">Goodreads</a>]')
+
+        manual_link = f"https://t.me/{bot_username}?start=req_manual"
+        lines.append("")
+        lines.append(f'✍️ <a href="{manual_link}"><b>Request Manually (\"{html.escape(query[:35])}\")</b></a>')
+
+        text = "\n".join(lines)
+        await status_msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        text = f"📖 <b>Book Request:</b> <i>\"{q_esc}\"</i>\n\nNo Goodreads matches found. Would you like to submit this request directly to the Request Channel?"
         keyboard = [
-            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_submit_{query[:40]}")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
+            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{query[:40]}"),
+             InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
         ]
         await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -99,46 +106,73 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     data = query.data
-    if data == "req_join_yes":
-        REQUEST_CHAT_ID = os.getenv("REQUEST_CHAT_ID")
+    
+    if data.startswith("req_sub_orig_") or data.startswith("req_sub_gb_"):
+        book_query = data.split("_", 3)[-1]
+        request_channel_id = os.getenv("REQUEST_CHANNEL_ID", "-1004447576324")
+        user = query.from_user
+        user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+        bq_esc = html.escape(book_query)
+        
+        req_text = f"📥 <b>New Book Request</b>\n\n👤 <b>Requested By:</b> {user_mention}\n📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
         try:
-            invite = await context.bot.create_chat_invite_link(
-                chat_id=int(REQUEST_CHAT_ID),
-                member_limit=1,
-                expire_date=int(query.message.date.timestamp()) + 3600
+            await context.bot.send_message(
+                chat_id=int(request_channel_id),
+                text=req_text,
+                parse_mode="HTML"
             )
             await query.edit_message_text(
-                f"✅ <b>Verification Passed!</b>\n\nHere is your secure, single-use invite link to the Request Group:\n{invite.invite_link}",
+                f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <i>\"{bq_esc}\"</i> has been forwarded to the Request Channel.",
                 parse_mode="HTML"
             )
         except Exception as e:
-            logger.error(f"Failed to create invite link: {e}")
-            await query.edit_message_text("❌ Failed to generate invite link. Please contact an admin.")
-    elif data.startswith("req_submit_"):
-        book_query = data.replace("req_submit_", "")
-        user = query.from_user
-        user_mention = f"@{user.username}" if user.username else user.full_name
-        REQUEST_CHAT_ID = os.getenv("REQUEST_CHAT_ID")
-        topic_id = os.getenv("CHANNEL_LOG_TOPIC_ID") or os.getenv("GROUP_LOG_TOPIC_ID")
-        if REQUEST_CHAT_ID:
-            try:
-                request_notice = f"📢 <b>New Book Request!</b>\n\n👤 <b>Requested By:</b> {user_mention} (<code>{user.id}</code>)\n📚 <b>Book:</b> <code>{book_query}</code>"
-                msg_kwargs = {
-                    "chat_id": int(REQUEST_CHAT_ID),
-                    "text": request_notice,
-                    "parse_mode": "HTML"
-                }
-                if topic_id:
-                    msg_kwargs["message_thread_id"] = int(topic_id)
-                await context.bot.send_message(**msg_kwargs)
-                await query.edit_message_text(
-                    f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <i>\"{book_query}\"</i> has been sent to the Request Group/Channel.",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.error(f"Failed to send to request group: {e}")
-                await query.edit_message_text("❌ Failed to forward request to the Request Group. Please contact an admin.")
-        else:
-            await query.edit_message_text("❌ Request Group ID is not configured.")
+            logger.error(f"Failed to send request to channel: {e}")
+            await query.edit_message_text("❌ Failed to submit request to channel. Please try again later.")
     elif data == "req_join_no":
         await query.edit_message_text("❌ Request cancelled.")
+
+async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    if not message or not context.args:
+        return
+    payload = context.args[0]
+    if payload.startswith("req_pick_"):
+        try:
+            idx = int(payload.split("req_pick_")[1])
+        except ValueError:
+            return
+        matches = context.bot_data.get("goodreads_cache", {}).get(
+            message.chat_id,
+            context.bot_data.get("goodreads_last_matches", [])
+        )
+        orig_query = context.bot_data.get("goodreads_last_query", "")
+        if 0 <= idx < len(matches):
+            book_data = matches[idx]
+            title = html.escape(book_data["title"])
+            author = html.escape(book_data["author"])
+            rating = html.escape(book_data.get("rating", "No rating"))
+            url = book_data["url"]
+            text = f"📖 <b>Goodreads Book Selected</b>\n\n📌 <b>Title:</b> <a href=\"{url}\">{title}</a>\n✍️ <b>Author:</b> {author}\n⭐ <b>Rating:</b> {rating}\n\nIs this the book you are looking for?"
+            encoded_title = book_data["title"][:40]
+            fallback_q = (orig_query or book_data["title"])[:40]
+            keyboard = [
+                [InlineKeyboardButton("✅ Yes (Submit Goodreads)", callback_data=f"req_sub_gb_{encoded_title}")],
+                [InlineKeyboardButton("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}")]
+            ]
+            await message.reply_text(
+                text,
+                parse_mode="HTML",
+                disable_web_page_preview=False,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            raise ApplicationHandlerStop
+    elif payload == "req_manual":
+        orig_query = context.bot_data.get("goodreads_last_query", "Book Request")
+        oq_esc = html.escape(orig_query)
+        text = f"📖 <b>Book Request:</b> <i>\"{oq_esc}\"</i>\n\nWould you like to submit this request directly to the Request Channel?"
+        keyboard = [
+            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}"),
+             InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
+        ]
+        await message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        raise ApplicationHandlerStop

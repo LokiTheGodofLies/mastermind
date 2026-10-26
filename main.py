@@ -20,8 +20,10 @@ from modules.allowance.handlers import quota_command, gift_command, refer_comman
 from modules.ban.handlers import ban_command, ban_pm_command, enforce_ban_middleware
 from modules.log.logger import setup_in_memory_logger
 from modules.database.user_db import init_user_db
-from modules.request.handlers import request_command, request_callback_handler
+from modules.request.handlers import request_command, request_callback_handler, request_deeplink_handler
 from modules.id.handlers import id_command
+from modules.stats.handlers import stats_command
+from modules.search.handlers import search_command, search_callback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,7 @@ def main():
         print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt")
         exit(1)
 
+    logging.basicConfig(level=logging.INFO)
     setup_in_memory_logger()
     init_user_db()
     print("✅ Database and tables initialized successfully.")
@@ -88,10 +91,14 @@ def main():
     # ID module handler
     # ID module handlers for standard chats and channels
     application.add_handler(CommandHandler("id", id_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("search", search_command))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(file_dl_|search_page_|join_search_group_quiz|generate_group_invite)"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
 
     # Request module handlers
     application.add_handler(CommandHandler("request", request_command))
+    
     application.add_handler(CommandHandler("req", request_command))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^req_"))
 
@@ -108,7 +115,8 @@ def main():
     
             # Ensure only a single active polling loop runs
     if not application.updater or not application.updater.running:
-        application.run_polling()
+            application.add_handler(CommandHandler("start", request_deeplink_handler), group=-2)
+    application.run_polling()
 
 
 if __name__ == "__main__":

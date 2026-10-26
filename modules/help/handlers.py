@@ -55,3 +55,34 @@ async def help_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text("📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• Status: Active", parse_mode="HTML")
     elif data == "bot_owner":
         await query.message.reply_text("👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.", parse_mode="HTML")
+    elif data == "stats_menu":
+        from modules.stats.handlers import stats_command
+        # Pass a mock update or trigger stats display
+        # We can handle the display directly here to keep callback clean:
+        user_id = query.from_user.id
+        is_admin = user_id in ADMIN_IDS
+        from modules.database.config_db import get_config
+        default_header = "📊 <b>Mastermind Bot Statistics</b>"
+        header_text = get_config("stats_header_script", default=default_header)
+        if is_admin:
+            stats_text = (
+                f"{header_text}\n\n"
+                "👑 <b>Admin System Metrics:</b>\n"
+                "• Bot Status: 🟢 Online (Configuration DB Active)\n"
+                "• Active Database: configuration.db\n"
+                "• Access Level: Administrator"
+            )
+        else:
+            stats_text = (
+                f"{header_text}\n\n"
+                "👥 <b>Public User Metrics:</b>\n"
+                "• Bot is fully operational and serving requests!"
+            )
+        media_type = get_config("stats_media_type", default="none")
+        media_url = get_config("stats_media_url", default="")
+        keyboard = [[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if media_type == "photo" and media_url:
+            await query.message.reply_photo(photo=media_url, caption=stats_text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await query.message.reply_text(text=stats_text, reply_markup=reply_markup, parse_mode="HTML")
