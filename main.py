@@ -1,5 +1,5 @@
 from modules.start.start_handler import menu_callback_router
-from modules.help.handlers import help_command
+from modules.help.handlers import help_command, help_button_callback
 from modules.editscript.handlers import editscript_command, editscript_callback
 from telegram.request import HTTPXRequest
 from modules.log.startup_log import send_startup_notification
