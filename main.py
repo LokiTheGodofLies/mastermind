@@ -42,11 +42,7 @@ async def send_startup_log(application):
     if logger_group_id:
         try:
             restart_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_text = (
-                "🔄 Bot Restarted Successfully\n\n"
-                "🤖 <b>Aurora Of Luna's Hope 💗✨</b> is now online.\n"
-                f"⏱️ Restarted at <code>{restart_time}</code> see /stats"
-            )
+            log_text = "🔄 Bot Restarted Successfully\n\n🤖 Mastermind is now online.\n⏱️ Restarted at " + restart_time
             await application.bot.send_message(
                 chat_id=int(logger_group_id),
                 text=log_text,
@@ -54,9 +50,13 @@ async def send_startup_log(application):
             )
             print("✅ Restart log sent to log group successfully.")
         except Exception as e:
-            logger.error(f"Failed to send startup log: {e}")
+            print(f"Failed to send startup log: {e}")
 
 def main():
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
     load_env()
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -86,7 +86,9 @@ def main():
     application.add_handler(CommandHandler("ban_pm", ban_pm_command))
     
     # ID module handler
+    # ID module handlers for standard chats and channels
     application.add_handler(CommandHandler("id", id_command))
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
 
     # Request module handlers
     application.add_handler(CommandHandler("request", request_command))
@@ -104,12 +106,10 @@ def main():
             await send_startup_log(app)
         application.post_init = post_init
     
-    try:
+            # Ensure only a single active polling loop runs
+    if not application.updater or not application.updater.running:
         application.run_polling()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        application.run_polling()
+
 
 if __name__ == "__main__":
     main()
