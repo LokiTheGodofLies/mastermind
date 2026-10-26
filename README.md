@@ -52,3 +52,4 @@ mastermind/
     │
     └── message/                # Folder for handling regular chat messages
         └── message_handler.py  # Contains the reply for normal text with an expandable section and help button
+# fantastic-eureka
