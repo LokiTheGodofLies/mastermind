@@ -29,9 +29,11 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     try:
         base_name = os.path.splitext(file_name)[0]
-        target_msg = await asyncio.wait_for(context.bot.send_document(chat_id=int(STORAGE_GROUP_ID), document=file_id, caption=f"📖 **Title:** {base_name}\n📚 **Format:** Ebook", parse_mode='Markdown', message_thread_id=INDEX_LOG_TOPIC_ID), timeout=15.0)
+        # Send file to storage group (NO message_thread_id so it goes to main storage/general stream)
+        target_msg = await asyncio.wait_for(context.bot.send_document(chat_id=int(STORAGE_GROUP_ID), document=file_id, caption=f"📖 **Title:** {base_name}\n📚 **Format:** Ebook", parse_mode='Markdown'), timeout=15.0)
         user = message.from_user
         save_indexed_file_db(file_unique_id=file_unique_id, file_id=file_id, storage_message_id=target_msg.message_id, file_name=file_name, file_size=file_size, duration=0, user_id=user.id if user else 0, user_title=user.full_name or user.username or 'Unknown', caption=message.caption or '', extension=ext, file_type=mime_type, category='book')
+        # Send log message specifically to Index Logs Topic (ID 18)
         try:
             log_text = f"📥 <b>File Indexed Successfully</b>\n\n📂 <b>Filename:</b> <code>{file_name}</code>\n🆔 <b>Unique ID:</b> <code>{file_unique_id}</code>\n👤 <b>Indexed By:</b> {user.full_name if user else 'Unknown'} (<code>{user.id if user else 'N/A'}</code>)"
             await context.bot.send_message(chat_id=int(STORAGE_GROUP_ID), text=log_text, parse_mode='HTML', message_thread_id=INDEX_LOG_TOPIC_ID)
