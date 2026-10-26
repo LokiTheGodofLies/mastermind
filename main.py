@@ -1,3 +1,4 @@
+from modules.help.handlers import help_command
 from modules.editscript.handlers import editscript_command, editscript_callback
 from telegram.request import HTTPXRequest
 from modules.log.startup_log import send_startup_notification
