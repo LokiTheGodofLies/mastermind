@@ -6,7 +6,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     role = get_user_role_db(user_id)
 
-    # Core help text
     help_text = (
         "<b>🤖 Bot Help Menu</b>\n\n"
         "Here are my modules and functions I can perform:\n"
@@ -14,6 +13,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <b>/help</b> - Shows this list of all available modules and functions.\n"
         "• <b>/quota</b> - Checks your current daily limits and role status.\n"
         "• <b>/refer</b> - Opens your referral dashboard to invite friends and earn bonus allowances.\n"
+        "• <b>/log</b> - View system memory logs (Admin/Owner only: <code>/log</code>, <code>/log 50</code>, <code>/log 15m</code>).\n"
         "• <b>Normal Text</b> - Reminds you that I can't chat and gives you a quick help button.\n\n"
         f"👤 <b>Your Current Role:</b> <code>{role}</code>\n\n"
         "📊 <b>Hierarchy & Quota Tiers:</b>\n"
@@ -23,7 +23,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <b>Admin / Owner:</b> Unlimited searches & requests (Plus management powers)"
     )
 
-    # Optional inline buttons for quick access
     keyboard = [
         [
             InlineKeyboardButton("📊 My Quota", callback_data='quota_shortcut'),
@@ -37,16 +36,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     if query.data == 'help_button':
         user_id = update.effective_user.id
         role = get_user_role_db(user_id)
-        
+
         help_text = (
             "<b>🤖 Bot Help Menu</b>\n\n"
             "Here are my modules and functions I can perform:\n"
             "• <b>/start</b> - Greets you with a simple welcome message and quick buttons.\n"
             "• <b>/help</b> - Shows this list of all available modules and functions.\n"
+            "• <b>/log</b> - View system memory logs (Admin/Owner).\n"
             "• <b>Normal Text</b> - Reminds you that I can't chat and gives you a quick help button.\n\n"
             f"👤 <b>Your Current Role:</b> <code>{role}</code>\n\n"
             "📊 <b>Hierarchy & Quotas:</b>\n"
