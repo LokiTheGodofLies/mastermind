@@ -1,6 +1,6 @@
 import os
 import logging
-import subprocess
+import datetime
 from modules.database.config_db import get_config
 
 logger = logging.getLogger(__name__)
@@ -13,15 +13,12 @@ async def send_startup_notification(application):
     try:
         bot_info = await application.bot.get_me()
         bot_title = bot_info.first_name or "Mastermind Bot"
-        try:
-            deploy_time = subprocess.check_output(["git", "log", "-1", "--format=%cd"]).decode("utf-8").strip()
-        except Exception:
-            deploy_time = "Unknown"
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        default_template = "🔄 <b>Bot Restarted Successfully</b>\n\n🤖 <b>{bot_title}</b> is now online .\n⏱️ Restarted at {deploy_time} see /stats"
+        default_template = "🔄 <b>ʙᴏᴛ ʀᴇꜱᴛᴀʀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ</b>\n\n🤖 <b>{bot_title}</b> ɪꜱ ɴᴏᴡ ᴏɴʟɪɴᴇ\n⏱️ ʀᴇꜱᴛᴀʀᴛᴇᴅ ᴀᴛ {deploy_time}\n🤞ꜱᴇᴇ /stats"
         template = get_config("startup_log_script", default=default_template)
-        startup_text = template.format(bot_title=bot_title, deploy_time=deploy_time)
-        
+        startup_text = template.format(bot_title=bot_title, deploy_time=current_time)
+
         media_type = get_config("startup_log_media_type", default="none")
         media_url = get_config("startup_log_media_url", default="")
         chat_id = int(logger_group_id)
