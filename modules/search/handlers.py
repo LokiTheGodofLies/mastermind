@@ -30,3 +30,13 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_animation(animation=media_url, caption=text_content, reply_markup=reply_markup, parse_mode="HTML")
     else:
         await message.reply_text(text=text_content, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await search_handler(update, context)
+
+async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text("🔍 Search action processed.", parse_mode="HTML")
