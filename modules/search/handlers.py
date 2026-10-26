@@ -3,9 +3,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
 
-DB_PATH = "configuration.db"
+DB_PATH = "database/files.db"
 ITEMS_PER_PAGE = 10
-SEARCH_GROUP_ID = -1003936877675
+SEARCH_GROUP_ID = -1004480538217
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
     results = []
@@ -82,6 +82,8 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     q = update.callback_query
     if not q: return
     d = q.data
+    print(f"📥 [CALLBACK CLICKED] Data received: \"{d}\"")
+    print(f"📥 [DEBUG CALLBACK] Received callback query data: '{d}' from user {q.from_user.id if q.from_user else 'unknown'}")
     if d == "join_search_group_quiz":
         await q.message.edit_text("📝 <b>Search Group Verification Quiz</b>\n\nDo you want to join our search group?", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Generate Invite Link", callback_data="generate_group_invite")], [InlineKeyboardButton("« Back", callback_data="search_menu")]]))
         await q.answer()
@@ -117,7 +119,11 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 except Exception: pass
             conn.close()
             if found:
-                await q.message.reply_text(f"📦 <b>File Record Retrieved:</b>\n<code>{found}</code>", parse_mode="HTML")
+                file_id = found[2]
+                try:
+                    await context.bot.send_document(chat_id=q.message.chat_id, document=file_id, caption="Here is your file!")
+                except Exception as ex:
+                    await q.message.reply_text(f"📦 <b>File Record Retrieved:</b>\n<code>{found}</code>", parse_mode="HTML")
             else:
                 await q.message.reply_text("❌ File record no longer found.")
         except Exception as e:

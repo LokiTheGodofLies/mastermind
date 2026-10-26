@@ -88,7 +88,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("support", support_command))
     application.add_handler(CallbackQueryHandler(help_button_callback, pattern="^(quota|bot_owner|help_menu|search_menu|stats_menu|start_menu)$"))
-    application.add_handler(CallbackQueryHandler(support_callback_handler))
+    application.add_handler(CallbackQueryHandler(support_callback_handler, pattern="^support_"))
     application.add_handler(CommandHandler("quota", quota_command))
     application.add_handler(CommandHandler("gift", gift_command))
     application.add_handler(CommandHandler("refer", refer_command))
@@ -103,8 +103,13 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("request", request_command))
     
     # Callback query handlers for search and request quizzes
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(start_menu|search_start_quiz|search_menu|join_search_group_quiz|generate_group_invite|file_dl_|search_page_).*$"))
+    
+    
+    
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^(request_start_quiz|request_ans_)"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(start_menu|search_start_quiz|search_menu|join_search_group_quiz|generate_group_invite)$"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^file_dl_"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^search_page_"))
 
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_book_indexing))
@@ -121,4 +126,17 @@ if __name__ == "__main__":
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern="^es_"))
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_handler))
+    
+
+
+
+
+    
+
+
+
+
+    
+    
+    
     application.run_polling()
