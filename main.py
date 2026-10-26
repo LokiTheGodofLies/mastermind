@@ -39,7 +39,7 @@ load_env()
 from modules.ban.ban import check_user_access
 from modules.database.user_db import init_user_db, get_user_role_db
 from modules.start.start_handler import start_command
-from modules.help_menu.help_handler import help_command, help_button_callback
+
 from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command
 from modules.allowance.allowance import quota_command, gift_command, refer_command
 from modules.log.handlers import log_command, handle_my_chat_member
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("support", support_command))
-    application.add_handler(CallbackQueryHandler(help_button_callback))
+    application.add_handler(CallbackQueryHandler(help_button_callback, pattern="^(quota|bot_owner|help_menu|search_menu|stats_menu|start_menu)$"))
     application.add_handler(CallbackQueryHandler(support_callback_handler))
     application.add_handler(CommandHandler("quota", quota_command))
     application.add_handler(CommandHandler("gift", gift_command))
