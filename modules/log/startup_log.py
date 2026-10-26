@@ -17,6 +17,11 @@ async def send_startup_notification(application):
 
         default_template = "🔄 <b>ʙᴏᴛ ʀᴇꜱᴛᴀʀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ</b>\n\n🤖 <b>{bot_title}</b> ɪꜱ ɴᴏᴡ ᴏɴʟɪɴᴇ\n⏱️ ʀᴇꜱᴛᴀʀᴛᴇᴅ ᴀᴛ {deploy_time}\n🤞ꜱᴇᴇ /stats"
         template = get_config("startup_log_script", default=default_template)
+        
+        # Ensure any literal \n from DB or config are converted to actual newlines
+        if template:
+            template = template.replace("\\n", "\n")
+
         startup_text = template.format(bot_title=bot_title, deploy_time=current_time)
 
         media_type = get_config("startup_log_media_type", default="none")
