@@ -1,9 +1,11 @@
 import os
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
 
 ADMIN_IDS = [7261537212]
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -27,17 +29,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  - <b>Admin Metrics:</b> Advanced server status and configuration tracking via <code>/stats</code>.\n"
         "  - <b>Startup Logging:</b> Automated deployment notifications sent directly to the configured logger group."
     )
-    
+
     help_text = get_config("help_script", default=default_help)
 
     keyboard = [
         [InlineKeyboardButton("🔍 Search", callback_data="search_menu"), InlineKeyboardButton("📊 Stats", callback_data="stats_menu")],
         [InlineKeyboardButton("📊 My Quota", callback_data="quota"), InlineKeyboardButton("👑 Bot Owner", callback_data="bot_owner")],
     ]
-    
+
     if is_admin:
         keyboard.append([InlineKeyboardButton("🛠️ Admin Hub (/editscript)", callback_data="es_menu_main")])
-        
+
     keyboard.append([InlineKeyboardButton("« Back to Start", callback_data="start_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -51,38 +53,26 @@ async def help_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     data = query.data
 
-    if data == "quota":
+    if data in ("help_button", "help_menu"):
+        from modules.start.start_handler import start_command
+        update.message = query.message
+        await start_command(update, context)
+    elif data == "quota":
         await query.message.reply_text("📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• Status: Active", parse_mode="HTML")
     elif data == "bot_owner":
-        await query.message.reply_text("👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.", parse_mode="HTML")
+        await query.message.reply_text(
+            "👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.",
+            parse_mode="HTML"
+        )
     elif data == "stats_menu":
         from modules.stats.handlers import stats_command
-        # Pass a mock update or trigger stats display
-        # We can handle the display directly here to keep callback clean:
-        user_id = query.from_user.id
-        is_admin = user_id in ADMIN_IDS
-        from modules.database.config_db import get_config
-        default_header = "📊 <b>Mastermind Bot Statistics</b>"
-        header_text = get_config("stats_header_script", default=default_header)
-        if is_admin:
-            stats_text = (
-                f"{header_text}\n\n"
-                "👑 <b>Admin System Metrics:</b>\n"
-                "• Bot Status: 🟢 Online (Configuration DB Active)\n"
-                "• Active Database: configuration.db\n"
-                "• Access Level: Administrator"
-            )
-        else:
-            stats_text = (
-                f"{header_text}\n\n"
-                "👥 <b>Public User Metrics:</b>\n"
-                "• Bot is fully operational and serving requests!"
-            )
-        media_type = get_config("stats_media_type", default="none")
-        media_url = get_config("stats_media_url", default="")
-        keyboard = [[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        if media_type == "photo" and media_url:
-            await query.message.reply_photo(photo=media_url, caption=stats_text, reply_markup=reply_markup, parse_mode="HTML")
-        else:
-            await query.message.reply_text(text=stats_text, reply_markup=reply_markup, parse_mode="HTML")
+        update.message = query.message
+        await stats_command(update, context)
+    elif data == "search_menu":
+        from modules.search.handlers import search_command
+        update.message = query.message
+        await search_command(update, context)
+    elif data == "start_menu":
+        from modules.start.start_handler import start_command
+        update.message = query.message
+        await start_command(update, context)

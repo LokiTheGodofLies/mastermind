@@ -13,6 +13,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
 
+    target_message = update.message or (update.callback_query.message if update.callback_query else None)
+    if not target_message:
+        return
+
     user_name = user.first_name
     today_str = datetime.now().strftime('%Y-%m-%d')
     bot_username = context.bot.username
@@ -43,7 +47,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("📖 Help Menu", callback_data='help_button'),
-            InlineKeyboardButton("👑 Bot Owner", url='tg://user?id=7261537212')
+            InlineKeyboardButton("👑 Bot Owner", callback_data='bot_owner')
         ],
         [
             InlineKeyboardButton("📤 Refer & Earn Bonus", url=share_url)
@@ -51,30 +55,43 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if update.message:
-        await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(message, parse_mode='HTML', reply_markup=reply_markup)
+    else:
+        await target_message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
 
 
 async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query:
+    if not query or not query.data:
         return
     await query.answer()
     data = query.data
 
-    if data == "search_menu":
-        from modules.search.handlers import search_handler
-        update.message = query.message
-        await search_handler(update, context)
-    elif data == "stats_menu":
-        from modules.stats.handlers import stats_command
-        update.message = query.message
-        await stats_command(update, context)
-    elif data == "help_menu":
+    if data in ("help_button", "help_menu"):
         from modules.help.handlers import help_command
         update.message = query.message
         await help_command(update, context)
+    elif data == "bot_owner":
+        await query.message.edit_text(
+            "👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.",
+            parse_mode="HTML"
+        )
+    elif data in ("search_menu", "stats_menu"):
+        if data == "search_menu":
+            from modules.search.handlers import search_command
+            update.message = query.message
+            await search_command(update, context)
+        else:
+            from modules.stats.handlers import stats_command
+            update.message = query.message
+            await stats_command(update, context)
     elif data == "start_menu":
+        update.message = query.message
         await start_command(update, context)
-    elif data == "quota" or data == "quota_menu":
-        await query.message.reply_text("📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• API Status: Active", parse_mode="HTML")
+    elif data in ("quota", "quota_menu"):
+        await query.message.edit_text(
+            "📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• API Status: Active",
+            parse_mode="HTML"
+        )

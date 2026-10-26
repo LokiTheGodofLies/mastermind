@@ -1,6 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-
 from modules.database.user_db import (
     record_referral_db,
     add_quota_limits_db,
@@ -30,7 +29,7 @@ def get_user_referral_stats(user_id: int):
 
 
 async def process_referral_with_notification(*args, **kwargs):
-    """Compatibility wrapper for older and newer referral call signatures."""
+    """Compatibility wrapper for both older and newer referral call patterns."""
     context = None
     referrer_id = None
     new_user_id = None

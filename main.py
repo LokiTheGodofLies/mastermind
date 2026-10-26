@@ -12,8 +12,7 @@ from telegram.ext import (
     ContextTypes
 )
 
-# Import from exact module paths
-from modules.start.start_handler import start_command
+from modules.start.start_handler import start_command, menu_callback_router
 from modules.help.handlers import help_command, help_button_callback
 from modules.support.handlers import support_command, support_callback_handler
 from modules.allowance.handlers import quota_command, gift_command, refer_command
@@ -71,51 +70,47 @@ def main():
     print("✅ Database and tables initialized successfully.")
     print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {os.getenv('STORAGE_GROUP_ID')}")
 
-    # Build application
     application = ApplicationBuilder().token(token).build()
 
-    # Register middleware and handlers inside main() scope
     application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("support", support_command))
-    application.add_handler(CallbackQueryHandler(help_button_callback, pattern="^(quota|bot_owner|help_menu|search_menu|stats_menu|start_menu)$"))
-    application.add_handler(CallbackQueryHandler(support_callback_handler, pattern="^support_"))
     application.add_handler(CommandHandler("quota", quota_command))
     application.add_handler(CommandHandler("gift", gift_command))
     application.add_handler(CommandHandler("refer", refer_command))
     application.add_handler(CommandHandler("ban", ban_command))
     application.add_handler(CommandHandler("ban_pm", ban_pm_command))
-    
-    # ID module handler
-    # ID module handlers for standard chats and channels
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("search", search_command))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(file_dl_|search_page_|join_search_group_quiz|generate_group_invite)"))
-    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
-
-    # Request module handlers
     application.add_handler(CommandHandler("request", request_command))
-    
     application.add_handler(CommandHandler("req", request_command))
+
+    application.add_handler(
+        CallbackQueryHandler(
+            menu_callback_router,
+            pattern=r"^(help_button|help_menu|search_menu|stats_menu|start_menu|quota|quota_menu|bot_owner)$"
+        )
+    )
+    application.add_handler(CallbackQueryHandler(support_callback_handler, pattern="^support_"))
+    application.add_handler(CallbackQueryHandler(help_button_callback, pattern="^(quota|bot_owner|help_button|help_menu|search_menu|stats_menu|start_menu)$"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(file_dl_|search_page_|join_search_group_quiz|generate_group_invite)"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^req_"))
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
 
     print("🤖 Mastermind bot is up and running...")
 
-    # Send startup log upon booting
     if application.job_queue:
         application.job_queue.run_once(lambda ctx: asyncio.create_task(send_startup_log(application)), when=1)
     else:
-        # Fallback if job_queue isn't active
         async def post_init(app):
             await send_startup_log(app)
         application.post_init = post_init
-    
-            # Ensure only a single active polling loop runs
+
     if not application.updater or not application.updater.running:
-            application.add_handler(CommandHandler("start", request_deeplink_handler), group=-2)
+        application.add_handler(CommandHandler("start", request_deeplink_handler), group=-2)
     application.run_polling()
 
 
