@@ -1,13 +1,12 @@
+from modules.request.handlers import request_command, request_callback_handler
 from modules.utility.ping import ping_command
 from modules.start.start_handler import menu_callback_router
 from modules.help.handlers import help_command, help_button_callback
 from modules.editscript.handlers import editscript_command, editscript_callback
-from telegram.request import HTTPXRequest
 from modules.log.startup_log import send_startup_notification
 from modules.stats.handlers import stats_command
 from modules.id.handlers import id_command
 from modules.search.handlers import search_command, search_callback_handler, search_text_handler
-from modules.request.handlers import request_command, request_callback_handler
 import os
 import logging
 import asyncio
@@ -82,38 +81,12 @@ if __name__ == "__main__":
     print("✅ Database and tables initialized successfully.")
     print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {os.getenv("STORAGE_GROUP_ID")}")
 
-    application = ApplicationBuilder().token(token).request(HTTPXRequest(connection_pool_size=8, read_timeout=30.0, write_timeout=30.0, connect_timeout=30.0)).post_init(send_startup_notification).build()
-    application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
 
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("support", support_command))
-    application.add_handler(CallbackQueryHandler(help_button_callback, pattern="^(quota|bot_owner|help_menu|search_menu|stats_menu|start_menu)$"))
-    application.add_handler(CallbackQueryHandler(support_callback_handler, pattern="^support_"))
-    application.add_handler(CommandHandler("quota", quota_command))
-    application.add_handler(CommandHandler("gift", gift_command))
-    application.add_handler(CommandHandler("refer", refer_command))
-    application.add_handler(CommandHandler("ban", ban_command))
-    application.add_handler(CommandHandler("ban_pm", ban_pm_command))
-    application.add_handler(CommandHandler("ban_support", ban_support_command))
-    application.add_handler(CommandHandler("unban", unban_command))
-    application.add_handler(CommandHandler("log", log_command))
-    application.add_handler(CommandHandler(["stats", "stat", "sysinfo"], stats_command))
-    application.add_handler(CommandHandler("id", id_command))
-    application.add_handler(CommandHandler("search", search_command))
-    application.add_handler(CommandHandler("request", request_command))
-    
-    # Callback query handlers for search and request quizzes
     
     
     
-    application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^(request_start_quiz|request_ans_)"))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(start_menu|search_start_quiz|search_menu|join_search_group_quiz|generate_group_invite)$"))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^file_dl_"))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^search_page_"))
+    
 
-    application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
-    application.add_handler(MessageHandler(filters.Document.ALL, handle_book_indexing))
 
     print("🤖 Mastermind bot is up and running...")
 
@@ -123,10 +96,7 @@ if __name__ == "__main__":
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        application.add_handler(CommandHandler("editscript", editscript_command))
-    application.add_handler(CallbackQueryHandler(editscript_callback, pattern="^es_"))
 
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_handler))
     
 
 
@@ -140,5 +110,8 @@ if __name__ == "__main__":
     
     
     
-    application.add_handler(CommandHandler("ping", ping_command))
+        application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
+    application.add_handler(CommandHandler("request", request_command))
+    application.add_handler(CommandHandler("req", request_command))
+    application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^req_"))
     application.run_polling()

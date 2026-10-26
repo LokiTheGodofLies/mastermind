@@ -1,89 +1,97 @@
+import os
+import logging
+import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-import os
 
-REQUEST_QUIZ_QUESTIONS = [
-    ("1. Is casual chatting allowed in the request chat?", False),
-    ("2. Should you check if a file already exists before requesting?", True),
-    ("3. Can you post spam or external links here?", False),
-]
+logger = logging.getLogger(__name__)
+
+def check_database_for_book(query: str) -> bool:
+    """Checks if the book exists in database/files.db"""
+    db_path = "database/files.db"
+    if not os.path.exists(db_path):
+        return False
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = [t[0] for t in cursor.fetchall()]
+        
+        for table in tables:
+            cursor.execute(f"PRAGMA table_info({table});")
+            columns = [col[1] for col in cursor.fetchall()]
+            for col in columns:
+                if any(k in col.lower() for k in ['title', 'name', 'filename']):
+                    cursor.execute(f"SELECT 1 FROM {table} WHERE {col} LIKE ? LIMIT 1;", (f"%{query}%",))
+                    if cursor.fetchone():
+                        conn.close()
+                        return True
+        conn.close()
+    except Exception as e:
+        logger.error(f"Database check error: {e}")
+    return False
 
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "📥 **Mastermind Request Center**\n\n"
-        "To keep requests orderly and spam-free, "
-        "you must pass a quick verification quiz first."
-    )
-    keyboard = [[InlineKeyboardButton("🚀 Start Request Verification", callback_data="request_start_quiz")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    message = update.message
+    if not message:
+        return
 
-    if update.message:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    # Extract query from args or reply
+    query = ""
+    if context.args:
+        query = " ".join(context.args)
+    elif message.reply_to_message and message.reply_to_message.text:
+        query = message.reply_to_message.text.strip()
+
+    # IF SENT ALONE (No query and no reply): Trigger Verification / Join Request Flow
+    if not query:
+        text = (
+            "📥 <b>Mastermind Request Center</b>\n\n"
+            "To keep requests orderly and spam-free, would you like to join our dedicated request group?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("✅ Yes, Join", callback_data="req_join_yes"),
+             InlineKeyboardButton("❌ No", callback_data="req_join_no")]
+        ]
+        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        return
+
+    # IF SENT WITH A QUERY: Run Database -> Goodreads -> Interactive Flow
+    await message.reply_text(f"🔍 Searching database for <i>\"{query}\"</i>...", parse_mode='HTML')
+
+    if check_database_for_book(query):
+        await message.reply_text(
+            f"📚 <b>Book Already Available!</b>\n\n"
+            f"<i>\"{query}\"</i> is already in our library. You can search and download it directly in our Search Group or via Bot PM.",
+            parse_mode='HTML'
+        )
+        return
+
+    # TODO: Integrate your existing Goodreads fetch & preview buttons here
+    await message.reply_text(
+        f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{query}\"</i>...",
+        parse_mode='HTML'
+    )
 
 async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    if data == "request_start_quiz":
-        context.user_data["request_quiz_step"] = 0
-        await send_request_question(query, context, step=0)
-
-    elif data.startswith("request_ans_"):
-        user_step = context.user_data.get("request_quiz_step", 0)
-        user_choice = True if data == "request_ans_yes" else False
-        expected_ans = REQUEST_QUIZ_QUESTIONS[user_step][1]
-
-        if user_choice == expected_ans:
-            user_step += 1
-            context.user_data["request_quiz_step"] = user_step
-
-            if user_step < len(REQUEST_QUIZ_QUESTIONS):
-                await send_request_question(query, context, step=user_step)
-            else:
-                await finalize_request_quiz_success(query, context)
-        else:
-            context.user_data["request_quiz_step"] = 0
-            fail_text = (
-                "❌ **Incorrect Answer!**\n\n"
-                "Quiz reset from the beginning. Let's try again."
+    if data == "req_join_yes":
+        REQUEST_CHAT_ID = os.getenv('REQUEST_CHAT_ID')
+        try:
+            invite = await context.bot.create_chat_invite_link(
+                chat_id=int(REQUEST_CHAT_ID),
+                member_limit=1,
+                expire_date=int(query.message.date.timestamp()) + 3600
             )
-            keyboard = [[InlineKeyboardButton("🔄 Restart Quiz", callback_data="request_start_quiz")]]
-            await query.message.edit_text(fail_text, parse_mode="Markdown", reply_markup=reply_markup)
-
-async def send_request_question(query, context, step: int):
-    question_text, _ = REQUEST_QUIZ_QUESTIONS[step]
-    text = f"📝 **Request Verification ({step + 1}/{len(REQUEST_QUIZ_QUESTIONS)})**\n\n{question_text}"
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Yes", callback_data="request_ans_yes"),
-            InlineKeyboardButton("❌ No", callback_data="request_ans_no")
-        ]
-    ]
-    await query.message.edit_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-
-async def finalize_request_quiz_success(query, context):
-    request_chat_id = os.getenv("REQUEST_CHAT_ID")
-    if not request_chat_id:
-        await query.message.edit_text(
-            "✅ **Quiz Passed Successfully!**\n\n⚠️ Request chat ID is not configured on this bot instance.",
-            parse_mode="Markdown"
-        )
-        return
-
-    try:
-        invite_link = await context.bot.create_chat_invite_link(
-            chat_id=int(request_chat_id),
-            member_limit=1,
-            creates_join_request=False
-        )
-        success_text = (
-            "🎉 **Congratulations! You passed the verification.**\n\n"
-            "Here is your secure, single-use invite link to join the request group:"
-        )
-        keyboard = [[InlineKeyboardButton("🔗 Join Request Group", url=invite_link.invite_link)]]
-        await query.message.edit_text(success_text, parse_mode="Markdown", reply_markup=reply_markup)
-    except Exception as e:
-        await query.message.edit_text(f"✅ **Quiz Passed!**\n\nCould not generate link: {e}", parse_mode="Markdown")
+            await query.edit_message_text(
+                f"✅ <b>Verification Passed!</b>\n\nHere is your secure, single-use invite link to the Request Group:\n{invite.invite_link}",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to create invite link: {e}")
+            await query.edit_message_text("❌ Failed to generate invite link. Please contact an admin.")
+    elif data == "req_join_no":
+        await query.edit_message_text("❌ Request cancelled.")
