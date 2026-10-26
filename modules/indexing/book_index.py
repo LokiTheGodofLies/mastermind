@@ -1,124 +1,99 @@
 import os
 import logging
+import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Import from the separate files database module
 from modules.database.file_db import (
-    get_file_by_file_id_db,
+    get_file_by_unique_id_db,
     save_indexed_file_db,
 )
 
 logger = logging.getLogger(__name__)
 
-# Allowed ebook extensions
 SUPPORTED_EBOOK_EXTENSIONS = {'.epub', '.pdf', '.mobi'}
 
-# Storage group ID (configure via config or env)
-STORAGE_GROUP_ID = os.getenv("STORAGE_GROUP_ID", "-100123456789")
-
-
-async def fetch_and_format_book_caption(file_name: str) -> str:
-    """
-    Placeholder for the upcoming Book Caption Module.
-    Fetches book metadata and returns a formatted caption.
-    """
-    base_name = os.path.splitext(file_name)[0]
-    return f"📖 **Title:** {base_name}\n📚 **Format:** Ebook"
-
-
 async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Core indexing function for books:
-    1. Checks if file is sent/uploaded.
-    2. Validates unique file_id against the database.
-    3. Handles storage group synchronization (DB vs Storage).
-    4. Step 3: Checks ebook extensions (.epub, .pdf, .mobi) and triggers metadata/caption update.
-    """
-    message = update.message or update.channel_post
+    print("🔥 [DEBUG] handle_book_indexing triggered!")
+    
+    STORAGE_GROUP_ID = os.getenv("STORAGE_GROUP_ID")
+    if not STORAGE_GROUP_ID:
+        print("❌ [LOG ERROR] STORAGE_GROUP_ID is missing from environment!")
+        return
+
+    message = update.message or update.channel_post or update.effective_message
     if not message or not message.document:
+        print("❌ [LOG ERROR] No message or document found in update!")
         return
 
     document = message.document
     file_id = document.file_id
+    file_unique_id = document.file_unique_id
     file_name = document.file_name or "unknown_file"
     file_size = document.file_size or 0
     mime_type = document.mime_type or "document"
     _, ext = os.path.splitext(file_name.lower())
 
-    user = message.from_user
-    user_id = user.id if user else 0
-    user_title = user.full_name or user.username or "Unknown"
+    print(f"📄 [LOG INFO] Document received: {file_name} | Ext: {ext} | Size: {file_size}")
 
-    # Step 1 & 2: Check database and storage existence
-    db_record = get_file_by_file_id_db(file_id)
-    exists_in_db = db_record is not None
+    if ext not in SUPPORTED_EBOOK_EXTENSIONS:
+        print(f"❌ [LOG ERROR] Unsupported extension: {ext}")
+        if update.message:
+            await update.message.reply_text("❌ Unsupported format! Please send a valid ebook (.epub, .pdf, or .mobi).")
+        return
+
+    print("🔍 [DEBUG] Checking database for file_unique_id...")
+    db_record = get_file_by_unique_id_db(file_unique_id)
+    if db_record:
+        print("📚 [LOG INFO] File already exists in database. Skipping duplicate.")
+        if update.message:
+            await update.message.reply_text("📚 This ebook is already indexed and stored in the library!")
+        return
+
+    print(f"🚀 [LOG INFO] Attempting to send document with 15s timeout to chat ID: {STORAGE_GROUP_ID}")
+    print("⏳ [DEBUG] About to invoke asyncio.wait_for(context.bot.send_document)")
     
-    # Check if message is coming from or being sent to the storage group
-    is_in_storage_group = str(message.chat_id) == str(STORAGE_GROUP_ID)
-
-    forwarded_msg = message
-
-    # Logic: Syncing DB and Storage Group
-    if is_in_storage_group and not exists_in_db:
-        # File exists in storage group but not in DB -> Save to DB
-        logger.info(f"File found in storage group but missing in DB. Saving: {file_name}")
-        save_indexed_file_db(
-            file_id=file_id,
-            storage_message_id=message.message_id,
-            file_name=file_name,
-            file_size=file_size,
-            duration=0,
-            user_id=user_id,
-            user_title=user_title,
-            caption=message.caption or "",
-            extension=ext,
-            file_type=mime_type,
-            category="book"
-        )
-        exists_in_db = True
-
-    elif not is_in_storage_group and not exists_in_db:
-        # File sent to bot directly -> Forward/Copy to storage group, then save to DB
-        logger.info(f"Forwarding new book to storage group: {file_name}")
-        forwarded_msg = await context.bot.forward_message(
-            chat_id=STORAGE_GROUP_ID,
-            from_chat_id=message.chat_id,
-            message_id=message.message_id
-        )
-        save_indexed_file_db(
-            file_id=file_id,
-            storage_message_id=forwarded_msg.message_id,
-            file_name=file_name,
-            file_size=file_size,
-            duration=0,
-            user_id=user_id,
-            user_title=user_title,
-            caption=message.caption or "",
-            extension=ext,
-            file_type=mime_type,
-            category="book"
-        )
-
-    # Step 3: Check extension and update caption
-    if ext in SUPPORTED_EBOOK_EXTENSIONS:
-        logger.info(f"Processing supported ebook extension ({ext}): {file_name}")
+    try:
+        base_name = os.path.splitext(file_name)[0]
+        formatted_caption = f"📖 **Title:** {base_name}\n📚 **Format:** Ebook"
         
-        # Generate new caption using the book info fetcher hook
-        new_caption = await fetch_and_format_book_caption(file_name)
-        
-        # Determine target message to update caption on
-        target_chat_id = STORAGE_GROUP_ID if not is_in_storage_group else message.chat_id
-        target_message_id = forwarded_msg.message_id if not is_in_storage_group else message.message_id
-
-        try:
-            await context.bot.edit_message_caption(
-                chat_id=target_chat_id,
-                message_id=target_message_id,
-                caption=new_caption,
+        # Wrapped with asyncio.wait_for to prevent infinite hanging
+        target_msg = await asyncio.wait_for(
+            context.bot.send_document(
+                chat_id=STORAGE_GROUP_ID,
+                document=file_id,
+                caption=formatted_caption,
                 parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Failed to update book caption for {file_name}: {e}")
-    else:
-        logger.info(f"File extension {ext} is not a supported ebook format.")
+            ),
+            timeout=15.0
+        )
+        print(f"✅ [LOG SUCCESS] Successfully sent to storage group! Storage Message ID: {target_msg.message_id}")
+        
+        user = message.from_user
+        save_indexed_file_db(
+            file_unique_id=file_unique_id,
+            file_id=file_id,
+            storage_message_id=target_msg.message_id,
+            file_name=file_name,
+            file_size=file_size,
+            duration=0,
+            user_id=user.id if user else 0,
+            user_title=user.full_name or user.username or "Unknown",
+            caption=message.caption or "",
+            extension=ext,
+            file_type=mime_type,
+            category="book"
+        )
+        print("✅ [LOG SUCCESS] File recorded into SQLite database.")
+        
+        if update.message:
+            await update.message.reply_text("✅ Ebook successfully indexed and stored in the library!")
+            
+    except asyncio.TimeoutError:
+        print("❌ [LOG CRITICAL ERROR] send_document timed out after 15 seconds! Check your network or bot permissions in the storage group.")
+        if update.message:
+            await update.message.reply_text("❌ Error: Request to storage group timed out. Is the bot an admin in the storage group?")
+    except Exception as e:
+        print(f"❌ [LOG CRITICAL ERROR] Failed to send document via Telegram API: {e}")
+        if update.message:
+            await update.message.reply_text(f"❌ Error forwarding to storage group: {e}")

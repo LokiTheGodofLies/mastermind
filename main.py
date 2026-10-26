@@ -1,3 +1,4 @@
+import os
 import logging
 import asyncio
 from telegram import Update
@@ -10,6 +11,21 @@ from telegram.ext import (
     ContextTypes,
     ApplicationHandlerStop
 )
+
+def load_env():
+    """Reads environment variables securely from env.txt and loads them into os.environ"""
+    try:
+        with open("env.txt", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
+        print("✅ Environment variables loaded from env.txt successfully.")
+    except FileNotFoundError:
+        print("❌ Error: env.txt file not found!")
+
+load_env()
 
 # Import ban access check and middleware
 from modules.ban.ban import check_user_access
@@ -30,19 +46,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-
-
-def load_token():
-    """Reads the bot token securely from env.txt"""
-    try:
-        with open("env.txt", "r") as f:
-            for line in f:
-                if line.startswith("TELEGRAM_BOT_TOKEN="):
-                    return line.split("=", 1)[1].strip()
-    except FileNotFoundError:
-        print("Error: env.txt file not found! Please create it.")
-    return None
-
 
 async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Global middleware that intercepts all updates and blocks banned users/chats."""
@@ -66,9 +69,8 @@ async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_T
 
         raise ApplicationHandlerStop
 
-
 if __name__ == '__main__':
-    token = load_token()
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt")
         exit(1)
@@ -76,6 +78,7 @@ if __name__ == '__main__':
     setup_in_memory_logger()
     init_user_db()
     print("✅ Database and tables initialized successfully.")
+    print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {os.getenv('STORAGE_GROUP_ID')}")
 
     application = ApplicationBuilder().token(token).build()
     application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
