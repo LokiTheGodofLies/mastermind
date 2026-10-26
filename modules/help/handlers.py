@@ -32,6 +32,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("🔍 Search", callback_data="search_menu"), InlineKeyboardButton("📊 Stats", callback_data="stats_menu")],
+        [InlineKeyboardButton("📊 My Quota", callback_data="quota"), InlineKeyboardButton("👑 Bot Owner", callback_data="bot_owner")],
     ]
     
     if is_admin:
@@ -41,3 +42,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await message.reply_text(text=help_text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def help_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    data = query.data
+
+    if data == "quota":
+        await query.message.reply_text("📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• Status: Active", parse_mode="HTML")
+    elif data == "bot_owner":
+        await query.message.reply_text("👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.", parse_mode="HTML")
