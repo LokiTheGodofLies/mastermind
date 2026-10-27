@@ -65,7 +65,7 @@ DEFAULT_TEMPLATES = {
         "module": "start",
         "title": "START MESSAGE",
         "description": "WHEN USER GIVE START COMMAND OR START THE BOT THEN BOT REPLY START MESSAGE. IN START MESSAGE BOT OWNER CAN SET START MESSAGE TEXT, PICTURE AND BUTTON.",
-        "text": "Hi <b>{user_name}</b>, welcome to <b>{bot_title}</b>! 👋\n\n📚 Search ebooks & audiobooks, request missing titles, and earn bonus quotas by inviting friends.\nTap the buttons below to explore features or open the Help Menu.",
+        "text": "Hi <b>{user_name}</b>, welcome to <b>{bot_title}</b>! 👋\n\n📚 Search ebooks & audiobooks, request missing titles, and earn bonus quotas by inviting friends.\nTap the buttons belo[...]
     },
     "about": {
         "module": "start",
@@ -80,7 +80,7 @@ DEFAULT_TEMPLATES = {
         "module": "search",
         "title": "FILE DELIVERY REPLY",
         "description": "MESSAGE SENT WHEN HELPER BOT DELIVERS A FILE.",
-        "text": "✅ <b>File Delivered!</b>\n\n📁 <b>File:</b> <code>{file_name}</code>\n📢 <b>Channel:</b> {channel_link}\n🔗 <b>Message:</b> <a href=\"{message_link}\">Open File (#{message_id})</a>\n\n⏳ <i>Auto-deletes in 2 minutes.</i>",
+        "text": "✅ <b>File Delivered!</b>\n\n📁 <b>File:</b> <code>{file_name}</code>\n📢 <b>Channel:</b> {channel_link}\n🔗 <b>Message:</b> <a href=\"{message_link}\">Open File (#{message_id}[...]",
     },
     "helper_not_started": {
         "module": "search",
@@ -98,17 +98,17 @@ DEFAULT_TEMPLATES = {
         "module": "quota",
         "title": "QUOTA STATUS MESSAGE",
         "description": "DISPLAYS REMAINING DAILY QUOTAS.",
-        "text": "👤 <b>Your Role:</b> <code>{role}</code>\n\n🔍 <b>Searches Left:</b> <code>{searches_left} / {searches_limit}</code>\n📥 <b>Requests Left:</b> <code>{requests_left} / {requests_limit}</code>",
+        "text": "👤 <b>Your Role:</b> <code>{role}</code>\n\n🔍 <b>Searches Left:</b> <code>{searches_left} / {searches_limit}</code>\n📥 <b>Requests Left:</b> <code>{requests_left} / {requests_[...]",
     },
     "referral_message": {
         "module": "quota",
         "title": "REFERRAL DASHBOARD",
         "description": "SHOWN ON /refer COMMAND.",
-        "text": "🔗 <b>Your Referral Dashboard</b>\n\n📌 <b>Link:</b> <code>{referral_link}</code>\n📊 <b>Invited:</b> <code>{total_invites}</code> | 🎁 <b>Bonus:</b> <code>+{bonus_earned}</code>",
+        "text": "🔗 <b>Your Referral Dashboard</b>\n\n📌 <b>Link:</b> <code>{referral_link}</code>\n📊 <b>Invited:</b> <code>{total_invites}</code> | 🎁 <b>Bonus:</b> <code>+{bonus_earned}</co[...]",
     },
     "index_caption": {"module": "indexing", "title": "STORAGE INDEX CAPTION", "description": "CAPTION FOR INDEXED FILES.", "text": ""},
-    "role_updated": {"module": "roles", "title": "ROLE ASSIGNMENT MESSAGE", "description": "SHOWN WHEN ROLE IS UPDATED.", "text": "🎖 <b>Role Updated!</b>\n👤 <b>User:</b> {target_user}\n🛡 <b>Role:</b> <code>{new_role}</code> (Quota: <code>{new_quota}</code>)"},
-    "startup_log": {"module": "logs", "title": "STARTUP LOG MESSAGE", "description": "BOT STARTUP NOTIFICATION.", "text": "🔄 <b>Bot Restarted Successfully</b>\n🤖 <b>{bot_title}</b> is online at {date} {time}"},
+    "role_updated": {"module": "roles", "title": "ROLE ASSIGNMENT MESSAGE", "description": "SHOWN WHEN ROLE IS UPDATED.", "text": "🎖 <b>Role Updated!</b>\n👤 <b>User:</b> {target_user}\n🛡 <b>R[...]",
+    "startup_log": {"module": "logs", "title": "STARTUP LOG MESSAGE", "description": "BOT STARTUP NOTIFICATION.", "text": "🔄 <b>Bot Restarted Successfully</b>\n🤖 <b>{bot_title}</b> is online at [...]",
     "fsub_message": {
         "module": "fsub",
         "title": "FORCE SUBSCRIBE MESSAGE",
@@ -452,28 +452,30 @@ EXTENDED_ENV_ALIASES = {
     "helper_bot_tokens": ("HELPER_BOT_TOKENS", "DELIVERY_BOT_TOKENS", "FILE_BOT_TOKENS", "BOT_TOKENS"),
 }
 
-def _get_env_val(key: str, fallback_env: str = None):
+EXTENDED_DEFAULT_CONFIGS = {
+    "request_channel_id": ("-1004447576324", "channel", "Dedicated Request Updates Channel ID"),
+    "index_channel_id": ("-1004343321416", "channel", "Dedicated Index Updates Channel ID"),
+    "request_log_topic_id": ("30", "int", "Request logs topic ID in Log Group"),
+    "error_log_topic_id": ("33", "int", "Errors topic ID in Log Group"),
+    "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
+    "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
+}
+
+
+def _get_extended_env_val(key: str, fallback_env: str = None):
     names = [key.upper()]
     if fallback_env:
         names.append(fallback_env)
-    names.extend(ENV_ALIASES.get(key, ()))
+    names.extend(EXTENDED_ENV_ALIASES.get(key, ()))
     for n in names:
         v = os.getenv(n)
         if v is not None and str(v).strip() != "":
             return str(v).strip()
     return None
 
-DEFAULT_CONFIGS = {
-    "request_channel_id": ("-1004447576324", "channel", "Dedicated Request Updates Channel ID"),
-    "index_channel_id": ("-1004343321416", "channel", "Dedicated Index Updates Channel ID"),
-    "request_log_topic_id": ("30", "int", "Request logs topic ID in Log Group"),
-    "error_log_topic_id": ("33", "int", "Errors topic ID in Log Group"),
-        "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
-    "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
-}
-
 
 def init_group_topics_table():
+    DEFAULT_CONFIGS.update(EXTENDED_DEFAULT_CONFIGS)
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
@@ -488,8 +490,7 @@ def init_group_topics_table():
     """)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in EXTENDED_DEFAULT_CONFIGS.items():
-        DEFAULT_CONFIGS[k] = (val, vtype, desc)
-        env_val = _get_env_val(k)
+        env_val = _get_extended_env_val(k)
         c.execute("""
             INSERT INTO config (key, value, type, updated_by, updated_at, description)
             VALUES (?, ?, ?, 0, ?, ?)
