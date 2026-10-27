@@ -8,21 +8,42 @@ DB_DIR = "database"
 DB_PATH = os.path.join(DB_DIR, "config.db")
 _CONFIG_CACHE = {}
 
+ENV_ALIASES = {
+    "general_log_group_id": ("GENERAL_LOG_GROUP_ID", "LOGGER_GROUP_ID"),
+    "admin_log_group_id": ("ADMIN_LOG_GROUP_ID", "LOGGER_GROUP_ID", "GENERAL_LOG_GROUP_ID"),
+    "request_log_chat_id": ("REQUEST_LOG_CHAT_ID", "REQUEST_CHANNEL_ID"),
+    "request_channel_id": ("REQUEST_CHANNEL_ID", "REQUEST_LOG_CHAT_ID"),
+    "storage_channel_id": ("STORAGE_CHANNEL_ID", "STORAGE_GROUP_ID"),
+    "posting_channel_id": ("POSTING_CHANNEL_ID", "SEARCH_CHAT_ID"),
+    "helper_bot_tokens": ("HELPER_BOT_TOKENS", "DELIVERY_BOT_TOKENS", "FILE_BOT_TOKENS", "BOT_TOKENS"),
+}
+
+def _get_env_val(key: str, fallback_env: str = None):
+    names = [key.upper()]
+    if fallback_env:
+        names.append(fallback_env)
+    names.extend(ENV_ALIASES.get(key, ()))
+    for n in names:
+        v = os.getenv(n)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return None
+
 DEFAULT_CONFIGS = {
     "bot_title": ("Mastermind Library Bot", "text", "Display title of the bot"),
     "bot_username": ("MastermindBot", "text", "Bot username without @"),
-    "helper_bot_username": ("MastermindHelperBot", "text", "Helper bot username without @"),
+    "helper_bot_username": ("RickRiordanBot", "text", "Helper bot username without @"),
     "storage_channel_id": ("-1003511375054", "channel", "Permanent file storage channel/group ID"),
     "posting_channel_id": ("-1003936877675", "channel", "Temporary file delivery posting channel ID"),
     "request_log_chat_id": ("-1004447576324", "channel", "Channel/group ID where book requests are posted"),
-    "admin_log_group_id": ("-1003936877675", "channel", "Admin & moderation audit log group ID"),
-    "general_log_group_id": ("-1003936877675", "channel", "General fallback log group ID"),
-    "support_chat_id": ("-1004496093454", "channel", "Support group ID"),
+    "admin_log_group_id": ("-1004293995714", "channel", "Admin & moderation audit log group ID"),
+    "general_log_group_id": ("-1004293995714", "channel", "General fallback log group ID"),
+    "support_chat_id": ("-1004299811408", "channel", "Support group ID"),
     "general_topic_id": ("1", "int", "General topic thread ID"),
-    "index_log_topic_id": ("18", "int", "Indexing & upload approval log topic ID"),
-    "group_log_topic_id": ("5", "int", "Group events log topic ID"),
-    "channel_log_topic_id": ("8", "int", "Channel events log topic ID"),
-    "user_log_topic_id": ("11", "int", "User events log topic ID"),
+    "index_log_topic_id": ("20", "int", "Indexing & upload approval log topic ID"),
+    "group_log_topic_id": ("23", "int", "Group events log topic ID"),
+    "channel_log_topic_id": ("26", "int", "Channel events log topic ID"),
+    "user_log_topic_id": ("2", "int", "User events log topic ID"),
     "max_index_batch": ("10", "int", "Max files processed per indexing batch"),
     "index_sleep_seconds": ("10", "int", "Cooldown sleep seconds after each 10-file batch"),
     "file_delete_after_seconds": ("120", "int", "Auto-delete timer (seconds) for temporary posting channel files"),
@@ -162,11 +183,13 @@ def init_config_db():
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in DEFAULT_CONFIGS.items():
-        env_val = os.getenv(k.upper())
-        cursor.execute(
-            "INSERT OR IGNORE INTO config (key, value, type, updated_by, updated_at, description) VALUES (?, ?, ?, 0, ?, ?)",
-            (k, str(env_val if env_val is not None else val), vtype, now_str, desc),
-        )
+        env_val = _get_env_val(k)
+        cursor.execute("""
+            INSERT INTO config (key, value, type, updated_by, updated_at, description)
+            VALUES (?, ?, ?, 0, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+        """, (k, str(env_val if env_val is not None else val), vtype, now_str, desc))
     for tname, tdata in DEFAULT_TEMPLATES.items():
         cursor.execute(
             "INSERT OR IGNORE INTO templates (name, module, title, description, text, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -191,15 +214,16 @@ def get_config(key, default=None, fallback_env=None):
     init_config_db()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT value FROM config WHERE key = ?", (key,))
+    cursor.execute("SELECT value, updated_by FROM config WHERE key = ?", (key,))
     row = cursor.fetchone()
     conn.close()
+    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
+        return row["value"]
+    env_val = _get_env_val(key, fallback_env)
+    if env_val is not None:
+        return env_val
     if row is not None and row["value"] not in (None, ""):
         return row["value"]
-    if fallback_env and os.getenv(fallback_env):
-        return os.getenv(fallback_env)
-    if os.getenv(key.upper()):
-        return os.getenv(key.upper())
     if key in DEFAULT_CONFIGS:
         return DEFAULT_CONFIGS[key][0]
     return default
@@ -418,11 +442,32 @@ init_config_db()
 
 
 # --- Multi-Group Topics & Extended Log Topic Support ---
-EXTENDED_DEFAULT_CONFIGS = {
+EXTENDED_ENV_ALIASES = {
+    "general_log_group_id": ("GENERAL_LOG_GROUP_ID", "LOGGER_GROUP_ID"),
+    "admin_log_group_id": ("ADMIN_LOG_GROUP_ID", "LOGGER_GROUP_ID", "GENERAL_LOG_GROUP_ID"),
+    "request_log_chat_id": ("REQUEST_LOG_CHAT_ID", "REQUEST_CHANNEL_ID"),
+    "request_channel_id": ("REQUEST_CHANNEL_ID", "REQUEST_LOG_CHAT_ID"),
+    "storage_channel_id": ("STORAGE_CHANNEL_ID", "STORAGE_GROUP_ID"),
+    "posting_channel_id": ("POSTING_CHANNEL_ID", "SEARCH_CHAT_ID"),
+    "helper_bot_tokens": ("HELPER_BOT_TOKENS", "DELIVERY_BOT_TOKENS", "FILE_BOT_TOKENS", "BOT_TOKENS"),
+}
+
+def _get_env_val(key: str, fallback_env: str = None):
+    names = [key.upper()]
+    if fallback_env:
+        names.append(fallback_env)
+    names.extend(ENV_ALIASES.get(key, ()))
+    for n in names:
+        v = os.getenv(n)
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    return None
+
+DEFAULT_CONFIGS = {
     "request_channel_id": ("-1004447576324", "channel", "Dedicated Request Updates Channel ID"),
-    "index_channel_id": ("", "channel", "Dedicated Index Updates Channel ID"),
-    "request_log_topic_id": ("0", "int", "Request logs topic ID in Log Group"),
-    "error_log_topic_id": ("0", "int", "Errors topic ID in Log Group"),
+    "index_channel_id": ("-1004343321416", "channel", "Dedicated Index Updates Channel ID"),
+    "request_log_topic_id": ("30", "int", "Request logs topic ID in Log Group"),
+    "error_log_topic_id": ("33", "int", "Errors topic ID in Log Group"),
         "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
     "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
 }
@@ -444,11 +489,13 @@ def init_group_topics_table():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in EXTENDED_DEFAULT_CONFIGS.items():
         DEFAULT_CONFIGS[k] = (val, vtype, desc)
-        env_val = os.getenv(k.upper())
-        c.execute(
-            "INSERT OR IGNORE INTO config (key, value, type, updated_by, updated_at, description) VALUES (?, ?, ?, 0, ?, ?)",
-            (k, str(env_val if env_val is not None else val), vtype, now_str, desc),
-        )
+        env_val = _get_env_val(k)
+        c.execute("""
+            INSERT INTO config (key, value, type, updated_by, updated_at, description)
+            VALUES (?, ?, ?, 0, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+        """, (k, str(env_val if env_val is not None else val), vtype, now_str, desc))
     conn.commit()
     conn.close()
 
