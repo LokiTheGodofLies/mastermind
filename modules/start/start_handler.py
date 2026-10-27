@@ -21,6 +21,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     referral_notice = ""
     args = context.args
+    if args and args[0].startswith("dl_"):
+        try:
+            file_row_id = int(args[0].replace("dl_", ""))
+            from modules.search.handlers import deliver_file_to_user
+            await deliver_file_to_user(target_msg, user, file_row_id, context)
+            return
+        except Exception as e:
+            await target_msg.reply_text(f"❌ Error delivering file: {e}")
+            return
+
     if args and args[0].startswith("ref_"):
         try:
             ref_id = int(args[0].split("_", 1)[1])

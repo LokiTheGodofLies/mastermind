@@ -1,3 +1,4 @@
+from server import start_server_in_background
 import os
 import asyncio
 import logging
@@ -16,18 +17,18 @@ from modules.database.user_db import init_user_db
 from modules.database.file_db import init_file_db
 from modules.log.logger import setup_in_memory_logger
 from modules.log.startup_log import send_startup_notification
-from modules.log.handlers import log_command, handle_my_chat_member
+from modules.log.handlers import log_command, settopic_command, enforce_group_topic_middleware, handle_my_chat_member
 from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command, enforce_ban_middleware
 from modules.fsub.handlers import enforce_fsub_middleware, handle_chat_join_request, fsub_verify_callback
 from modules.start.start_handler import start_command, menu_callback_router
 from modules.help.handlers import help_command, adminhelp_command
 from modules.roles.handlers import addvol_command, addprom_command, addmod_command, addadmin_command
 from modules.allowance.allowance import quota_command, gift_command, refer_command
-from modules.search.handlers import search_command, search_callback_handler
+from modules.search.handlers import search_command, searchebook_command, searchaudiobook_command, search_callback_handler
 from modules.request.handlers import request_command, request_callback_handler
 from modules.indexing.book_index import handle_book_indexing, index_command, indexing_callback_handler
 from modules.editscript.handlers import (
-    customize_command, editscript_callback, reloadconfig_command,
+    customize_command, editscript_callback, reloadconfig_command, restart_command, redeploy_command,
     setconfig_command, getconfig_command, template_cli_command,
 )
 from modules.broadcast.handlers import broadcast_command, broadcast_confirm_command, broadcast_callback_handler
@@ -69,17 +70,22 @@ def main():
 
     app = ApplicationBuilder().token(token).build()
 
-    # Middlewares: Group -2 Ban check, Group -1 Force Subscribe check
-    app.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-2)
+    # Middlewares: Group -3 Ban check, Group -2 Group Topic filter, Group -1 Force Subscribe
+    app.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-3)
+    app.add_handler(MessageHandler(filters.ALL, enforce_group_topic_middleware), group=-2)
+    app.add_handler(CallbackQueryHandler(enforce_group_topic_middleware), group=-2)
     app.add_handler(MessageHandler(filters.ALL, enforce_fsub_middleware), group=-1)
     app.add_handler(ChatJoinRequestHandler(handle_chat_join_request))
     app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
-    # User Commands
+    # User & Group Commands
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("search", search_command))
+    app.add_handler(CommandHandler("searchebook", searchebook_command))
+    app.add_handler(CommandHandler("searchaudiobook", searchaudiobook_command))
     app.add_handler(CommandHandler(["request", "req"], request_command))
+    app.add_handler(CommandHandler("settopic", settopic_command))
     app.add_handler(CommandHandler("quota", quota_command))
     app.add_handler(CommandHandler(["refer", "ref"], refer_command))
     app.add_handler(CommandHandler("support", support_command))
@@ -104,6 +110,8 @@ def main():
     # Config, Customize & Broadcast Commands
     app.add_handler(CommandHandler(["customize", "editscript", "config", "showconfig"], customize_command))
     app.add_handler(CommandHandler("reloadconfig", reloadconfig_command))
+    app.add_handler(CommandHandler("restart", restart_command))
+    app.add_handler(CommandHandler("redeploy", redeploy_command))
     app.add_handler(CommandHandler("setconfig", setconfig_command))
     app.add_handler(CommandHandler("getconfig", getconfig_command))
     app.add_handler(CommandHandler(["edittext", "setmedia", "removemedia", "addbutton", "removebutton", "listtemplates", "showtemplate"], template_cli_command))
@@ -113,7 +121,7 @@ def main():
     # Callback Routers
     app.add_handler(CallbackQueryHandler(fsub_verify_callback, pattern=r"^fsub_"))
     app.add_handler(CallbackQueryHandler(menu_callback_router, pattern=r"^(help_button|help_menu|help_open_admin|help_sec_|adm_sec_|search_menu|stats_menu|start_menu|quota|quota_menu|bot_owner)"))
-    app.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|search_cancel|noop)"))
+    app.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|spg\||sendall\||search_cancel|noop)"))
     app.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     app.add_handler(CallbackQueryHandler(indexing_callback_handler, pattern=r"^idx_"))
     app.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^(cust_|es_)"))
@@ -128,6 +136,7 @@ def main():
         await send_startup_notification(application)
 
     app.post_init = post_init
+    start_server_in_background()
     print("🤖 Mastermind Library Bot is online and polling...")
     app.run_polling()
 
