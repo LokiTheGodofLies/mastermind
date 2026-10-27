@@ -182,3 +182,30 @@ def reset_file_db():
 
 init_file_db()
 _init_extra_file_tables()
+
+
+def search_books_by_mode_db(keyword: str, mode: str = "all", limit: int = 80) -> list:
+    """Matches keyword in book title, author name, or series name (plus filename), filtered by ebook or audiobook."""
+    conn = get_connection()
+    q = f"%{keyword.strip()}%"
+    audio_exts = (".mp3", ".m4b", ".aax", "mp3", "m4b", "aax")
+
+    rows = conn.execute("""
+        SELECT * FROM indexed_files
+        WHERE (title LIKE ? OR author LIKE ? OR series LIKE ? OR file_name LIKE ? OR caption LIKE ?)
+        ORDER BY id DESC LIMIT ?
+    """, (q, q, q, q, q, limit)).fetchall()
+    conn.close()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        ext = (d.get("extension") or "").lower()
+        cat = (d.get("category") or "").lower()
+        is_audio = ext in audio_exts or cat == "audiobook"
+        if mode == "ebook" and is_audio:
+            continue
+        if mode == "audiobook" and not is_audio:
+            continue
+        results.append(d)
+    return results

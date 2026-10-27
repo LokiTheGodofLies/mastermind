@@ -19,12 +19,12 @@ USER_HELP_MAIN = (
 
 USER_HELP_SECTIONS = {
     "help_sec_search": (
-        "🔍 <b>How to Search & Use Result Buttons</b>\n\n"
-        "1. Type <code>/search &lt;keyword&gt;</code> (or send a book title).\n"
-        "2. The bot searches indexed files across <b>file name, caption, metadata, title, author, narrator, series, description, and keywords</b>.\n"
-        "3. Matching results appear as numbered inline buttons with rich metadata (Narrator, Length, Release Date, Publisher, Size).\n"
-        "4. <b>Important:</b> You must start the <b>Helper Bot</b> (@{helper_bot_username}) first before clicking a result.\n"
-        "5. Tapping a result button triggers the Helper Bot to post the file to the temporary posting channel and mirror it to your DM."
+        "🔍 <b>How to Search & Download Files</b>\n\n"
+        "• <code>/search &lt;keyword&gt;</code> — Search all books & audiobooks\n"
+        "• <code>/searchebook &lt;keyword&gt;</code> — Search eBooks only 📚\n"
+        "• <code>/searchaudiobook &lt;keyword&gt;</code> — Search Audiobooks only 🎧\n\n"
+        "Each result shows <b>Book Title, Series Name, Author Name, and Extension</b> with a clickable <b>download</b> link.\n"
+        "Use <b>📚</b> (eBooks only), <b>📤 Send All</b> (send full page), or <b>🎧</b> (Audiobooks only) below the results!"
     ),
     "help_sec_requests": (
         "📥 <b>How to Request a Book / Audiobook</b>\n\n"
@@ -61,6 +61,15 @@ USER_HELP_SECTIONS.update({
         "2. When you click a search result button, the Helper Bot posts the file to the <b>File Posting Channel</b> and sends you the channel link + message link.\n"
         "3. If your DM session is active, the Helper Bot also mirrors the file directly to your DM.\n"
         "4. The file in the Posting Channel is <b>auto-deleted after 2 minutes</b> to keep storage clean."
+    ),
+        "help_sec_groups": (
+        "👥 <b>Using the Bot in Your Own Group (Groups Help)</b>\n\n"
+        "Anyone can add <b>{bot_title}</b> to their own Telegram group to search and request books & audiobooks!\n\n"
+        "🔹 <b>Topic Setup for Group Admins (<code>/settopic</code>):</b>\n"
+        "If your group uses Topics (like <i>Beyond the Shelf</i>), any <b>Group Admin</b> can restrict the bot to specific topics:\n"
+        "• <code>/settopic search</code> — Run inside your Search topic so only search commands (<code>/search</code>, <code>/searchebook</code>, <code>/searchaudiobook</code>) work there.\n"
+        "• <code>/settopic request</code> — Run inside your Request topic so only <code>/request</code> commands work there.\n"
+        "• Once set, the bot will stay completely silent in all other topics of your group!"
     ),
     "help_sec_roles": (
         "🛡 <b>Roles, Quotas & Permissions</b>\n\n"
@@ -130,7 +139,8 @@ def build_user_help_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔍 Search", callback_data="help_sec_search"), InlineKeyboardButton("📥 Requests", callback_data="help_sec_requests")],
         [InlineKeyboardButton("📤 Uploads", callback_data="help_sec_uploads"), InlineKeyboardButton("📊 Quota", callback_data="help_sec_quota")],
         [InlineKeyboardButton("🔗 Referral", callback_data="help_sec_referral"), InlineKeyboardButton("⏳ Temporary Files", callback_data="help_sec_tempfiles")],
-        [InlineKeyboardButton("🛡 Roles", callback_data="help_sec_roles"), InlineKeyboardButton("✨ Formatting & Buttons", callback_data="help_sec_formatting")],
+        [InlineKeyboardButton("🛡 Roles", callback_data="help_sec_roles"), InlineKeyboardButton("👥 Groups Help", callback_data="help_sec_groups")],
+        [InlineKeyboardButton("✨ Formatting & Buttons", callback_data="help_sec_formatting")],
     ]
     if is_admin:
         kb.append([InlineKeyboardButton("👑 Admin Commands (/adminhelp)", callback_data="help_open_admin")])

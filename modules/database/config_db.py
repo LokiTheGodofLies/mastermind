@@ -415,3 +415,67 @@ def reset_channels_and_groups_db():
 
 
 init_config_db()
+
+
+# --- Multi-Group Topics & Extended Log Topic Support ---
+EXTENDED_DEFAULT_CONFIGS = {
+    "request_channel_id": ("-1004447576324", "channel", "Dedicated Request Updates Channel ID"),
+    "index_channel_id": ("", "channel", "Dedicated Index Updates Channel ID"),
+    "request_log_topic_id": ("0", "int", "Request logs topic ID in Log Group"),
+    "error_log_topic_id": ("0", "int", "Errors topic ID in Log Group"),
+    "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
+}
+
+
+def init_group_topics_table():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS group_topics (
+            chat_id INTEGER PRIMARY KEY,
+            chat_title TEXT DEFAULT '',
+            search_topic_id INTEGER DEFAULT 0,
+            request_topic_id INTEGER DEFAULT 0,
+            updated_by INTEGER DEFAULT 0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for k, (val, vtype, desc) in EXTENDED_DEFAULT_CONFIGS.items():
+        DEFAULT_CONFIGS[k] = (val, vtype, desc)
+        env_val = os.getenv(k.upper())
+        c.execute(
+            "INSERT OR IGNORE INTO config (key, value, type, updated_by, updated_at, description) VALUES (?, ?, ?, 0, ?, ?)",
+            (k, str(env_val if env_val is not None else val), vtype, now_str, desc),
+        )
+    conn.commit()
+    conn.close()
+
+
+def set_group_topic_db(chat_id: int, chat_title: str, topic_type: str, thread_id: int, updated_by: int = 0):
+    init_group_topics_table()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    col = "search_topic_id" if topic_type == "search" else "request_topic_id"
+    conn = get_connection()
+    conn.execute(f"""
+        INSERT INTO group_topics (chat_id, chat_title, {col}, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            chat_title = excluded.chat_title,
+            {col} = excluded.{col},
+            updated_by = excluded.updated_by,
+            updated_at = excluded.updated_at
+    """, (int(chat_id), chat_title or "Group", int(thread_id), int(updated_by), now_str))
+    conn.commit()
+    conn.close()
+
+
+def get_group_topics_db(chat_id: int) -> dict | None:
+    init_group_topics_table()
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM group_topics WHERE chat_id = ?", (int(chat_id),)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+init_group_topics_table()
