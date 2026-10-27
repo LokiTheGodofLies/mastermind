@@ -41,7 +41,8 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
     bot_uname = (context.bot.username or get_config("bot_username", "MastermindBot")).lstrip("@")
 
     mode_badge = {"all": "All Formats (📚 + 🎧)", "ebook": "eBooks Only 📚", "audiobook": "Audiobooks Only 🎧"}.get(mode, "All")
-    q_short = search_term[:20]
+    q_short = search_term.encode("utf-8")[:20].decode("utf-8", errors="ignore")
+    q_req = search_term.encode("utf-8")[:34].decode("utf-8", errors="ignore")
 
     kb = []
     if total > 0:
@@ -77,8 +78,8 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
         )
     else:
         kb.append([
-            InlineKeyboardButton("📚", callback_data=f"spg|ebook|1|{q_short}"),
-            InlineKeyboardButton("🎧", callback_data=f"spg|audiobook|1|{q_short}"),
+            InlineKeyboardButton("📚" + (" ✓" if mode == "ebook" else ""), callback_data=f"spg|ebook|1|{q_short}"),
+            InlineKeyboardButton("🎧" + (" ✓" if mode == "audiobook" else ""), callback_data=f"spg|audiobook|1|{q_short}"),
         ])
         txt = (
             f"🔍 <b>Search Results — {html.escape(bot_title)}</b>\n"
@@ -88,7 +89,7 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
 
     kb.append([
         InlineKeyboardButton("❌ Cancel", callback_data="search_cancel"),
-        InlineKeyboardButton("📝 Request Book", callback_data=f"req_from_search_{search_term[:35]}"),
+        InlineKeyboardButton("📝 Request Book", callback_data=f"req_from_search|{mode}|{q_req}"),
     ])
 
     if update.callback_query:
