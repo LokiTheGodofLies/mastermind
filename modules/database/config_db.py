@@ -423,6 +423,7 @@ EXTENDED_DEFAULT_CONFIGS = {
     "index_channel_id": ("", "channel", "Dedicated Index Updates Channel ID"),
     "request_log_topic_id": ("0", "int", "Request logs topic ID in Log Group"),
     "error_log_topic_id": ("0", "int", "Errors topic ID in Log Group"),
+        "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
     "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
 }
 

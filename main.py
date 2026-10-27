@@ -28,7 +28,7 @@ from modules.search.handlers import search_command, searchebook_command, searcha
 from modules.request.handlers import request_command, request_callback_handler
 from modules.indexing.book_index import handle_book_indexing, index_command, indexing_callback_handler
 from modules.editscript.handlers import (
-    customize_command, editscript_callback, reloadconfig_command,
+    customize_command, editscript_callback, reloadconfig_command, restart_command, redeploy_command,
     setconfig_command, getconfig_command, template_cli_command,
 )
 from modules.broadcast.handlers import broadcast_command, broadcast_confirm_command, broadcast_callback_handler
@@ -110,6 +110,8 @@ def main():
     # Config, Customize & Broadcast Commands
     app.add_handler(CommandHandler(["customize", "editscript", "config", "showconfig"], customize_command))
     app.add_handler(CommandHandler("reloadconfig", reloadconfig_command))
+    app.add_handler(CommandHandler("restart", restart_command))
+    app.add_handler(CommandHandler("redeploy", redeploy_command))
     app.add_handler(CommandHandler("setconfig", setconfig_command))
     app.add_handler(CommandHandler("getconfig", getconfig_command))
     app.add_handler(CommandHandler(["edittext", "setmedia", "removemedia", "addbutton", "removebutton", "listtemplates", "showtemplate"], template_cli_command))

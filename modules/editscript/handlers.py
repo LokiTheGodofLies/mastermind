@@ -321,8 +321,26 @@ async def _handle_cust_template_and_db_callbacks(q, d: str, uid: int, context: C
         )
     elif d == "cust_sys_restart":
         reload_config_cache()
-        await q.answer("🔄 Configurations hot-reloaded!", show_alert=True)
-        await q.message.edit_text("✅ <b>Bot Configuration & Templates Reloaded Successfully!</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ BACK", callback_data="cust_open_main")]]))
+        await q.answer("Restart & Redeploy Menu")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Hot-Reload Configs", callback_data="cust_do_hotreload")],
+            [InlineKeyboardButton("🚀 Redeploy on Render (Webhook)", callback_data="cust_do_redeploy")],
+            [InlineKeyboardButton("♻️ Hard Restart Bot Process", callback_data="cust_do_hardrestart")],
+            [InlineKeyboardButton("🔗 Edit Deploy Hook URL", callback_data="cust_var_render_deploy_hook_url")],
+            [InlineKeyboardButton("≼ BACK", callback_data="cust_open_main")],
+        ])
+        await q.message.edit_text("⚙️ <b>Restart & Render Redeploy Hub</b>\n\nSelect how you want to reload or redeploy the bot:", parse_mode="HTML", reply_markup=kb)
+    elif d == "cust_do_hotreload":
+        reload_config_cache()
+        await q.answer("✅ Configurations & templates hot-reloaded!", show_alert=True)
+    elif d == "cust_do_redeploy":
+        await q.answer("🚀 Calling Render Deploy Hook...")
+        ok, msg = await trigger_render_redeploy()
+        await q.message.edit_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ BACK", callback_data="cust_sys_restart")]]))
+    elif d == "cust_do_hardrestart":
+        await q.answer("♻️ Restarting bot process...", show_alert=True)
+        await q.message.edit_text("♻️ <b>Restarting bot process now...</b>", parse_mode="HTML")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
     elif d.startswith("cust_ask_rst_"):
         kind = d.replace("cust_ask_rst_", "")
         await q.answer()
@@ -359,8 +377,12 @@ async def setconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.effective_message.reply_text("⚠️ <b>Usage:</b> <code>/setconfig &lt;key&gt; &lt;value&gt;</code>", parse_mode="HTML")
         return
-    k, v = context.args[0], " ".join(context.args[1:])
+    k, v = context.args[0].lower(), " ".join(context.args[1:])
     set_config(k, v, updated_by=update.effective_user.id)
+    if k in ("logger_group_id", "general_log_group_id", "admin_log_group_id"):
+        for alias in ("logger_group_id", "general_log_group_id", "admin_log_group_id"):
+            set_config(alias, v, updated_by=update.effective_user.id)
+    reload_config_cache()
     await update.effective_message.reply_text(f"✅ Set <code>{html.escape(k)}</code> = <code>{html.escape(v)}</code>", parse_mode="HTML")
 
 
@@ -411,3 +433,150 @@ async def template_cli_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"✅ Removed button #{args[1]} from <code>{args[0]}</code>.", parse_mode="HTML")
     else:
         await customize_command(update, context)
+
+
+async def trigger_render_redeploy() -> tuple:
+    """Calls the configured Render Deploy Hook URL to trigger a fresh Render deployment."""
+    import aiohttp
+    hook_url = get_config("render_deploy_hook_url", fallback_env="RENDER_DEPLOY_HOOK_URL")
+    if not hook_url or not hook_url.startswith("http"):
+        return False, "⚠️ No valid `render_deploy_hook_url` configured. Set it via `/setconfig render_deploy_hook_url <url>`."
+    try:
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(hook_url) as resp:
+                body = await resp.text()
+                if resp.status in (200, 201, 202):
+                    return True, f"🚀 <b>Render Redeploy Triggered Successfully!</b> (HTTP {resp.status})\nRender is now pulling the latest commit and redeploying your service."
+                return False, f"⚠️ Render webhook returned HTTP {resp.status}: <code>{html.escape(body[:200])}</code>"
+    except Exception as e:
+        return False, f"❌ Failed calling Render Deploy Hook: <code>{html.escape(str(e))}</code>"
+
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /restart showing Hot-Reload, Render Redeploy, and Process Restart options."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied. Only Admins and Owners can restart or redeploy.")
+        return
+    reload_config_cache()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Hot-Reload Configs & Templates", callback_data="cust_do_hotreload")],
+        [InlineKeyboardButton("🚀 Redeploy on Render (Deploy Hook)", callback_data="cust_do_redeploy")],
+        [InlineKeyboardButton("♻️ Hard Restart Bot Process", callback_data="cust_do_hardrestart")],
+        [InlineKeyboardButton("🔗 Edit Render Deploy Hook URL", callback_data="cust_var_render_deploy_hook_url")],
+    ])
+    await update.effective_message.reply_text(
+        "⚙️ <b>Restart & Render Deployment Control</b>\n\n"
+        "✅ In-memory configuration cache has been refreshed.\n"
+        "Choose an action below:",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+
+
+async def redeploy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /redeploy to immediately trigger the Render Deploy Hook."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied.")
+        return
+    status_msg = await update.effective_message.reply_text("⏳ Triggering Render Deploy Hook...")
+    ok, msg = await trigger_render_redeploy()
+    await status_msg.edit_text(msg, parse_mode="HTML")
+
+
+async def trigger_render_redeploy() -> tuple:
+    """Calls the configured Render Deploy Hook URL to trigger a fresh Render deployment."""
+    import aiohttp
+    hook_url = get_config("render_deploy_hook_url", fallback_env="RENDER_DEPLOY_HOOK_URL")
+    if not hook_url or not hook_url.startswith("http"):
+        return False, "⚠️ No valid `render_deploy_hook_url` configured. Set it via `/setconfig render_deploy_hook_url <url>`."
+    try:
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(hook_url) as resp:
+                body = await resp.text()
+                if resp.status in (200, 201, 202):
+                    return True, f"🚀 <b>Render Redeploy Triggered Successfully!</b> (HTTP {resp.status})\nRender is now pulling the latest commit and redeploying your service."
+                return False, f"⚠️ Render webhook returned HTTP {resp.status}: <code>{html.escape(body[:200])}</code>"
+    except Exception as e:
+        return False, f"❌ Failed calling Render Deploy Hook: <code>{html.escape(str(e))}</code>"
+
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /restart showing Hot-Reload, Render Redeploy, and Process Restart options."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied. Only Admins and Owners can restart or redeploy.")
+        return
+    reload_config_cache()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Hot-Reload Configs & Templates", callback_data="cust_do_hotreload")],
+        [InlineKeyboardButton("🚀 Redeploy on Render (Deploy Hook)", callback_data="cust_do_redeploy")],
+        [InlineKeyboardButton("♻️ Hard Restart Bot Process", callback_data="cust_do_hardrestart")],
+        [InlineKeyboardButton("🔗 Edit Render Deploy Hook URL", callback_data="cust_var_render_deploy_hook_url")],
+    ])
+    await update.effective_message.reply_text(
+        "⚙️ <b>Restart & Render Deployment Control</b>\n\n"
+        "✅ In-memory configuration cache has been refreshed.\n"
+        "Choose an action below:",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+
+
+async def redeploy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /redeploy to immediately trigger the Render Deploy Hook."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied.")
+        return
+    status_msg = await update.effective_message.reply_text("⏳ Triggering Render Deploy Hook...")
+    ok, msg = await trigger_render_redeploy()
+    await status_msg.edit_text(msg, parse_mode="HTML")
+
+
+async def trigger_render_redeploy() -> tuple:
+    """Calls the configured Render Deploy Hook URL to trigger a fresh Render deployment."""
+    import aiohttp
+    hook_url = get_config("render_deploy_hook_url", fallback_env="RENDER_DEPLOY_HOOK_URL")
+    if not hook_url or not hook_url.startswith("http"):
+        return False, "⚠️ No valid `render_deploy_hook_url` configured. Set it via `/setconfig render_deploy_hook_url <url>`."
+    try:
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(hook_url) as resp:
+                body = await resp.text()
+                if resp.status in (200, 201, 202):
+                    return True, f"🚀 <b>Render Redeploy Triggered Successfully!</b> (HTTP {resp.status})\nRender is now pulling the latest commit and redeploying your service."
+                return False, f"⚠️ Render webhook returned HTTP {resp.status}: <code>{html.escape(body[:200])}</code>"
+    except Exception as e:
+        return False, f"❌ Failed calling Render Deploy Hook: <code>{html.escape(str(e))}</code>"
+
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /restart showing Hot-Reload, Render Redeploy, and Process Restart options."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied. Only Admins and Owners can restart or redeploy.")
+        return
+    reload_config_cache()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Hot-Reload Configs & Templates", callback_data="cust_do_hotreload")],
+        [InlineKeyboardButton("🚀 Redeploy on Render (Deploy Hook)", callback_data="cust_do_redeploy")],
+        [InlineKeyboardButton("♻️ Hard Restart Bot Process", callback_data="cust_do_hardrestart")],
+        [InlineKeyboardButton("🔗 Edit Render Deploy Hook URL", callback_data="cust_var_render_deploy_hook_url")],
+    ])
+    await update.effective_message.reply_text(
+        "⚙️ <b>Restart & Render Deployment Control</b>\n\n"
+        "✅ In-memory configuration cache has been refreshed.\n"
+        "Choose an action below:",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+
+
+async def redeploy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /redeploy to immediately trigger the Render Deploy Hook."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied.")
+        return
+    status_msg = await update.effective_message.reply_text("⏳ Triggering Render Deploy Hook...")
+    ok, msg = await trigger_render_redeploy()
+    await status_msg.edit_text(msg, parse_mode="HTML")
