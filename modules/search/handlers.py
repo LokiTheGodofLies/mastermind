@@ -1,155 +1,249 @@
 import os
-import sqlite3
+import html
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from modules.database.config_db import get_config
+from modules.database.file_db import search_indexed_files_db, get_file_by_id_db, log_file_delivery_db, mark_delivery_deleted_db
+from modules.database.config_db import get_config, get_config_int, get_config_bool, get_template, format_template_string
+from modules.database.user_db import has_started_helper_bot_db, set_helper_started_db
+from modules.allowance.allowance import can_user_search, deduct_search_quota, get_user_quota_summary
+from modules.log.startup_log import send_log_with_fallback
 
-DB_PATH = "database/files.db"
-ITEMS_PER_PAGE = 10
-SEARCH_GROUP_ID = -1004480538217
+ITEMS_PER_PAGE = 5
+
+
+def _format_result_item(idx: int, row: dict) -> str:
+    title = html.escape(row.get("title") or row.get("file_name") or "Unknown Title")
+    series = html.escape(row.get("series") or "")
+    author = html.escape(row.get("author") or "Unknown Author")
+    narrator = html.escape(row.get("narrator") or "N/A")
+    length_str = html.escape(row.get("length_str") or "N/A")
+    rel_date = html.escape(row.get("release_date") or "N/A")
+    publisher = html.escape(row.get("publisher") or "N/A")
+    cat = html.escape(row.get("category") or "Book / Audiobook")
+    size_b = int(row.get("file_size") or 0)
+    size_str = f"{size_b / (1024*1024):.0f}MB" if size_b >= 1024 * 1024 else f"{size_b / 1024:.0f}KB"
+
+    lines = [f"<b>{idx}. {title}</b>"]
+    if series:
+        lines.append(series)
+    lines.append(f"By: {author}")
+    if narrator and narrator != "N/A":
+        lines.append(f"Narrated by: {narrator}")
+    if length_str and length_str != "N/A":
+        lines.append(f"Length: {length_str}")
+    if rel_date and rel_date != "N/A":
+        lines.append(f"Release Date: {rel_date}")
+    if publisher and publisher != "N/A":
+        lines.append(f"Publisher: {publisher}")
+    lines.append(f"Categories: {cat}")
+    lines.append(f"<i>{size_str}</i>")
+    return "\n".join(lines)
+
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
-    results = []
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        for (tname,) in cursor.fetchall():
-            try:
-                cursor.execute(f"SELECT * FROM {tname}")
-                for row in cursor.fetchall():
-                    row_id = row[0] if len(row) > 0 else 0
-                    full_str = " ".join(str(v) for v in row if v is not None)
-                    if search_term.lower() in full_str.lower():
-                        label = str(row[1]) if len(row) > 1 else str(row[0])
-                        for v in row:
-                            if isinstance(v, str) and search_term.lower() in v.lower() and len(v) < 50:
-                                label = v
-                                break
-                        if len(label) > 35:
-                            label = label[:32] + "..."
-                        if (row_id, tname, label) not in results:
-                            results.append((row_id, tname, label))
-            except Exception:
-                pass
-        conn.close()
-    except Exception:
-        pass
-
+    search_term = search_term.strip()
+    results = search_indexed_files_db(search_term, limit=50)
     total = len(results)
-    keyboard = []
+    bot_title = get_config("bot_title", "Mastermind Cafe Bot")
+
+    kb = []
     if total > 0:
-        tp = (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        tp = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
         page = max(1, min(page, tp))
-        for row_id, tname, lbl in results[(page-1)*ITEMS_PER_PAGE : page*ITEMS_PER_PAGE]:
-            keyboard.append([InlineKeyboardButton(f"📁 [{tname}] {lbl}", callback_data=f"file_dl_{row_id}")])
+        slice_rows = results[(page - 1) * ITEMS_PER_PAGE : page * ITEMS_PER_PAGE]
+
+        item_blocks = []
+        for i, r in enumerate(slice_rows, start=(page - 1) * ITEMS_PER_PAGE + 1):
+            item_blocks.append(_format_result_item(i, r))
+            btn_title = (r.get("title") or r.get("file_name") or "File")[:38]
+            kb.append([InlineKeyboardButton(f"{i}. {btn_title}", callback_data=f"file_dl_{r['id']}")])
+
         nav = []
         if page > 1:
-            nav.append(InlineKeyboardButton("« Prev", callback_data=f"search_page_{search_term}_{page-1}"))
-        nav.append(InlineKeyboardButton(f"📄 {page}/{tp}", callback_data="noop"))
+            nav.append(InlineKeyboardButton("« Prev", callback_data=f"search_page_{search_term[:25]}_{page-1}"))
+        nav.append(InlineKeyboardButton(f"{page} / {tp}", callback_data="noop"))
         if page < tp:
-            nav.append(InlineKeyboardButton("Next »", callback_data=f"search_page_{search_term}_{page+1}"))
-        if nav:
-            keyboard.append(nav)
-        txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\nFound {total} matching file(s). Page {page} of {tp}:"
-    else:
-        txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n• No matching files found in the database.\n\n<i>(Storage Group ID: {SEARCH_GROUP_ID})</i>"
+            nav.append(InlineKeyboardButton("Next »", callback_data=f"search_page_{search_term[:25]}_{page+1}"))
+        kb.append(nav)
 
-    keyboard.append([InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")])
+        txt = (
+            f"🔍 <b>Search results from the {html.escape(bot_title)}'s database</b>\n\n"
+            f"<b>{html.escape(search_term)}</b> · {total} match{'es' if total != 1 else ''}\n\n"
+            + "\n\n".join(item_blocks)
+            + "\n\n❗️❗️❗️ <b>Select a title below to get the file instantly</b> ❗️❗️❗️"
+        )
+    else:
+        txt = (
+            f"🔍 <b>Search results from the {html.escape(bot_title)}'s database</b>\n\n"
+            f"<b>{html.escape(search_term)}</b> · 0 matches\n\n"
+            f"No indexed files matched your query. Tap <b>📝 Request Book</b> below to request it!"
+        )
+
+    kb.append([
+        InlineKeyboardButton("❌ Cancel", callback_data="search_cancel"),
+        InlineKeyboardButton("📝 Request Book", callback_data=f"req_from_search_{search_term[:35]}"),
+    ])
+
     if update.callback_query:
-        await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
         await update.callback_query.answer()
     else:
-        await update.message.reply_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.effective_message.reply_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def _auto_delete_posted_file(bot, posting_chat_id: int, message_id: int, log_id: int, delay_seconds: int, file_name: str, receiver_id: int):
+    await asyncio.sleep(delay_seconds)
+    try:
+        await bot.delete_message(chat_id=int(posting_chat_id), message_id=int(message_id))
+    except Exception:
+        pass
+    deleted_at = mark_delivery_deleted_db(log_id)
+    audit_txt = (
+        f"🗑 <b>Temporary File Auto-Deleted (2m Timer)</b>\n\n"
+        f"📁 <b>File:</b> <code>{html.escape(file_name)}</code>\n"
+        f"👤 <b>Receiver ID:</b> <code>{receiver_id}</code>\n"
+        f"📢 <b>Channel / Msg ID:</b> <code>{posting_chat_id} / {message_id}</code>\n"
+        f"⏱ <b>Deleted At:</b> <code>{deleted_at}</code>"
+    )
+    await send_log_with_fallback(bot, audit_txt, "admin_log_group_id", "channel_log_topic_id")
+
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message or (update.callback_query.message if update.callback_query else None)
-    if not msg: return
+    msg = update.effective_message
+    if not msg:
+        return
     if context.args:
         await perform_search(update, context, " ".join(context.args).strip(), 1)
         return
-    if update.message and update.message.reply_to_message and update.message.reply_to_message.text:
-        await perform_search(update, context, update.message.reply_to_message.text.strip(), 1)
+    if msg.reply_to_message and msg.reply_to_message.text:
+        await perform_search(update, context, msg.reply_to_message.text.strip(), 1)
         return
-    txt = get_config("search_script", default="🔍 <b>File Search Engine</b>\n\nYou can either join our search group to search there, or search right here in private chat by providing a keyword after the search command or replying to a message with /search.")
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("👥 Join Search Group", callback_data="join_search_group_quiz")], [InlineKeyboardButton("« Back to Start", callback_data="start_menu")]])
+
+    txt = (
+        "🔍 <b>Library Search Engine</b>\n\n"
+        "Use <code>/search &lt;keyword&gt;</code> to search books & audiobooks by title, author, narrator, series, or file name.\n"
+        "<i>(Searching is free — quota is only used when a file is delivered!)</i>"
+    )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back to Start", callback_data="start_menu")]])
     if update.callback_query:
-        await update.callback_query.message.edit_text(text=txt, reply_markup=kb, parse_mode="HTML")
+        await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=kb)
         await update.callback_query.answer()
     else:
-        await msg.reply_text(text=txt, reply_markup=kb, parse_mode="HTML")
+        await msg.reply_text(txt, parse_mode="HTML", reply_markup=kb)
+
 
 async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    if not q: return
+    if not q:
+        return
     d = q.data
-    print(f"📥 [CALLBACK CLICKED] Data received: \"{d}\"")
-    print(f"📥 [DEBUG CALLBACK] Received callback query data: '{d}' from user {q.from_user.id if q.from_user else 'unknown'}")
-    if d == "join_search_group_quiz":
-        await q.message.edit_text("📝 <b>Search Group Verification Quiz</b>\n\nDo you want to join our search group?", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, Generate Invite Link", callback_data="generate_group_invite")], [InlineKeyboardButton("« Back", callback_data="search_menu")]]))
-        await q.answer()
-    elif d == "generate_group_invite":
-        await q.answer("Generating invite link...")
-        try:
-            link = await context.bot.create_chat_invite_link(chat_id=SEARCH_GROUP_ID, member_limit=1)
-            await q.message.edit_text(f"🎉 <b>Here is your single-use invite link:</b>\n\n{link.invite_link}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))
-        except Exception as e:
-            await q.message.edit_text(f"❌ <b>Could not generate invite link.</b>\n\nReason: {e}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))
-    elif d == "search_menu":
+    user = q.from_user
+
+    if d == "search_menu":
         await search_command(update, context)
     elif d == "noop":
         await q.answer("Current Page")
+    elif d == "search_cancel":
+        await q.answer("Search closed.")
+        await q.message.delete()
     elif d.startswith("search_page_"):
         parts = d.replace("search_page_", "", 1).rsplit("_", 1)
-        if len(parts) == 2: await perform_search(update, context, parts[0], int(parts[1]))
+        if len(parts) == 2 and parts[1].isdigit():
+            await perform_search(update, context, parts[0], int(parts[1]))
     elif d.startswith("file_dl_"):
-        row_id = d.replace("file_dl_", "")
-        await q.answer("Fetching file...")
+        row_id = int(d.replace("file_dl_", ""))
+        if not can_user_search(user.id):
+            await q.answer("⚠️ Daily search quota reached! Use /refer or wait for reset.", show_alert=True)
+            return
+
+        # Step 1: Verify user has started helper bot
+        if get_config_bool("require_helper_bot_start", True) and not has_started_helper_bot_db(user.id):
+            helper_uname = get_config("helper_bot_username", context.bot.username or "Bot").lstrip("@")
+            start_url = f"https://t.me/{helper_uname}?start=helper_init"
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"🚀 Start @{helper_uname}", url=start_url)]])
+            await q.answer("⚠️ Please start the helper bot first to receive the file.", show_alert=True)
+            await q.message.reply_text("Please start the helper bot first to receive the file.", reply_markup=kb)
+            return
+
+        row = get_file_by_id_db(row_id)
+        if not row:
+            await q.answer("❌ File no longer exists in database.", show_alert=True)
+            return
+
+        storage_id = get_config("storage_channel_id", fallback_env="STORAGE_GROUP_ID")
+        posting_id = get_config("posting_channel_id", fallback_env="SEARCH_CHAT_ID") or storage_id
+        file_id = row.get("file_id")
+        storage_msg_id = row.get("storage_message_id")
+        file_name = row.get("title") or row.get("file_name") or "Book_File"
+
+        await q.answer("📥 Preparing temporary delivery...")
+        posted_msg = None
+        dm_delivered = False
+
+        # Step 2: Deliver to temporary file-posting channel
+        if posting_id:
+            try:
+                if storage_msg_id and storage_id:
+                    posted_msg = await context.bot.copy_message(chat_id=int(posting_id), from_chat_id=int(storage_id), message_id=int(storage_msg_id))
+                elif file_id:
+                    posted_msg = await context.bot.send_document(chat_id=int(posting_id), document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>\n⏳ <i>Auto-deletes in 2 minutes</i>", parse_mode="HTML")
+            except Exception as ch_err:
+                await send_log_with_fallback(
+                    context.bot,
+                    f"⚠️ <b>Helper/Bot Channel Admin Permission Error</b>\nCould not post to <code>{posting_id}</code>: <code>{ch_err}</code>",
+                    "admin_log_group_id",
+                    "channel_log_topic_id",
+                )
+
+        # Step 3: Mirror/Forward to user DM if possible
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT file_id, storage_message_id, file_name FROM indexed_files WHERE id = ?", (row_id,))
-            row = cursor.fetchone()
-            conn.close()
-            
-            if row:
-                file_id, storage_msg_id, file_name = row
-                storage_group_id = os.getenv("STORAGE_GROUP_ID")
-                
-                sent = False
-                # Try copying from storage group first (most reliable)
-                if storage_msg_id and storage_group_id:
-                    try:
-                        await context.bot.copy_message(
-                            chat_id=q.message.chat_id,
-                            from_chat_id=int(storage_group_id),
-                            message_id=int(storage_msg_id)
-                        )
-                        sent = True
-                    except Exception as copy_err:
-                        print(f"Copy message failed: {copy_err}")
-                
-                # Fallback to send_document using file_id
-                if not sent and file_id:
-                    try:
-                        cap_text = f"📁 {file_name}" if file_name else "📁 Here is your file!"
-                        await context.bot.send_document(
-                            chat_id=q.message.chat_id,
-                            document=file_id,
-                            caption=cap_text
-                        )
-                        sent = True
-                    except Exception as doc_err:
-                        print(f"Send document failed: {doc_err}")
-                
-                if not sent:
-                    await q.message.reply_text("❌ Failed to dispatch file. The storage message or file ID may no longer be valid.")
-            else:
-                await q.message.reply_text("❌ File record no longer found in database.")
-        except Exception as e:
-            await q.message.reply_text(f"❌ Error retrieving file: {e}")
+            if storage_msg_id and storage_id:
+                await context.bot.copy_message(chat_id=user.id, from_chat_id=int(storage_id), message_id=int(storage_msg_id))
+                dm_delivered = True
+            elif file_id:
+                await context.bot.send_document(chat_id=user.id, document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>", parse_mode="HTML")
+                dm_delivered = True
+            set_helper_started_db(user.id, True)
+        except Exception:
+            pass
 
-async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pass
+        if not posted_msg and not dm_delivered:
+            await q.message.reply_text("❌ File delivery failed. No quota was deducted.")
+            return
 
-search_handler = search_command
+        # Step 4: Deduct search quota ONLY on confirmed delivery
+        deduct_search_quota(user.id)
+        q_sum = get_user_quota_summary(user.id)
+
+        post_mid = getattr(posted_msg, "message_id", 0) or 0
+        clean_cid = str(posting_id).replace("-100", "") if posting_id else ""
+        ch_link = f"https://t.me/c/{clean_cid}" if clean_cid else "DM Delivery"
+        msg_link = f"https://t.me/c/{clean_cid}/{post_mid}" if (clean_cid and post_mid) else ch_link
+        del_secs = get_config_int("file_delete_after_seconds", 120)
+
+        reply_txt = (
+            f"✅ <b>File Ready for Download!</b>\n\n"
+            f"📁 <b>File:</b> <code>{html.escape(file_name)}</code>\n"
+            f"📢 <b>Posting Channel:</b> <a href=\"{ch_link}\">Open Channel</a>\n"
+            f"🔗 <b>Message Link:</b> <a href=\"{msg_link}\">Message #{post_mid}</a>\n"
+            f"💬 <b>DM Mirror:</b> {'Sent to your DM ✅' if dm_delivered else 'Channel Link Only'}\n"
+            f"📊 <b>Remaining Search Quota:</b> <code>{q_sum['searches_left']}</code>\n\n"
+            f"⏳ <i>This file in the posting channel will auto-delete in {del_secs // 60} minutes.</i>"
+        )
+        await q.message.reply_text(reply_txt, parse_mode="HTML")
+
+        log_id = log_file_delivery_db(file_id or "", file_name, context.bot.username or "Bot", user.id, ch_link, msg_link, post_mid, "delivered")
+        audit_msg = (
+            f"📤 <b>File Shared (Temporary Delivery)</b>\n\n"
+            f"🆔 <b>File ID:</b> <code>{html.escape(str(file_id)[:35])}</code>\n"
+            f"📁 <b>Title:</b> <code>{html.escape(file_name)}</code>\n"
+            f"🤖 <b>Sender:</b> @{context.bot.username or 'Bot'}\n"
+            f"👤 <b>Receiver:</b> {html.escape(user.full_name)} (<code>{user.id}</code>)\n"
+            f"🔗 <b>Link:</b> {msg_link}\n"
+            f"📦 <b>Status:</b> <code>delivered (auto-delete in {del_secs}s)</code>"
+        )
+        await send_log_with_fallback(context.bot, audit_msg, "admin_log_group_id", "channel_log_topic_id")
+
+        if posted_msg and post_mid and get_config_bool("auto_delete_enabled", True):
+            asyncio.create_task(_auto_delete_posted_file(context.bot, int(posting_id), post_mid, log_id, del_secs, file_name, user.id))

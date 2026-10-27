@@ -1,100 +1,99 @@
 from datetime import datetime
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-
-from modules.database.user_db import add_or_update_user_db
+from modules.database.user_db import add_or_update_user_db, get_user_role_db, set_helper_started_db
+from modules.database.config_db import get_template, format_template_string
 from modules.allowance.referral import process_referral_with_notification
+from modules.allowance.allowance import get_user_quota_summary
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Telegram command handler for /start, handles registration, referrals, and welcome UI."""
     user = update.effective_user
-    if not user:
+    target_msg = update.message or (update.callback_query.message if update.callback_query else None)
+    if not user or not target_msg:
         return
 
-    target_message = update.message or (update.callback_query.message if update.callback_query else None)
-    if not target_message:
-        return
-
-    user_name = user.first_name
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    bot_username = context.bot.username
-
-    add_or_update_user_db(user.id, user.username, user.full_name, today_str)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    is_private = update.effective_chat and update.effective_chat.type == "private"
+    is_new = add_or_update_user_db(user.id, user.username, user.full_name, today_str, helper_started=True if is_private else None)
+    if is_private:
+        set_helper_started_db(user.id, True)
 
     referral_notice = ""
     args = context.args
     if args and args[0].startswith("ref_"):
         try:
-            referrer_id = int(args[0].split("_")[1])
-            success, _ = await process_referral_with_notification(context, referrer_id, user.id, user.full_name)
-            if success:
-                referral_notice = "\n\n🎉 <b>Referral Bonus Applied!</b> You and your referrer received +10 searches & requests."
+            ref_id = int(args[0].split("_", 1)[1])
+            ok, msg = await process_referral_with_notification(context, ref_id, user.id, user.full_name or user.first_name, is_first_time=is_new)
+            if ok:
+                referral_notice = "\n\n🎁 <b>Referral bonus applied: +10 search quota, +10 request quota!</b>"
+            else:
+                referral_notice = f"\n\n<i>{msg}</i>"
         except ValueError:
             pass
+    elif args and args[0] == "helper_init":
+        referral_notice = "\n\n✅ <b>Helper Bot Activated!</b> You can now click any search result to receive files in the posting channel and DM."
 
-    message = (
-        f"Hi <b>{user_name}</b>, welcome to Mastermind Bot! 👋\n\n"
-        "I am your modular assistant. Tap the buttons below to see my help menu or reach out to my owner."
-        f"{referral_notice}"
-    )
+    tpl = get_template("start")
+    raw_txt = tpl.get("text") or "Hi <b>{user_name}</b>, welcome to <b>{bot_title}</b>! 👋"
+    text = format_template_string(raw_txt, {"user_name": user.first_name or "User"}) + referral_notice
 
-    my_referral_link = f"https://t.me/{bot_username}?start=ref_{user.id}"
-    share_text = "try this amazing bot and let's earn bonus searches and requests !"
-    share_url = f"https://t.me/share/url?url={my_referral_link}&text={share_text}"
+    bot_uname = context.bot.username or "Bot"
+    ref_link = f"https://t.me/{bot_uname}?start=ref_{user.id}"
+    share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20and%20earn%20%2B10%20bonus%20quota"
 
-    keyboard = [
-        [
-            InlineKeyboardButton("📖 Help Menu", callback_data='help_button'),
-            InlineKeyboardButton("👑 Bot Owner", callback_data='bot_owner')
-        ],
-        [
-            InlineKeyboardButton("📤 Refer & Earn Bonus", url=share_url)
-        ]
+    kb = [
+        [InlineKeyboardButton("🔍 Search Library", callback_data="search_menu"), InlineKeyboardButton("📖 Help Menu", callback_data="help_button")],
+        [InlineKeyboardButton("📊 My Quota", callback_data="quota_menu"), InlineKeyboardButton("📤 Refer & Earn +10", url=share_url)],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    for b in tpl.get("buttons", []):
+        if b.get("type") == "url":
+            kb.append([InlineKeyboardButton(b["label"], url=b["target"])])
+        else:
+            kb.append([InlineKeyboardButton(b["label"], callback_data=b["target"])])
 
+    role = get_user_role_db(user.id)
+    if role in ("Admin", "Owner"):
+        kb.append([InlineKeyboardButton("🪄 Customize Bot (/customize)", callback_data="cust_open_main"), InlineKeyboardButton("👑 Admin Help", callback_data="help_open_admin")])
+
+    markup = InlineKeyboardMarkup(kb)
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.edit_text(message, parse_mode='HTML', reply_markup=reply_markup)
+        await target_msg.edit_text(text, parse_mode="HTML", reply_markup=markup)
     else:
-        await target_message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
+        if tpl.get("media_type") == "photo" and tpl.get("media_id"):
+            await target_msg.reply_photo(photo=tpl["media_id"], caption=text, parse_mode="HTML", reply_markup=markup)
+        else:
+            await target_msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
 
 
 async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query or not query.data:
+    q = update.callback_query
+    if not q:
         return
-    await query.answer()
-    data = query.data
-
-    if data in ("help_button", "help_menu"):
-        from modules.help.handlers import help_command
-        update.message = query.message
-        await help_command(update, context)
-    elif data == "bot_owner":
-        await query.message.edit_text(
-            "👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.",
-            parse_mode="HTML"
-        )
-    elif data in ("search_menu", "stats_menu"):
-        if data == "search_menu":
-            from modules.search.handlers import search_command
-            update.message = query.message
-            await search_command(update, context)
-        else:
-            from modules.stats.handlers import stats_command
-            update.message = query.message
-            await stats_command(update, context)
-    elif data == "start_menu":
-        update.message = query.message
+    d = q.data
+    if d in ("help_button", "help_menu", "help_open_admin") or d.startswith(("help_sec_", "adm_sec_")):
+        from modules.help.handlers import help_button_callback
+        await help_button_callback(update, context)
+    elif d == "start_menu":
         await start_command(update, context)
-    elif data in ("quota", "quota_menu"):
-        await query.message.edit_text(
-            "📊 <b>Your Quota Status:</b>\n\n• Remaining Searches: Unlimited\n• API Status: Active",
-            parse_mode="HTML"
+    elif d == "search_menu":
+        from modules.search.handlers import search_command
+        await search_command(update, context)
+    elif d == "stats_menu":
+        from modules.stats.handlers import stats_command
+        await stats_command(update, context)
+    elif d in ("quota", "quota_menu"):
+        await q.answer()
+        s = get_user_quota_summary(q.from_user.id)
+        txt = (
+            f"📊 <b>Your Quota Status</b>\n\n"
+            f"🛡 <b>Role:</b> <code>{s['role']}</code>\n"
+            f"🔍 <b>Searches Remaining:</b> <code>{s['searches_left']} / {s['searches_limit']}</code>\n"
+            f"📥 <b>Requests Remaining:</b> <code>{s['requests_left']} / {s['requests_limit']}</code>"
         )
-
-
-start_handler = start_command
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back to Start", callback_data="start_menu")]])
+        await q.message.edit_text(txt, parse_mode="HTML", reply_markup=kb)
+    elif d == "bot_owner":
+        await q.answer()
+        await q.message.edit_text("👑 <b>Bot Owner:</b> <code>7261537212</code>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back", callback_data="start_menu")]]))

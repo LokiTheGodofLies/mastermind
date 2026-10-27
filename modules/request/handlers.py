@@ -1,178 +1,426 @@
+import os
+import html
 import logging
+import requests
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ApplicationHandlerStop
-from modules.database.file_db import get_connection as get_db_connection
-import os
-import requests
-from bs4 import BeautifulSoup
-import html
+from modules.database.file_db import get_connection as get_db_conn
+from modules.database.config_db import get_config
+from modules.database.user_db import get_user_role_db
+from modules.allowance.allowance import can_user_request, deduct_request_quota
+from modules.log.startup_log import send_log_with_fallback
 
 logger = logging.getLogger(__name__)
 
-def fetch_goodreads_metadata(query):
+
+def fetch_audible_or_goodreads_options(query: str) -> list:
+    """Queries Audible catalog API (with Goodreads fallback) for rich audiobook/book options."""
+    results = []
     try:
-        search_url = f"https://www.goodreads.com/search?q={requests.utils.quote(query)}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get(search_url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return []
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = []
-        rows = soup.select("tr[itemtype='http://schema.org/Book']")[:5]
-        for row in rows:
-            title_tag = row.select_one("span[itemprop='name']")
-            author_tag = row.select_one("span[itemprop='author']")
-            link_tag = row.select_one("a.bookTitle")
-            rating_tag = row.select_one("span.minirating")
-            
-            if title_tag and link_tag:
-                title = title_tag.get_text(strip=True)
-                author = author_tag.get_text(strip=True) if author_tag else "Unknown Author"
-                url = "https://www.goodreads.com" + link_tag["href"]
-                rating = rating_tag.get_text(strip=True) if rating_tag else ""
-                results.append({"title": title, "author": author, "url": url, "rating": rating})
-        return results
+        url = "https://api.audible.com/1.0/catalog/products"
+        params = {
+            "keywords": query,
+            "num_results": 3,
+            "products_sort_by": "Relevance",
+            "response_groups": "contributors,product_attrs,product_desc,series",
+        }
+        resp = requests.get(url, params=params, timeout=8)
+        if resp.status_code == 200:
+            for p in resp.json().get("products", [])[:3]:
+                title = p.get("title") or query
+                authors = ", ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")) or "Unknown Author"
+                narrators = ", ".join(n.get("name", "") for n in p.get("narrators", []) if n.get("name")) or "N/A"
+                series_list = p.get("series") or []
+                series_str = f"{series_list[0].get('title', '')}, #{series_list[0].get('sequence', '')}".strip(", #") if series_list else ""
+                rel_year = (p.get("release_date") or p.get("issue_date") or "N/A")[:4]
+                pub = p.get("publisher_name") or "Audible Studios"
+                asin = p.get("asin") or ""
+                link = f"https://www.audible.com/pd/{asin}" if asin else "https://www.audible.com"
+                results.append({
+                    "title": title, "author": authors, "narrator": narrators,
+                    "series": series_str, "year": rel_year, "publisher": pub,
+                    "url": link, "source": "Audible", "format": "Audiobook",
+                })
     except Exception as e:
-        logger.error(f"Error fetching Goodreads metadata: {e}")
-        return []
+        logger.warning(f"Audible API lookup warning: {e}")
+
+    if not results:
+        try:
+            g_url = f"https://www.goodreads.com/book/auto_complete?format=json&q={requests.utils.quote(query)}"
+            r = requests.get(g_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+            if r.status_code == 200 and isinstance(r.json(), list):
+                for item in r.json()[:3]:
+                    a_obj = item.get("author") or {}
+                    results.append({
+                        "title": item.get("title") or query,
+                        "author": a_obj.get("name") if isinstance(a_obj, dict) else "Unknown Author",
+                        "narrator": "N/A", "series": "",
+                        "year": str(item.get("publicationYear") or "N/A"),
+                        "publisher": "Goodreads Catalog",
+                        "url": "https://www.goodreads.com" + str(item.get("bookUrl", "")),
+                        "source": "Goodreads", "format": "eBook / Audiobook",
+                    })
+        except Exception:
+            pass
+    return results
+
+
+async def show_request_options(target_msg, user, query: str, context: ContextTypes.DEFAULT_TYPE, is_edit: bool = False):
+    if not can_user_request(user.id):
+        txt = "⚠️ <b>Daily request quota reached!</b> Use <code>/refer</code> to earn +10 bonus quota or wait for daily reset."
+        if is_edit:
+            await target_msg.edit_text(txt, parse_mode="HTML")
+        else:
+            await target_msg.reply_text(txt, parse_mode="HTML")
+        return
+
+    options = fetch_audible_or_goodreads_options(query)
+    context.user_data["req_candidates"] = options
+    context.user_data["req_raw_query"] = query
+
+    kb = []
+    if options:
+        lines = ["📬 <b>Matching book options found for your request in Internet:</b>\n"]
+        for i, opt in enumerate(options, start=1):
+            t_esc = html.escape(opt["title"])
+            a_esc = html.escape(opt["author"])
+            s_part = f" [{html.escape(opt['series'])}]," if opt.get("series") else ""
+            n_esc = html.escape(opt.get("narrator") or "N/A")
+            y_esc = html.escape(opt.get("year") or "N/A")
+            p_esc = html.escape(opt.get("publisher") or "N/A")
+            u_esc = html.escape(opt.get("url") or "https://www.audible.com")
+            src = html.escape(opt.get("source") or "Audible")
+            lines.append(
+                f"{i}. <b>{t_esc}</b> by {a_esc}\n"
+                f"  {s_part} Narrated by: {n_esc}, Released {y_esc}, Publisher {p_esc}\n"
+                f"  <a href=\"{u_esc}\">{src}</a>\n"
+            )
+            btn_lbl = f"📖 {i}. {opt['title'][:24]} — {opt['author'][:16]}"
+            kb.append([InlineKeyboardButton(btn_lbl, callback_data=f"req_pick_opt_{i-1}")])
+        lines.append('Select a book to attach it to your request, links in the message will help you, or choose "<b>None of these</b>" to send your original or manual request.')
+        text = "\n".join(lines)
+    else:
+        text = f"📬 <b>Request Book:</b> <i>{html.escape(query)}</i>\n\nNo automatic Audible matches found. Choose how you would like to submit your request:"
+
+    kb.append([InlineKeyboardButton("📋 None of these — Send original request", callback_data="req_send_original")])
+    kb.append([InlineKeyboardButton("✍️ Enter Manual Details (Title/Author/Format/Series)", callback_data="req_start_manual")])
+    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="req_cancel")])
+
+    if is_edit:
+        await target_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb), disable_web_page_preview=True)
+    else:
+        await target_msg.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb), disable_web_page_preview=True)
+
 
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    if not message:
+    msg = update.effective_message
+    if not msg:
         return
-    
-    query = " ".join(context.args).strip()
+    query = " ".join(context.args).strip() if context.args else ""
     if not query:
-        await message.reply_text("📖 Please provide a book title or keyword. Usage: <code>/request [book name]</code>", parse_mode="HTML")
+        await msg.reply_text(
+            "📖 <b>How to Request a Book / Audiobook:</b>\n"
+            "• <code>/request &lt;title&gt; &lt;author&gt;</code>\n"
+            "• Or tap <b>✍️ Manual Request</b> below to fill in Title, Author, Format & Series step by step.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✍️ Start Manual Request", callback_data="req_start_manual")]]),
+        )
         return
-    
-    q_esc = html.escape(query)
-    status_msg = await message.reply_text(f"🔎 Searching local database for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT file_id, file_name FROM indexed_files WHERE file_name LIKE ? LIMIT 5", (f"%{query}%",))
-    rows = cursor.fetchall()
+    await show_request_options(msg, update.effective_user, query, context, is_edit=False)
+
+
+def _render_request_log_card(req_row: dict) -> str:
+    return (
+        f"📥 <b>Book / Audiobook Request #{req_row['id']}</b>\n\n"
+        f"🏷 <b>Type:</b> <code>{html.escape(req_row.get('request_type', 'Book/Audiobook'))}</code>\n"
+        f"📖 <b>Title:</b> <b>{html.escape(req_row.get('title', 'Unknown'))}</b>\n"
+        f"✍️ <b>Author:</b> <code>{html.escape(req_row.get('author', 'N/A'))}</code>\n"
+        f"📚 <b>Series:</b> <code>{html.escape(req_row.get('series') or 'N/A')}</code>\n"
+        f"🎧 <b>Format:</b> <code>{html.escape(req_row.get('format') or 'Any')}</code>\n"
+        f"🌐 <b>Source:</b> {html.escape(req_row.get('source', 'Manual'))}\n"
+        f"📌 <b>Status:</b> <code>{html.escape(req_row.get('status', 'Pending'))}</code>\n"
+        f"👤 <b>User:</b> {html.escape(req_row.get('user_name', 'User'))} (<code>{req_row.get('user_id')}</code>)\n"
+        f"⏱ <b>Timestamp:</b> <code>{html.escape(str(req_row.get('created_at', '')))}</code>"
+    )
+
+
+async def _submit_final_request(bot, user, chat_msg, title, author, series="", fmt="Any", source="Manual", url=""):
+    if not can_user_request(user.id):
+        await chat_msg.edit_text("⚠️ Daily request quota exhausted.")
+        return
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO requests_queue (user_id, user_name, request_type, title, author, series, format, source, audible_url, status, created_at)
+        VALUES (?, ?, 'Book/Audiobook', ?, ?, ?, ?, ?, ?, 'Pending', ?)
+    """, (user.id, user.full_name or user.username or "User", title, author, series, fmt, source, url, now_str))
+    req_id = cur.lastrowid
+    conn.commit()
+    row = dict(cur.execute("SELECT * FROM requests_queue WHERE id = ?", (req_id,)).fetchone())
     conn.close()
-    
-    if rows:
-        header = f"📁 <b>Local Database Matches for:</b> <i>\"{q_esc}\"</i>\n"
-        lines = [header]
-        for row in rows:
-            file_id, file_name = row
-            lines.append(f"• {html.escape(file_name)}")
-        text = "\n".join(lines)
-        await status_msg.edit_text(text, parse_mode="HTML")
+
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Show Options", callback_data=f"req_opts_{req_id}")]])
+    log_msg = await send_log_with_fallback(bot, _render_request_log_card(row), "request_log_chat_id", None, reply_markup=kb)
+
+    if log_msg:
+        deduct_request_quota(user.id)
+        conn = get_db_conn()
+        conn.execute("UPDATE requests_queue SET log_chat_id = ?, log_message_id = ? WHERE id = ?", (log_msg.chat_id, log_msg.message_id, req_id))
+        conn.commit()
+        conn.close()
+        summary = f"{title} by {author}" if author and author != "N/A" else title
+        await chat_msg.edit_text(
+            f"✅ <b>Request received!</b>\n\n<b>{html.escape(summary)}</b>\n\nYour request has been noted. Admins will review it soon!",
+            parse_mode="HTML",
+        )
     else:
-        await process_goodreads_or_request(status_msg, query, context)
+        await chat_msg.edit_text("❌ Could not post request to Request Log. No quota was deducted.")
 
-async def process_goodreads_or_request(status_msg, query, context):
-    q_esc = html.escape(query)
-    await status_msg.edit_text(f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
-    matches = fetch_goodreads_metadata(query)
-    if matches:
-        bot_username = context.bot.username or (await context.bot.get_me()).username
-        if "goodreads_cache" not in context.bot_data:
-            context.bot_data["goodreads_cache"] = {}
-        context.bot_data["goodreads_cache"][status_msg.chat_id] = matches
-        context.bot_data["goodreads_last_matches"] = matches
-        context.bot_data["goodreads_last_query"] = query
+STATUS_LABELS = {
+    "added": "Added to Database ✅",
+    "notavail": "Not Available ❌",
+    "notrel": "Not Released ⏳",
+    "reqagain": "Request Again 🔄",
+    "already": "Already Available 📚",
+}
 
-        header = f"📖 <b>Goodreads Book Matches Found for:</b> <i>\"{q_esc}\"</i>"
-        lines = [header, "", "Tap any book title below to select and request it:"]
-        for idx, book in enumerate(matches):
-            title = html.escape(book["title"])
-            author = html.escape(book["author"])
-            url = book["url"]
-            rating = html.escape(book.get("rating", ""))
-            cmd_link = f"https://t.me/{bot_username}?start=req_pick_{idx}"
-            lines.append(f'{idx + 1}. <a href="{cmd_link}">📚 <b>{title}</b> ({author})</a> — {rating} [<a href="{url}">Goodreads</a>]')
 
-        manual_link = f"https://t.me/{bot_username}?start=req_manual"
-        lines.append("")
-        lines.append(f'✍️ <a href="{manual_link}"><b>Request Manually (\"{html.escape(query[:35])}\")</b></a>')
+async def handle_manual_request_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    wiz = context.user_data.get("manual_req_wizard")
+    if not wiz or not update.message or not update.message.text:
+        return False
+    txt = update.message.text.strip()
+    step = wiz.get("step")
 
-        text = "\n".join(lines)
-        await status_msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
-    else:
-        text = f"📖 <b>Book Request:</b> <i>\"{q_esc}\"</i>\n\nNo Goodreads matches found. Would you like to submit this request directly to the Request Channel?"
-        keyboard = [
-            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{query[:40]}"),
-             InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
-        ]
-        await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+    if step == "title":
+        wiz["title"] = txt
+        wiz["step"] = "author"
+        await update.message.reply_text("✍️ <b>Step 2/4:</b> Enter the <b>Author Name</b>:", parse_mode="HTML")
+        return True
+    if step == "author":
+        wiz["author"] = txt
+        wiz["step"] = "format"
+        await update.message.reply_text("🎧 <b>Step 3/4:</b> Enter the <b>Format</b> (e.g. <code>Audiobook</code>, <code>eBook</code>, or <code>Both</code>):", parse_mode="HTML")
+        return True
+    if step == "format":
+        wiz["format"] = txt
+        wiz["step"] = "series"
+        await update.message.reply_text("📚 <b>Step 4/4:</b> Enter the <b>Series Name</b> (or type <code>None</code> if standalone):", parse_mode="HTML")
+        return True
+    if step == "series":
+        context.user_data.pop("manual_req_wizard", None)
+        series_val = "" if txt.lower() == "none" else txt
+        status_msg = await update.message.reply_text("⏳ Submitting your manual request...")
+        await _submit_final_request(
+            context.bot, update.effective_user, status_msg,
+            wiz.get("title", "Unknown"), wiz.get("author", "Unknown"),
+            series=series_val, fmt=wiz.get("format", "Any"), source="Manual",
+        )
+        return True
+    return False
+
 
 async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    
-    if data.startswith("req_sub_orig_") or data.startswith("req_sub_gb_"):
-        book_query = data.split("_", 3)[-1]
-        request_channel_id = os.getenv("REQUEST_CHANNEL_ID", "-1004447576324")
-        user = query.from_user
-        user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-        bq_esc = html.escape(book_query)
-        
-        req_text = f"📥 <b>New Book Request</b>\n\n👤 <b>Requested By:</b> {user_mention}\n📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
-        try:
-            await context.bot.send_message(
-                chat_id=int(request_channel_id),
-                text=req_text,
-                parse_mode="HTML"
-            )
-            await query.edit_message_text(
-                f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <i>\"{bq_esc}\"</i> has been forwarded to the Request Channel.",
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.error(f"Failed to send request to channel: {e}")
-            await query.edit_message_text("❌ Failed to submit request to channel. Please try again later.")
-    elif data == "req_join_no":
-        await query.edit_message_text("❌ Request cancelled.")
+    q = update.callback_query
+    if not q:
+        return
+    d = q.data
+    user = q.from_user
+
+    if d == "req_cancel":
+        context.user_data.pop("manual_req_wizard", None)
+        await q.answer("Cancelled")
+        await q.message.edit_text("❌ Request cancelled. No quota was used.")
+    elif d.startswith("req_from_search_"):
+        await q.answer()
+        query = d.replace("req_from_search_", "", 1)
+        await show_request_options(q.message, user, query, context, is_edit=True)
+    elif d.startswith("req_pick_opt_"):
+        await q.answer("Submitting selected book...")
+        idx = int(d.replace("req_pick_opt_", ""))
+        opts = context.user_data.get("req_candidates", [])
+        if 0 <= idx < len(opts):
+            o = opts[idx]
+            await _submit_final_request(context.bot, user, q.message, o["title"], o["author"], o.get("series", ""), o.get("format", "Audiobook"), o.get("source", "Audible"), o.get("url", ""))
+    elif d == "req_send_original":
+        await q.answer("Submitting original request...")
+        raw_q = context.user_data.get("req_raw_query") or "Book Request"
+        await _submit_final_request(context.bot, user, q.message, raw_q, "As Requested", "", "Any", "Original Query", "")
+    elif d == "req_start_manual":
+        await q.answer()
+        context.user_data["manual_req_wizard"] = {"step": "title"}
+        await q.message.edit_text("📖 <b>Manual Request — Step 1/4:</b>\nPlease reply with the <b>Book / Audiobook Title</b>:", parse_mode="HTML")
+    elif d.startswith("req_opts_"):
+        role = get_user_role_db(user.id)
+        if role not in ("Moderator", "Admin", "Owner"):
+            await q.answer("⛔ Only Moderators, Admins, and Owners can manage request status.", show_alert=True)
+            return
+        req_id = int(d.replace("req_opts_", ""))
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Added to Database", callback_data=f"req_st_{req_id}_added")],
+            [InlineKeyboardButton("📚 Already Available", callback_data=f"req_st_{req_id}_already"), InlineKeyboardButton("❌ Not Available", callback_data=f"req_st_{req_id}_notavail")],
+            [InlineKeyboardButton("⏳ Not Released", callback_data=f"req_st_{req_id}_notrel"), InlineKeyboardButton("🔄 Request Again", callback_data=f"req_st_{req_id}_reqagain")],
+            [InlineKeyboardButton("≼ Hide Options", callback_data=f"req_hide_{req_id}")],
+        ])
+        await q.answer()
+        await q.message.edit_reply_markup(reply_markup=kb)
+    elif d.startswith("req_hide_"):
+        req_id = int(d.replace("req_hide_", ""))
+        await q.answer()
+        await q.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Show Options", callback_data=f"req_opts_{req_id}")]]))
+    elif d.startswith("req_st_"):
+        role = get_user_role_db(user.id)
+        if role not in ("Moderator", "Admin", "Owner"):
+            await q.answer("⛔ Access denied.", show_alert=True)
+            return
+        _, _, req_id_str, st_code = d.split("_", 3)
+        req_id = int(req_id_str)
+        new_status = STATUS_LABELS.get(st_code, st_code)
+        conn = get_db_conn()
+        conn.execute("UPDATE requests_queue SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_status, req_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM requests_queue WHERE id = ?", (req_id,)).fetchone()
+        conn.close()
+        if row:
+            rdict = dict(row)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Show Options", callback_data=f"req_opts_{req_id}")]])
+            await q.message.edit_text(_render_request_log_card(rdict), parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+            try:
+                await context.bot.send_message(
+                    chat_id=int(rdict["user_id"]),
+                    text=f"📬 <b>Request Status Updated!</b>\n\n📖 <b>Title:</b> {html.escape(rdict['title'])}\n📌 <b>New Status:</b> <code>{new_status}</code>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        await q.answer(f"Status updated to: {new_status}")
+
 
 async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    if not message or not context.args:
-        return
-    payload = context.args[0]
-    if payload.startswith("req_pick_"):
-        try:
-            idx = int(payload.split("req_pick_")[1])
-        except ValueError:
-            return
-        matches = context.bot_data.get("goodreads_cache", {}).get(
-            message.chat_id,
-            context.bot_data.get("goodreads_last_matches", [])
+    return
+
+STATUS_LABELS = {
+    "added": "Added to Database ✅",
+    "notavail": "Not Available ❌",
+    "notrel": "Not Released ⏳",
+    "reqagain": "Request Again 🔄",
+    "already": "Already Available 📚",
+}
+
+
+async def handle_manual_request_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    wiz = context.user_data.get("manual_req_wizard")
+    if not wiz or not update.message or not update.message.text:
+        return False
+    txt = update.message.text.strip()
+    step = wiz.get("step")
+
+    if step == "title":
+        wiz["title"] = txt
+        wiz["step"] = "author"
+        await update.message.reply_text("✍️ <b>Step 2/4:</b> Enter the <b>Author Name</b>:", parse_mode="HTML")
+        return True
+    if step == "author":
+        wiz["author"] = txt
+        wiz["step"] = "format"
+        await update.message.reply_text("🎧 <b>Step 3/4:</b> Enter the <b>Format</b> (e.g. <code>Audiobook</code>, <code>eBook</code>, or <code>Both</code>):", parse_mode="HTML")
+        return True
+    if step == "format":
+        wiz["format"] = txt
+        wiz["step"] = "series"
+        await update.message.reply_text("📚 <b>Step 4/4:</b> Enter the <b>Series Name</b> (or type <code>None</code> if standalone):", parse_mode="HTML")
+        return True
+    if step == "series":
+        context.user_data.pop("manual_req_wizard", None)
+        series_val = "" if txt.lower() == "none" else txt
+        status_msg = await update.message.reply_text("⏳ Submitting your manual request...")
+        await _submit_final_request(
+            context.bot, update.effective_user, status_msg,
+            wiz.get("title", "Unknown"), wiz.get("author", "Unknown"),
+            series=series_val, fmt=wiz.get("format", "Any"), source="Manual",
         )
-        orig_query = context.bot_data.get("goodreads_last_query", "")
-        if 0 <= idx < len(matches):
-            book_data = matches[idx]
-            title = html.escape(book_data["title"])
-            author = html.escape(book_data["author"])
-            rating = html.escape(book_data.get("rating", "No rating"))
-            url = book_data["url"]
-            text = f"📖 <b>Goodreads Book Selected</b>\n\n📌 <b>Title:</b> <a href=\"{url}\">{title}</a>\n✍️ <b>Author:</b> {author}\n⭐ <b>Rating:</b> {rating}\n\nIs this the book you are looking for?"
-            encoded_title = book_data["title"][:40]
-            fallback_q = (orig_query or book_data["title"])[:40]
-            keyboard = [
-                [InlineKeyboardButton("✅ Yes (Submit Goodreads)", callback_data=f"req_sub_gb_{encoded_title}")],
-                [InlineKeyboardButton("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}")]
-            ]
-            await message.reply_text(
-                text,
-                parse_mode="HTML",
-                disable_web_page_preview=False,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            raise ApplicationHandlerStop
-    elif payload == "req_manual":
-        orig_query = context.bot_data.get("goodreads_last_query", "Book Request")
-        oq_esc = html.escape(orig_query)
-        text = f"📖 <b>Book Request:</b> <i>\"{oq_esc}\"</i>\n\nWould you like to submit this request directly to the Request Channel?"
-        keyboard = [
-            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}"),
-             InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
-        ]
-        await message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-        raise ApplicationHandlerStop
+        return True
+    return False
+
+
+async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    if not q:
+        return
+    d = q.data
+    user = q.from_user
+
+    if d == "req_cancel":
+        context.user_data.pop("manual_req_wizard", None)
+        await q.answer("Cancelled")
+        await q.message.edit_text("❌ Request cancelled. No quota was used.")
+    elif d.startswith("req_from_search_"):
+        await q.answer()
+        query = d.replace("req_from_search_", "", 1)
+        await show_request_options(q.message, user, query, context, is_edit=True)
+    elif d.startswith("req_pick_opt_"):
+        await q.answer("Submitting selected book...")
+        idx = int(d.replace("req_pick_opt_", ""))
+        opts = context.user_data.get("req_candidates", [])
+        if 0 <= idx < len(opts):
+            o = opts[idx]
+            await _submit_final_request(context.bot, user, q.message, o["title"], o["author"], o.get("series", ""), o.get("format", "Audiobook"), o.get("source", "Audible"), o.get("url", ""))
+    elif d == "req_send_original":
+        await q.answer("Submitting original request...")
+        raw_q = context.user_data.get("req_raw_query") or "Book Request"
+        await _submit_final_request(context.bot, user, q.message, raw_q, "As Requested", "", "Any", "Original Query", "")
+    elif d == "req_start_manual":
+        await q.answer()
+        context.user_data["manual_req_wizard"] = {"step": "title"}
+        await q.message.edit_text("📖 <b>Manual Request — Step 1/4:</b>\nPlease reply with the <b>Book / Audiobook Title</b>:", parse_mode="HTML")
+    elif d.startswith("req_opts_"):
+        role = get_user_role_db(user.id)
+        if role not in ("Moderator", "Admin", "Owner"):
+            await q.answer("⛔ Only Moderators, Admins, and Owners can manage request status.", show_alert=True)
+            return
+        req_id = int(d.replace("req_opts_", ""))
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Added to Database", callback_data=f"req_st_{req_id}_added")],
+            [InlineKeyboardButton("📚 Already Available", callback_data=f"req_st_{req_id}_already"), InlineKeyboardButton("❌ Not Available", callback_data=f"req_st_{req_id}_notavail")],
+            [InlineKeyboardButton("⏳ Not Released", callback_data=f"req_st_{req_id}_notrel"), InlineKeyboardButton("🔄 Request Again", callback_data=f"req_st_{req_id}_reqagain")],
+            [InlineKeyboardButton("≼ Hide Options", callback_data=f"req_hide_{req_id}")],
+        ])
+        await q.answer()
+        await q.message.edit_reply_markup(reply_markup=kb)
+    elif d.startswith("req_hide_"):
+        req_id = int(d.replace("req_hide_", ""))
+        await q.answer()
+        await q.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Show Options", callback_data=f"req_opts_{req_id}")]]))
+    elif d.startswith("req_st_"):
+        role = get_user_role_db(user.id)
+        if role not in ("Moderator", "Admin", "Owner"):
+            await q.answer("⛔ Access denied.", show_alert=True)
+            return
+        _, _, req_id_str, st_code = d.split("_", 3)
+        req_id = int(req_id_str)
+        new_status = STATUS_LABELS.get(st_code, st_code)
+        conn = get_db_conn()
+        conn.execute("UPDATE requests_queue SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_status, req_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM requests_queue WHERE id = ?", (req_id,)).fetchone()
+        conn.close()
+        if row:
+            rdict = dict(row)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Show Options", callback_data=f"req_opts_{req_id}")]])
+            await q.message.edit_text(_render_request_log_card(rdict), parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+            try:
+                await context.bot.send_message(
+                    chat_id=int(rdict["user_id"]),
+                    text=f"📬 <b>Request Status Updated!</b>\n\n📖 <b>Title:</b> {html.escape(rdict['title'])}\n📌 <b>New Status:</b> <code>{new_status}</code>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+        await q.answer(f"Status updated to: {new_status}")
+
+
+async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return

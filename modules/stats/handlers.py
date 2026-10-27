@@ -1,48 +1,43 @@
-import os
+import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from modules.database.config_db import get_config
+from modules.database.user_db import DB_FILE as USER_DB, get_user_role_db
+from modules.database.file_db import get_connection as get_file_conn
+
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    if not message or not message.from_user:
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
         return
 
-    user_id = message.from_user.id
-    admin_ids = [7261537212]
-    is_admin = user_id in admin_ids
+    uconn = sqlite3.connect(USER_DB)
+    total_users = uconn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    total_refs = uconn.execute("SELECT COUNT(*) FROM referrals").fetchone()[0]
+    uconn.close()
 
-    # Fetch stats header script from configuration DB
-    default_header = "📊 <b>Mastermind Bot Statistics</b>"
-    header_text = get_config("stats_header_script", default=default_header)
+    fconn = get_file_conn()
+    total_files = fconn.execute("SELECT COUNT(*) FROM indexed_files").fetchone()[0]
+    queued_files = fconn.execute("SELECT COUNT(*) FROM indexing_queue WHERE status = 'queued'").fetchone()[0]
+    total_reqs = fconn.execute("SELECT COUNT(*) FROM requests_queue").fetchone()[0]
+    pending_reqs = fconn.execute("SELECT COUNT(*) FROM requests_queue WHERE status = 'Pending'").fetchone()[0]
+    total_deliveries = fconn.execute("SELECT COUNT(*) FROM delivery_logs").fetchone()[0]
+    fconn.close()
 
-    if is_admin:
-        stats_text = (
-            f"{header_text}\n\n"
-            "👑 <b>Admin System Metrics:</b>\n"
-            "• Bot Status: 🟢 Online (Configuration DB Active)\n"
-            "• Active Database: configuration.db\n"
-            "• Access Level: Administrator"
-        )
+    role = get_user_role_db(user.id)
+    txt = (
+        f"📊 <b>Mastermind Library Statistics</b>\n\n"
+        f"📚 <b>Total Indexed Books/Audiobooks:</b> <code>{total_files}</code>\n"
+        f"⏳ <b>Files in Indexing Queue:</b> <code>{queued_files}</code>\n"
+        f"📤 <b>Temporary Deliveries Served:</b> <code>{total_deliveries}</code>\n"
+        f"📥 <b>Total Book Requests:</b> <code>{total_reqs}</code> (Pending: <code>{pending_reqs}</code>)\n"
+        f"👥 <b>Registered Users:</b> <code>{total_users}</code>\n"
+        f"🔗 <b>Completed Referrals:</b> <code>{total_refs}</code>\n"
+        f"🛡 <b>Your Role:</b> <code>{role}</code>"
+    )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back to Start", callback_data="start_menu")]])
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=kb)
     else:
-        stats_text = (
-            f"{header_text}\n\n"
-            "👥 <b>Public User Metrics:</b>\n"
-            "• Bot is fully operational and serving requests!"
-        )
-
-    # Fetch optional media config for stats
-    media_type = get_config("stats_media_type", default="none")
-    media_url = get_config("stats_media_url", default="")
-
-    keyboard = [[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if media_type == "photo" and media_url:
-        await message.reply_photo(photo=media_url, caption=stats_text, reply_markup=reply_markup, parse_mode="HTML")
-    elif media_type == "video" and media_url:
-        await message.reply_video(video=media_url, caption=stats_text, reply_markup=reply_markup, parse_mode="HTML")
-    elif media_type == "animation" and media_url:
-        await message.reply_animation(animation=media_url, caption=stats_text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await message.reply_text(text=stats_text, reply_markup=reply_markup, parse_mode="HTML")
+        await msg.reply_text(txt, parse_mode="HTML", reply_markup=kb)

@@ -1,59 +1,51 @@
 import os
 import asyncio
 import logging
-from datetime import datetime
-from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ChatMemberHandler,
+    ChatJoinRequestHandler,
     filters,
-    ContextTypes
 )
 
-from modules.start.start_handler import start_command, menu_callback_router
-from modules.help.handlers import help_command, help_button_callback
-from modules.support.handlers import support_command, support_callback_handler
-from modules.allowance.handlers import quota_command, gift_command, refer_command
-from modules.ban.handlers import ban_command, ban_pm_command, enforce_ban_middleware
-from modules.log.logger import setup_in_memory_logger
+from modules.database.config_db import init_config_db, reload_config_cache
 from modules.database.user_db import init_user_db
-from modules.request.handlers import request_command, request_callback_handler, request_deeplink_handler
-from modules.id.handlers import id_command
-from modules.stats.handlers import stats_command
+from modules.database.file_db import init_file_db
+from modules.log.logger import setup_in_memory_logger
+from modules.log.startup_log import send_startup_notification
+from modules.log.handlers import log_command, handle_my_chat_member
+from modules.ban.handlers import ban_command, ban_pm_command, ban_support_command, unban_command, enforce_ban_middleware
+from modules.fsub.handlers import enforce_fsub_middleware, handle_chat_join_request, fsub_verify_callback
+from modules.start.start_handler import start_command, menu_callback_router
+from modules.help.handlers import help_command, adminhelp_command
+from modules.roles.handlers import addvol_command, addprom_command, addmod_command, addadmin_command
+from modules.allowance.allowance import quota_command, gift_command, refer_command
 from modules.search.handlers import search_command, search_callback_handler
-
-logger = logging.getLogger(__name__)
+from modules.request.handlers import request_command, request_callback_handler
+from modules.indexing.book_index import handle_book_indexing, index_command, indexing_callback_handler
+from modules.editscript.handlers import (
+    customize_command, editscript_callback, reloadconfig_command,
+    setconfig_command, getconfig_command, template_cli_command,
+)
+from modules.broadcast.handlers import broadcast_command, broadcast_confirm_command, broadcast_callback_handler
+from modules.stats.handlers import stats_command
+from modules.support.handlers import support_command, support_callback_handler
+from modules.id.handlers import id_command
+from modules.utility.ping import ping_command
+from modules.message.message_handler import handle_normal_text
 
 
 def load_env():
-    env_path = "env.txt"
-    if os.path.exists(env_path):
-        with open(env_path, "r") as f:
-            for line in f:
-                if "=" in line and not line.strip().startswith("#"):
-                    key, value = line.strip().split("=", 1)
-                    os.environ[key.strip()] = value.strip()
-        print("✅ Environment variables loaded from env.txt successfully.")
-    else:
-        print("⚠️ env.txt not found, relying on system environment variables.")
-
-
-async def send_startup_log(application):
-    logger_group_id = os.getenv("LOGGER_GROUP_ID")
-    if logger_group_id:
-        try:
-            restart_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_text = "🔄 Bot Restarted Successfully\n\n🤖 Mastermind is now online.\n⏱️ Restarted at " + restart_time
-            await application.bot.send_message(
-                chat_id=int(logger_group_id),
-                text=log_text,
-                parse_mode="HTML"
-            )
-            print("✅ Restart log sent to log group successfully.")
-        except Exception as e:
-            print(f"Failed to send startup log: {e}")
+    for env_path in ("env.txt", ".env"):
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    if "=" in line and not line.strip().startswith("#"):
+                        k, v = line.strip().split("=", 1)
+                        os.environ[k.strip()] = v.strip()
 
 
 def main():
@@ -63,56 +55,81 @@ def main():
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     load_env()
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
     if not token:
-        print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt")
+        print("❌ Please set TELEGRAM_BOT_TOKEN in env.txt")
         exit(1)
 
     logging.basicConfig(level=logging.INFO)
     setup_in_memory_logger()
+    init_config_db()
+    reload_config_cache()
     init_user_db()
-    print("✅ Database and tables initialized successfully.")
-    print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {os.getenv('STORAGE_GROUP_ID')}")
+    init_file_db()
 
-    application = ApplicationBuilder().token(token).build()
+    app = ApplicationBuilder().token(token).build()
 
-    application.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-1)
+    # Middlewares: Group -2 Ban check, Group -1 Force Subscribe check
+    app.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-2)
+    app.add_handler(MessageHandler(filters.ALL, enforce_fsub_middleware), group=-1)
+    app.add_handler(ChatJoinRequestHandler(handle_chat_join_request))
+    app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("support", support_command))
-    application.add_handler(CommandHandler("quota", quota_command))
-    application.add_handler(CommandHandler("gift", gift_command))
-    application.add_handler(CommandHandler("refer", refer_command))
-    application.add_handler(CommandHandler("ban", ban_command))
-    application.add_handler(CommandHandler("ban_pm", ban_pm_command))
-    application.add_handler(CommandHandler("id", id_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("search", search_command))
-    application.add_handler(CommandHandler("request", request_command))
-    application.add_handler(CommandHandler("req", request_command))
+    # User Commands
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("search", search_command))
+    app.add_handler(CommandHandler(["request", "req"], request_command))
+    app.add_handler(CommandHandler("quota", quota_command))
+    app.add_handler(CommandHandler(["refer", "ref"], refer_command))
+    app.add_handler(CommandHandler("support", support_command))
+    app.add_handler(CommandHandler("id", id_command))
+    app.add_handler(CommandHandler("ping", ping_command))
 
-    application.add_handler(
-        CallbackQueryHandler(
-            menu_callback_router,
-            pattern=r"^(help_button|help_menu|search_menu|stats_menu|start_menu|quota|quota_menu|bot_owner)$"
-        )
-    )
-    application.add_handler(CallbackQueryHandler(support_callback_handler, pattern="^support_"))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern="^(file_dl_|search_page_|join_search_group_quiz|generate_group_invite)"))
-    application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^req_"))
-    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
+    # Admin & Role Commands
+    app.add_handler(CommandHandler(["adminhelp", "ownerhelp"], adminhelp_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("log", log_command))
+    app.add_handler(CommandHandler("gift", gift_command))
+    app.add_handler(CommandHandler("ban", ban_command))
+    app.add_handler(CommandHandler("ban_pm", ban_pm_command))
+    app.add_handler(CommandHandler("ban_support", ban_support_command))
+    app.add_handler(CommandHandler("unban", unban_command))
+    app.add_handler(CommandHandler("addvol", addvol_command))
+    app.add_handler(CommandHandler("addprom", addprom_command))
+    app.add_handler(CommandHandler("addmod", addmod_command))
+    app.add_handler(CommandHandler("addadmin", addadmin_command))
+    app.add_handler(CommandHandler(["index", "Index"], index_command))
 
-    print("🤖 Mastermind bot is up and running...")
+    # Config, Customize & Broadcast Commands
+    app.add_handler(CommandHandler(["customize", "editscript", "config", "showconfig"], customize_command))
+    app.add_handler(CommandHandler("reloadconfig", reloadconfig_command))
+    app.add_handler(CommandHandler("setconfig", setconfig_command))
+    app.add_handler(CommandHandler("getconfig", getconfig_command))
+    app.add_handler(CommandHandler(["edittext", "setmedia", "removemedia", "addbutton", "removebutton", "listtemplates", "showtemplate"], template_cli_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("broadcast_confirm", broadcast_confirm_command))
 
-    if application.job_queue:
-        application.job_queue.run_once(lambda ctx: asyncio.create_task(send_startup_log(application)), when=1)
-    else:
-        async def post_init(app):
-            await send_startup_log(app)
-        application.post_init = post_init
+    # Callback Routers
+    app.add_handler(CallbackQueryHandler(fsub_verify_callback, pattern=r"^fsub_"))
+    app.add_handler(CallbackQueryHandler(menu_callback_router, pattern=r"^(help_button|help_menu|help_open_admin|help_sec_|adm_sec_|search_menu|stats_menu|start_menu|quota|quota_menu|bot_owner)"))
+    app.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|search_cancel|noop)"))
+    app.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
+    app.add_handler(CallbackQueryHandler(indexing_callback_handler, pattern=r"^idx_"))
+    app.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^(cust_|es_)"))
+    app.add_handler(CallbackQueryHandler(broadcast_callback_handler, pattern=r"^bcast_"))
+    app.add_handler(CallbackQueryHandler(support_callback_handler, pattern=r"^support_|^quiz_ans_"))
 
-    application.run_polling()
+    # File Upload / Auto-Indexing & Conversational / Text Handlers
+    app.add_handler(MessageHandler(filters.Document.ALL | filters.AUDIO, handle_book_indexing))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.FORWARDED | (filters.TEXT & ~filters.COMMAND), handle_normal_text))
+
+    async def post_init(application):
+        await send_startup_notification(application)
+
+    app.post_init = post_init
+    print("🤖 Mastermind Library Bot is online and polling...")
+    app.run_polling()
 
 
 if __name__ == "__main__":

@@ -1,28 +1,29 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from modules.editscript.handlers import handle_customize_input
+from modules.indexing.book_index import handle_index_wizard_message
+from modules.request.handlers import handle_manual_request_message
+from modules.search.handlers import perform_search
+
 
 async def handle_normal_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = (
-        "<blockquote expandable>"
-        "🤖 <b>Mastermind Notice</b>\n\n"
-        "I am just a Telegram bot and cannot chat freely!\n\n"
-        "• <b>Want to search?</b> Use the /search command and join our search group.\n"
-        "• <b>Want to request?</b> Use the /request command and join our request group.\n"
-        "• <b>Need help?</b> Use the /support command to contact support.\n\n"
-        "Tap the buttons below to see options or view the help menu."
-        "</blockquote>"
-    )
+    if not update.message:
+        return
+    if await handle_customize_input(update, context):
+        return
+    if await handle_index_wizard_message(update, context):
+        return
+    if await handle_manual_request_message(update, context):
+        return
 
-    keyboard = [
-        [
-            InlineKeyboardButton("🔍 Search Group", callback_data='search_menu'),
-            InlineKeyboardButton("📥 Request Group", callback_data='request_menu')
-        ],
-        [
-            InlineKeyboardButton("🛡️ Support", callback_data='support_start_quiz'),
-            InlineKeyboardButton("📖 Help Menu", callback_data='help_button')
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.effective_chat and update.effective_chat.type == "private" and update.message.text:
+        q = update.message.text.strip()
+        if len(q) >= 2 and not q.startswith("/"):
+            await perform_search(update, context, q, 1)
+            return
 
-    await update.message.reply_text(message, parse_mode='HTML', reply_markup=reply_markup)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔍 Search Library", callback_data="search_menu"), InlineKeyboardButton("📖 Help Menu", callback_data="help_button")],
+        [InlineKeyboardButton("🛡️ Support", callback_data="support_start_quiz")],
+    ])
+    await update.message.reply_text("🤖 Use <code>/search &lt;title&gt;</code>, <code>/request &lt;title&gt;</code>, or <code>/help</code>.", parse_mode="HTML", reply_markup=kb)
