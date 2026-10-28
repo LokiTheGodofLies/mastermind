@@ -309,6 +309,15 @@ async def fetch_comprehensive_book_metadata(file_name: str, ext: str = "") -> di
 
     # 3. Query Mediagoer (Goodreads, Storytel, Audible)
     meta = await asyncio.to_thread(_mediagoer_sync_worker, queries, is_audio)
+    if meta and not is_audio and (meta.get("year") in ("N/A", "") or meta.get("rating") in ("N/A", "")):
+        aud_sup = await asyncio.to_thread(_mediagoer_sync_worker, queries, True)
+        if aud_sup:
+            if meta.get("year") in ("N/A", "") and aud_sup.get("year") not in ("N/A", ""):
+                meta["year"] = aud_sup["year"]
+                meta["release_date"] = aud_sup["year"]
+            if meta.get("rating") in ("N/A", "") and aud_sup.get("rating") not in ("N/A", ""):
+                meta["rating"] = aud_sup["rating"]
+                meta["ratings_count"] = aud_sup.get("ratings_count", "0")
 
     # 4. Query OceanofPDF, EbookHunter, Anna's Archive, Mobilism, and AudioBookBay
     async with aiohttp.ClientSession(headers=HEADERS) as session:
