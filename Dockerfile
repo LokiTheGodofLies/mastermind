@@ -5,6 +5,8 @@ USER root
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     QT_QPA_PLATFORM=offscreen \
+    QTWEBENGINE_DISABLE_SANDBOX=1 \
+    QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu --headless" \
     PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Install Pandoc for document conversions

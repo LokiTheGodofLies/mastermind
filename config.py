@@ -68,3 +68,6 @@ for _p in [
         os.environ["PATH"] = f"{_p}:{os.environ.get('PATH', '')}"
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
+os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-gpu --headless")
