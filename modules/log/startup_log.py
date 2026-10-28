@@ -33,7 +33,9 @@ async def send_error_alert(bot, error_text: str):
                 await _send_html(bot, lg, body, t)
                 break
             except Exception: pass
-    await _notify_owners(bot, body)async def _chk(bot, lbl, cid):
+    await _notify_owners(bot, body)
+
+async def _chk(bot, lbl, cid):
     if not cid: return f"• <b>{lbl}:</b> ❌ Not Set"
     try:
         ch = await bot.get_chat(int(cid))
