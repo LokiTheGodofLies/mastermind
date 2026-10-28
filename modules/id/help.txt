@@ -1,0 +1,7 @@
+MODULE: id  (modules/id/)
+=========================
+  /id                 Your user ID, the chat ID and chat type.
+  /id (as a reply)    The replied user's name and ID plus the chat ID.
+  /id @name           Echoes the username (no lookup is possible for arbitrary users).
+Works in private chats, groups and channels; useful when filling env/config chat IDs.
+It is exempt from the topic filter and force-subscribe so it always answers.

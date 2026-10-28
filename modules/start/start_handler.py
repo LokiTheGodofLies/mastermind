@@ -2,8 +2,8 @@ from datetime import datetime
 from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from modules.database.user_db import add_or_update_user_db, get_user_role_db, set_helper_started_db
-from modules.database.config_db import get_template, format_template_string
+from modules.database.user_db import add_or_update_user_db, get_user_role_db, set_helper_started_db, get_owner_ids
+from modules.database.config_db import get_template, format_template_string, get_config, get_config_int
 from modules.database.file_db import get_file_by_start_payload_db
 from modules.allowance.referral import process_referral_with_notification
 from modules.allowance.allowance import get_user_quota_summary
@@ -48,7 +48,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ref_id = int(args[0].split("_", 1)[1])
             ok, msg = await process_referral_with_notification(context, ref_id, user.id, user.full_name or user.first_name, is_first_time=is_new)
             if ok:
-                referral_notice = "\n\n🎁 <b>Referral bonus applied: +10 search quota, +10 request quota!</b>"
+                s_bon, r_bon = get_config_int("referral_bonus_search", 10), get_config_int("referral_bonus_request", 10)
+                referral_notice = f"\n\n🎁 <b>Referral bonus applied: +{s_bon} search quota, +{r_bon} request quota!</b>"
             else:
                 referral_notice = f"\n\n<i>{msg}</i>"
         except ValueError:
@@ -70,9 +71,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     kb = [
         [InlineKeyboardButton("🔍 Search Library", callback_data="search_menu"), InlineKeyboardButton("📖 Help Menu", callback_data="help_button")],
-        [InlineKeyboardButton("📊 My Quota", callback_data="quota_menu"), InlineKeyboardButton("📤 Refer & Earn +10", url=share_url)],
-        [InlineKeyboardButton("💬 Join Community", url="https://t.me/heyucutie")],
+        [InlineKeyboardButton("📊 My Quota", callback_data="quota_menu"), InlineKeyboardButton("🔄 Convert Ebook", callback_data="cv|menu")],
+        [InlineKeyboardButton(f"📤 Refer & Earn +{get_config_int('referral_bonus_search', 10)}", url=share_url)],
     ]
+    community = get_config("community_url")
+    if community:
+        kb.append([InlineKeyboardButton("💬 Join Community", url=community)])
 
     for b in tpl.get("buttons", []):
         if b.get("type") == "url":
@@ -124,4 +128,5 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         await q.message.edit_text(txt, parse_mode="HTML", reply_markup=kb)
     elif d == "bot_owner":
         await q.answer()
-        await q.message.edit_text("👑 <b>Bot Owner:</b> <code>7261537212</code>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back", callback_data="start_menu")]]))
+        owners = ", ".join(f"<code>{o}</code>" for o in sorted(get_owner_ids())) or "<i>not configured</i>"
+        await q.message.edit_text(f"👑 <b>Bot Owner:</b> {owners}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back", callback_data="start_menu")]]))

@@ -1,0 +1,8 @@
+MODULE: message  (modules/message/)
+===================================
+Plain text, photo, video and forwarded messages. handle_normal_text tries in order:
+  1. customize wizard (admin editing a template/variable)   2. /index wizard
+  3. manual request wizard                                  4. direct search
+Direct search: in private chat any text of 2+ characters is a search; in a group only inside the
+registered Search topic (/settopic search). Anything else in private chat gets a short hint with
+Search / Help / Support buttons. Commands never reach this handler.

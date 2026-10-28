@@ -3,8 +3,8 @@ import tempfile
 from telegram import Update
 from telegram.ext import ContextTypes, ApplicationHandlerStop
 from modules.database.user_db import get_user_role_db
-from modules.database.config_db import get_config, get_config_int, set_config, set_group_topic_db, get_group_topics_db
-from modules.log.logger import get_logs_by_count, get_logs_by_time, setup_in_memory_logger
+from modules.database.config_db import get_config, set_config, set_group_topic_db, get_group_topics_db
+from modules.log.logger import get_logs_by_count, setup_in_memory_logger
 from modules.log.startup_log import send_log_with_fallback
 
 setup_in_memory_logger()

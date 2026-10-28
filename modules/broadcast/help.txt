@@ -1,0 +1,20 @@
+MODULE: broadcast  (modules/broadcast/)
+=======================================
+Purpose
+  Admin/Owner message to many users at once.
+
+Commands
+  /broadcast <everyone|normal|promoter|volunteer|moderator|admin> <message>
+      Shows a preview with [Confirm] / [Cancel] inline buttons.
+  /broadcast_confirm <target> <message>
+      Sends immediately without the preview step.
+
+Logic
+  - Disabled when config is_broadcast_enabled = false.
+  - Targets map to roles in the users table; "everyone" / "all" sends to all registered users.
+  - Messages are sent as HTML, one by one with a 0.05 s pause (flood protection). Users who
+    blocked the bot count as "failed" and never stop the run.
+  - A summary (target, recipients, delivered, failed) replaces the status message and is also
+    logged to the admin log group (general topic).
+  - The pending message lives in the admin's own session (context.user_data).
+Callbacks: bcast_confirm, bcast_cancel.

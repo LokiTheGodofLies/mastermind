@@ -10,7 +10,7 @@ from modules.database.user_db import (
     increment_request_used_db,
     add_quota_limits_db,
 )
-from modules.database.config_db import get_template, format_template_string
+from modules.database.config_db import get_template, format_template_string, get_config_int
 from modules.allowance.referral import get_user_referral_stats
 from modules.log.startup_log import send_log_with_fallback
 
@@ -109,16 +109,18 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ref_link = f"https://t.me/{bot_uname}?start=ref_{user.id}"
     stats = get_user_referral_stats(user.id)
     total = stats["total_invites"]
+    s_bon = get_config_int("referral_bonus_search", 10)
+    r_bon = get_config_int("referral_bonus_request", 10)
     text = (
         f"🔗 <b>Your Referral Dashboard</b>\n\n"
         f"📌 <b>Your Referral Link:</b>\n<code>{ref_link}</code>\n"
         f"💡 Or command: <code>/ref {user.id}</code>\n\n"
         f"📊 <b>Total Friends Invited:</b> <code>{total}</code>\n"
-        f"🎁 <b>Total Bonus Earned:</b> <code>+{total * 10}</code> Searches & Requests\n\n"
-        f"<i>When a new first-time user joins via your link, both of you receive +10 search quota and +10 request quota!</i>"
+        f"🎁 <b>Total Bonus Earned:</b> <code>+{total * s_bon}</code> Searches & <code>+{total * r_bon}</code> Requests\n\n"
+        f"<i>When a new first-time user joins via your link, both of you receive +{s_bon} search quota and +{r_bon} request quota!</i>"
     )
     enc_u = urllib.parse.quote(ref_link, safe="")
-    enc_t = urllib.parse.quote("Join and earn +10 bonus quota", safe="")
+    enc_t = urllib.parse.quote(f"Join and earn +{s_bon} bonus quota", safe="")
     share_url = f"https://t.me/share/url?url={enc_u}&text={enc_t}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Share Referral Link", url=share_url)]])
     await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=kb)

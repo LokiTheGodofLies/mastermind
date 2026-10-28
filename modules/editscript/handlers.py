@@ -5,7 +5,7 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import (
-    get_config, get_config_bool, set_config, get_all_configs, reload_config_cache,
+    get_config, get_config_bool, set_config, get_all_configs, reload_config_cache, mask_value,
     get_template, list_templates, update_template_text, update_template_media,
     remove_template_media, add_template_button, remove_template_button,
     add_fsub_channel_db, remove_fsub_channel_db, get_fsub_channels_db,
@@ -254,7 +254,7 @@ async def handle_customize_input(update: Update, context: ContextTypes.DEFAULT_T
         k = state["target"]
         set_config(k, msg.text.strip(), updated_by=uid)
         context.user_data.pop("cust_prompt", None)
-        await msg.reply_text(f"✅ Config <code>{k}</code> updated to <code>{html.escape(msg.text.strip())}</code> (Hot-reloaded!)", parse_mode="HTML")
+        await msg.reply_text(f"✅ Config <code>{k}</code> updated to <code>{html.escape(mask_value(k, msg.text.strip()))}</code> (Hot-reloaded!)", parse_mode="HTML")
         return True
 
     if action == "add_fsub":
@@ -311,7 +311,7 @@ async def _handle_cust_template_and_db_callbacks(q, d: str, uid: int, context: C
     elif d == "cust_vars_menu":
         await q.answer()
         cfgs = get_all_configs()
-        kb = [[InlineKeyboardButton(f"{c['key']} = {str(c['value'])[:18]}", callback_data=f"cust_var_{c['key']}")] for c in cfgs[:20]]
+        kb = [[InlineKeyboardButton(f"{c['key']} = {mask_value(c['key'], c['value'])[:18]}", callback_data=f"cust_var_{c['key']}")] for c in cfgs[:40]]
         kb.append([InlineKeyboardButton("≼ BACK", callback_data="cust_open_main")])
         await q.message.edit_text("⚙️ <b>Select a Variable to Edit Live:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
     elif d.startswith("cust_var_"):
@@ -320,7 +320,7 @@ async def _handle_cust_template_and_db_callbacks(q, d: str, uid: int, context: C
         context.user_data["cust_prompt"] = {"action": "set_var", "target": k}
         await q.answer()
         await q.message.edit_text(
-            f"⚙️ <b>Variable:</b> <code>{k}</code>\n<b>Current Value:</b> <code>{html.escape(str(val))}</code>\n\nReply with the new value:",
+            f"⚙️ <b>Variable:</b> <code>{k}</code>\n<b>Current Value:</b> <code>{html.escape(mask_value(k, val))}</code>\n\nReply with the new value:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ BACK", callback_data="cust_vars_menu")]]),
         )
@@ -403,7 +403,7 @@ async def setconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for alias in ("logger_group_id", "general_log_group_id", "admin_log_group_id"):
             set_config(alias, v, updated_by=update.effective_user.id)
     reload_config_cache()
-    await update.effective_message.reply_text(f"✅ Set <code>{html.escape(k)}</code> = <code>{html.escape(v)}</code>", parse_mode="HTML")
+    await update.effective_message.reply_text(f"✅ Set <code>{html.escape(k)}</code> = <code>{html.escape(mask_value(k, v))}</code>", parse_mode="HTML")
 
 
 async def getconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -412,11 +412,11 @@ async def getconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if not context.args:
         cfgs = get_all_configs()
-        lines = ["⚙️ <b>Current Configuration:</b>"] + [f"• <code>{c['key']}</code> = <code>{html.escape(str(c['value']))}</code>" for c in cfgs]
+        lines = ["⚙️ <b>Current Configuration:</b>"] + [f"• <code>{c['key']}</code> = <code>{html.escape(mask_value(c['key'], c['value']))}</code>" for c in cfgs]
         await update.effective_message.reply_text("\n".join(lines), parse_mode="HTML")
         return
     k = context.args[0]
-    await update.effective_message.reply_text(f"🔍 <code>{html.escape(k)}</code> = <code>{html.escape(str(get_config(k, '(Not set)')))}</code>", parse_mode="HTML")
+    await update.effective_message.reply_text(f"🔍 <code>{html.escape(k)}</code> = <code>{html.escape(mask_value(k, get_config(k, '(Not set)')))}</code>", parse_mode="HTML")
 
 
 async def template_cli_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,15 +482,18 @@ async def get_render_deploy_details(deploy_id: str = "") -> str:
     import json
     from modules.log.logger import get_logs_by_count
 
-    srv_id = get_config("render_service_id", "srv-dbgi9nflk1mc73c0abmg")
+    srv_id = get_config("render_service_id", "")
     api_key = get_config("render_api_key", fallback_env="RENDER_API_KEY")
     lines = []
 
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        # 1. Fetch latest commit on LokiTheGodofLies/mastermind being deployed
+        # 1. Fetch the latest commit of the configured GitHub repo (github_repo = owner/name)
+        gh_repo = get_config("github_repo", "")
         try:
-            gh_url = "https://api.github.com/repos/LokiTheGodofLies/mastermind/commits/main"
+            if not gh_repo:
+                raise LookupError("github_repo not configured")
+            gh_url = f"https://api.github.com/repos/{gh_repo}/commits/main"
             async with session.get(gh_url, headers={"User-Agent": "MastermindBot"}) as gresp:
                 if gresp.status == 200:
                     gdata = await gresp.json()
@@ -499,7 +502,7 @@ async def get_render_deploy_details(deploy_id: str = "") -> str:
                     cauthor = gdata.get("commit", {}).get("author", {}).get("name") or "GitHub"
                     lines.append(f"📦 <b>Target Commit:</b> <code>{sha}</code> — <i>{html.escape(cmsg[:60])}</i> (by {html.escape(cauthor)})")
         except Exception:
-            pass
+            pass  # commit lookup is optional
 
         # 2. If RENDER_API_KEY is configured, query Render REST API v1 for exact deploy status & build logs
         if api_key and srv_id:

@@ -1,0 +1,65 @@
+MODULE: converter  (modules/converter/)
+=======================================
+Purpose
+  Converts ebooks/documents between formats, driven by inline buttons. Users never type a
+  format: they send a file, tap the target format, and receive the result.
+  Merged from the standalone "ebook_converter" module (Calibre + Pandoc + KFX + PDF/Office
+  pre-processing) and the bot's Telegram front-end.
+
+Files
+  formats.py   Plain data + routing: the 61 readable inputs, 31 writable outputs, Pandoc maps,
+               output_choices(input, calibre=, pandoc=, kfx=), backend_for(), effective_input().
+               No Telegram or external tools needed.
+  engine.py    Async conversion pipeline (Telegram-free): process-group sandboxing, timeouts,
+               output validation, PDF -> HTMLZ (PyMuPDF), legacy Office -> Markdown (Anydoc),
+               KFX plugins, Pandoc, RTL EPUB patching, host capability detection, semaphore.
+  handlers.py  python-telegram-bot front-end: /convert, upload hook, keyboard, callbacks.
+  telethon_adapter.py  OPTIONAL Telethon front-end for a separate MTProto bot (not used by main.py).
+
+Commands
+  /convert                 Reply to a file with /convert, OR send /convert and then upload a file
+                           (waits 5 minutes). Also reachable from the start menu: "Convert Ebook".
+
+Callback data (prefix "cv|")
+  cv|menu                  Open the convert screen from the start menu.
+  cv|fmt|<format>|<token>  Convert the pending file to <format>.
+  cv|rtl|<token>           Toggle "Force RTL" for the pending file.
+  cv|cancel|<token>        Discard the pending file.
+  cv|wait_cancel           Stop waiting for an upload.
+
+How it works
+  1. The file type and size are checked (max 20 MB: Telegram bots cannot download more).
+  2. A short random token is stored in the user's own session (expires after 15 minutes) and
+     buttons are shown for every output that is valid for the input AND installed on the host.
+  3. On a tap: the file is downloaded to a temporary folder, converted, uploaded, and the
+     folder is deleted - even on errors or timeouts.
+  4. A user can run one conversion at a time; globally only convert_max_concurrent run at once,
+     the rest show "Queued".
+  5. Results above ~49 MB are refused (Telegram's 50 MB bot upload cap).
+
+Routing summary
+  calibre  : ebook formats -> CALIBRE_OUTPUTS            (needs "ebook-convert")
+  pandoc   : markup/office inputs, and md/html/odt/org/rst/tex/typ/adoc/pptx outputs (needs "pandoc")
+  pdf      : text is extracted with PyMuPDF first (falls back to Calibre's PDF reader without it)
+  doc/xls/ppt/odp/ods/docm/xlsm : need the optional "firecrawl-anydoc" package
+  kfx      : needs Calibre's KFX Input/Output plugins and convert_kfx_enabled=true
+
+Settings (change live with /setconfig <key> <value>)
+  convert_enabled           true/false - master switch.
+  convert_timeout_seconds   Default 300. Per-conversion time limit.
+  convert_max_concurrent    Default 2. Simultaneous conversions on this host.
+  convert_max_input_mb      Default 20 (cannot exceed 20 because of the Bot API).
+  convert_kfx_enabled       Default false. Offer KFX (plugins required).
+
+Requirements
+  Calibre and/or Pandoc on the host. The provided Dockerfile installs both plus
+  requirements-converter.txt (pymupdf, firecrawl-anydoc).
+
+Integration points
+  - main.py registers /convert and the "^cv\|" callback handler.
+  - modules/indexing/book_index.py::handle_book_indexing calls handle_convert_upload() first so
+    a file sent right after /convert is converted instead of being indexed.
+
+Known gap
+  Shamela ".bok" input from the standalone module is NOT supported: that module imported a
+  bok_helper that was never part of the archive.

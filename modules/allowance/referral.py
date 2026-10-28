@@ -1,7 +1,5 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
 from modules.database.config_db import get_config_int
-from modules.database.user_db import record_referral_db, add_quota_limits_db, get_referred_users_db, user_exists_db
+from modules.database.user_db import record_referral_db, add_quota_limits_db, get_referred_users_db
 
 
 def process_referral(referrer_id: int, new_user_id: int, is_first_time: bool = True):
@@ -26,7 +24,7 @@ async def process_referral_with_notification(context, referrer_id: int, new_user
     ok, msg = process_referral(referrer_id, new_user_id, is_first_time=is_first_time)
     if not ok:
         return False, msg
-    notice = "🎁 <b>Referral bonus applied: +10 search quota, +10 request quota</b>"
+    notice = f"🎁 <b>Referral bonus applied: +{get_config_int('referral_bonus_search', 10)} search quota, +{get_config_int('referral_bonus_request', 10)} request quota</b>"
     if context and hasattr(context, "bot"):
         for uid, txt in [
             (referrer_id, f"👤 <b>New Referral Joined!</b> ({new_user_name})\n{notice}"),
