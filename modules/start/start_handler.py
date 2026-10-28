@@ -1,3 +1,4 @@
+import urllib.parse
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -21,11 +22,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     referral_notice = ""
     args = context.args
-    if args and args[0].startswith("dl_"):
+    if args and args[0].startswith(("dl_", "file_")):
         try:
-            file_row_id = int(args[0].replace("dl_", ""))
             from modules.search.handlers import deliver_file_to_user
-            await deliver_file_to_user(target_msg, user, file_row_id, context)
+            await deliver_file_to_user(target_msg, user, args[0], context)
             return
         except Exception as e:
             await target_msg.reply_text(f"❌ Error delivering file: {e}")
@@ -50,7 +50,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot_uname = context.bot.username or "Bot"
     ref_link = f"https://t.me/{bot_uname}?start=ref_{user.id}"
-    share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20and%20earn%20%2B10%20bonus%20quota"
+    enc_u = urllib.parse.quote(ref_link, safe="")
+    enc_t = urllib.parse.quote("Join and earn +10 bonus quota", safe="")
+    share_url = f"https://t.me/share/url?url={enc_u}&text={enc_t}"
 
     kb = [
         [InlineKeyboardButton("🔍 Search Library", callback_data="search_menu"), InlineKeyboardButton("📖 Help Menu", callback_data="help_button")],

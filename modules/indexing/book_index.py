@@ -282,7 +282,8 @@ async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_na
     size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{(file_size or 0) / 1024:.1f} KB"
 
     caption_html = format_index_caption(file_name, size_str, ext.lstrip("."), mime_type, meta)
-    target_msg = await bot.send_document(chat_id=int(storage_id), document=file_id, caption=caption_html, parse_mode="HTML")
+    comm_kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Join our community", url="https://t.me/heyucutie")]])
+    target_msg = await bot.send_document(chat_id=int(storage_id), document=file_id, caption=caption_html, parse_mode="HTML", reply_markup=comm_kb)
 
     save_indexed_file_db(
         file_unique_id=file_unique_id,

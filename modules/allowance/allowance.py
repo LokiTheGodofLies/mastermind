@@ -1,3 +1,4 @@
+import urllib.parse
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -116,6 +117,8 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎁 <b>Total Bonus Earned:</b> <code>+{total * 10}</code> Searches & Requests\n\n"
         f"<i>When a new first-time user joins via your link, both of you receive +10 search quota and +10 request quota!</i>"
     )
-    share_url = f"https://t.me/share/url?url={ref_link}&text=Join%20and%20get%20%2B10%20bonus%20quota"
+    enc_u = urllib.parse.quote(ref_link, safe="")
+    enc_t = urllib.parse.quote("Join and earn +10 bonus quota", safe="")
+    share_url = f"https://t.me/share/url?url={enc_u}&text={enc_t}"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Share Referral Link", url=share_url)]])
     await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=kb)
