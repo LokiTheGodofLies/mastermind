@@ -14,25 +14,18 @@ from modules.database.user_db import get_user_role_db
 from modules.log.startup_log import send_log_with_fallback
 
 logger = logging.getLogger(__name__)
-SUPPORTED_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".djvu", ".mp3", ".m4b", ".aax", ".cbz"}
+EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".djvu", ".cbz"}
+AUDIO_EXTENSIONS = {".mp3", ".m4b", ".aax"}
+SUPPORTED_EXTENSIONS = EBOOK_EXTENSIONS | AUDIO_EXTENSIONS
+
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128.0.0.0 Safari/537.36"}
-_BOOK_CACHE = {}
+_META_CACHE = {}
 
 QUEUE_STATE = {
-    "running": False,
-    "paused": False,
-    "cancelled": False,
-    "status": "idle",
-    "fetched": 0,
-    "remaining": 0,
-    "forwarded": 0,
-    "duplicates": 0,
-    "deleted": 0,
-    "skipped": 0,
-    "filtered": 0,
-    "start_time": 0.0,
-    "card_chat_id": None,
-    "card_msg_id": None,
+    "running": False, "paused": False, "cancelled": False, "status": "idle",
+    "fetched": 0, "remaining": 0, "forwarded": 0, "duplicates": 0,
+    "deleted": 0, "skipped": 0, "filtered": 0, "start_time": 0.0,
+    "card_chat_id": None, "card_msg_id": None,
 }
 
 
@@ -40,85 +33,149 @@ def clean_filename_for_search(file_name: str) -> str:
     if not file_name:
         return ""
     name = re.sub(r"\.[a-zA-Z0-9]{2,5}$", "", file_name)
-    name = re.sub(r"\[.*?\]|\(.*?\)", " ", name)
+    # Strip round, square, and curly brackets
+    name = re.sub(r"\[.*?\]|\(.*?\)|(\{.*?\})", " ", name)
     noise = r"\b(z-lib\.org|z-library|annas-archive|libgen|epub|pdf|azw3|kfx|mp3|m4b|aax|audiobook|unabridged|64kbps|128kbps)\b"
     name = re.sub(noise, " ", name, flags=re.IGNORECASE)
     name = re.sub(r"[_\.\-]+", " ", name)
+    # Clean isolated single characters like ' s '
+    name = re.sub(r"\s+[a-zA-Z]\s+", " ", name)
     return re.sub(r"\s+", " ", name).strip()
 
 
-def _default_book_meta(clean_title: str) -> dict:
-    return {
-        "book_title": clean_title or "Unknown Title",
-        "book_author": "Unknown Author",
-        "book_rating": "N/A",
-        "book_ratings_count": "0",
-        "book_genres": "General",
-        "book_pages": "N/A",
-        "book_published": "N/A",
-        "book_url": "",
-    }
-
-
-async def fetch_goodreads_metadata(file_name: str) -> dict:
-    clean_query = clean_filename_for_search(file_name)
-    if not clean_query:
-        return _default_book_meta(file_name)
-    ckey = clean_query.lower()
-    if ckey in _BOOK_CACHE:
-        return _BOOK_CACHE[ckey]
+async def fetch_audible_metadata(query: str) -> dict:
+    clean_q = clean_filename_for_search(query)
+    ckey = f"aud_{clean_q.lower()}"
+    if ckey in _META_CACHE:
+        return _META_CACHE[ckey]
 
     timeout = aiohttp.ClientTimeout(total=8)
     try:
-        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
-            words = clean_query.split()
-            queries = [clean_query] + ([" ".join(words[:5])] if len(words) > 5 else [])
-            for q in queries:
-                url = f"https://www.goodreads.com/book/auto_complete?format=json&q={quote_plus(q)}"
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        items = await resp.json(content_type=None)
-                        if isinstance(items, list) and items:
-                            first = items[0]
-                            author_obj = first.get("author") or {}
-                            data = {
-                                "book_title": first.get("title") or clean_query,
-                                "book_author": author_obj.get("name") if isinstance(author_obj, dict) else "Unknown Author",
-                                "book_rating": str(first.get("avgRating") or "N/A"),
-                                "book_ratings_count": str(first.get("ratingsCount") or "0"),
-                                "book_genres": "Books & Literature",
-                                "book_pages": str(first.get("numPages") or "N/A"),
-                                "book_published": str(first.get("publicationYear") or "N/A"),
-                                "book_url": urljoin("https://www.goodreads.com", first.get("bookUrl", "")).split("?")[0],
-                            }
-                            _BOOK_CACHE[ckey] = data
-                            return data
+        url = "https://api.audible.com/1.0/catalog/products"
+        params = {
+            "keywords": clean_q,
+            "num_results": 1,
+            "products_sort_by": "Relevance",
+            "response_groups": "contributors,product_attrs,product_desc,series",
+        }
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    prods = data.get("products") or []
+                    if prods:
+                        p = prods[0]
+                        authors = ", ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")) or "Unknown Author"
+                        narrators = ", ".join(n.get("name", "") for n in p.get("narrators", []) if n.get("name")) or "N/A"
+                        s_list = p.get("series") or []
+                        series_str = f"{s_list[0].get('title', '')}, #{s_list[0].get('sequence', '')}".strip(", #") if s_list else ""
+                        rel_date = (p.get("release_date") or p.get("issue_date") or "N/A")[:10]
+                        pub = p.get("publisher_name") or "Audible Studios"
+                        asin = p.get("asin") or ""
+                        link = f"https://www.audible.com/pd/{asin}" if asin else ""
+                        run_time = p.get("runtime_length_min") or 0
+                        hrs, mins = divmod(run_time, 60)
+                        len_str = f"{hrs} hrs and {mins} mins" if hrs else f"{mins} mins"
+
+                        meta = {
+                            "title": p.get("title") or clean_q,
+                            "author": authors,
+                            "narrator": narrators,
+                            "series": series_str,
+                            "length_str": len_str,
+                            "release_date": rel_date,
+                            "publisher": pub,
+                            "url": link,
+                            "is_audiobook": True,
+                        }
+                        _META_CACHE[ckey] = meta
+                        return meta
     except Exception as e:
-        logger.warning(f"Goodreads lookup warning: {e}")
-    return _default_book_meta(clean_query)
+        logger.warning(f"Audible metadata lookup error: {e}")
+
+    # Fallback to Goodreads if Audible has no result
+    return await fetch_goodreads_metadata(query)
 
 
-def format_index_channel_caption(file_name: str, file_size_str: str, extension: str, file_type: str, book_meta: dict) -> str:
-    esc_fn = html.escape(file_name or "Unknown")
-    esc_t = html.escape(book_meta.get("book_title") or "Unknown")
-    esc_a = html.escape(book_meta.get("book_author") or "N/A")
-    esc_r = html.escape(book_meta.get("book_rating") or "N/A")
-    esc_rc = html.escape(book_meta.get("book_ratings_count") or "0")
-    esc_g = html.escape(book_meta.get("book_genres") or "N/A")
-    esc_p = html.escape(book_meta.get("book_pages") or "N/A")
-    esc_pub = html.escape(book_meta.get("book_published") or "N/A")
-    burl = book_meta.get("book_url") or ""
+async def fetch_goodreads_metadata(query: str) -> dict:
+    clean_q = clean_filename_for_search(query)
+    ckey = f"gr_{clean_q.lower()}"
+    if ckey in _META_CACHE:
+        return _META_CACHE[ckey]
+
+    timeout = aiohttp.ClientTimeout(total=8)
+    try:
+        url = f"https://www.goodreads.com/book/auto_complete?format=json&q={quote_plus(clean_q)}"
+        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    items = await resp.json(content_type=None)
+                    if isinstance(items, list) and items:
+                        first = items[0]
+                        a_obj = first.get("author") or {}
+                        meta = {
+                            "title": first.get("title") or clean_q,
+                            "author": a_obj.get("name") if isinstance(a_obj, dict) else "Unknown Author",
+                            "narrator": "N/A",
+                            "series": "",
+                            "length_str": f"{first.get('numPages', 'N/A')} pages",
+                            "release_date": str(first.get("publicationYear") or "N/A"),
+                            "publisher": "Goodreads Catalog",
+                            "rating": str(first.get("avgRating") or "N/A"),
+                            "ratings_count": str(first.get("ratingsCount") or "0"),
+                            "url": urljoin("https://www.goodreads.com", first.get("bookUrl", "")).split("?")[0],
+                            "is_audiobook": False,
+                        }
+                        _META_CACHE[ckey] = meta
+                        return meta
+    except Exception as e:
+        logger.warning(f"Goodreads metadata lookup error: {e}")
+
+    return {
+        "title": clean_q or query, "author": "Unknown Author", "narrator": "N/A",
+        "series": "", "length_str": "N/A", "release_date": "N/A",
+        "publisher": "Unknown", "rating": "N/A", "ratings_count": "0",
+        "url": "", "is_audiobook": False,
+    }
+
+
+def format_index_caption(file_name: str, size_str: str, ext: str, mime: str, meta: dict) -> str:
+    esc_fn = html.escape(file_name)
+    esc_t = html.escape(meta.get("title") or file_name)
+    esc_a = html.escape(meta.get("author") or "Unknown Author")
+    burl = meta.get("url") or ""
     t_disp = f'<a href="{html.escape(burl)}">{esc_t}</a>' if burl else esc_t
-    lines = [
-        f"📚 <b>Book:</b> {t_disp}",
-        f"✍️ <b>Author:</b> <code>{esc_a}</code>",
-        f"⭐ <b>Rating:</b> <code>{esc_r}</code> (<code>{esc_rc}</code> ratings)",
-        f"🏷 <b>Genres:</b> <code>{esc_g}</code>",
-        f"📄 <b>Pages:</b> <code>{esc_p}</code> | 📅 <code>{esc_pub}</code>",
-        "",
-        f"📁 <b>File Name:</b> <code>{esc_fn}</code>",
-        f"📦 <b>Size:</b> <code>{html.escape(file_size_str)}</code> | <b>Type:</b> <code>{html.escape(file_type)} (.{html.escape(extension)})</code>",
-    ]
+
+    if meta.get("is_audiobook"):
+        esc_n = html.escape(meta.get("narrator") or "N/A")
+        esc_len = html.escape(meta.get("length_str") or "N/A")
+        esc_pub = html.escape(meta.get("publisher") or "N/A")
+        esc_rel = html.escape(meta.get("release_date") or "N/A")
+        lines = [
+            f"🎧 <b>Audiobook:</b> {t_disp}",
+            f"✍️ <b>By:</b> <code>{esc_a}</code>",
+            f"🎙 <b>Narrated by:</b> <code>{esc_n}</code>",
+            f"⏱ <b>Length:</b> <code>{esc_len}</code>",
+            f"📅 <b>Release Date:</b> <code>{esc_rel}</code>",
+            f"🏢 <b>Publisher:</b> <code>{esc_pub}</code>",
+            "",
+            f"📁 <b>File:</b> <code>{esc_fn}</code>",
+            f"📦 <b>Size:</b> <code>{size_str}</code> | <b>Type:</b> <code>.{ext}</code>",
+        ]
+    else:
+        esc_r = html.escape(meta.get("rating") or "N/A")
+        esc_rc = html.escape(meta.get("ratings_count") or "0")
+        esc_len = html.escape(meta.get("length_str") or "N/A")
+        esc_rel = html.escape(meta.get("release_date") or "N/A")
+        lines = [
+            f"📚 <b>Book:</b> {t_disp}",
+            f"✍️ <b>Author:</b> <code>{esc_a}</code>",
+            f"⭐ <b>Rating:</b> <code>{esc_r}</code> (<code>{esc_rc}</code> ratings)",
+            f"📄 <b>Pages:</b> <code>{esc_len}</code> | 📅 <code>{esc_rel}</code>",
+            "",
+            f"📁 <b>File:</b> <code>{esc_fn}</code>",
+            f"📦 <b>Size:</b> <code>{size_str}</code> | <b>Type:</b> <code>.{ext}</code>",
+        ]
     return "\n".join(lines)[:1020]
 
 
@@ -183,8 +240,21 @@ def render_progress_card_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+async def _refresh_progress_card(bot):
+    cid, mid = QUEUE_STATE["card_chat_id"], QUEUE_STATE["card_msg_id"]
+    if not cid or not mid:
+        return
+    try:
+        await bot.edit_message_text(
+            chat_id=int(cid), message_id=int(mid),
+            text=render_progress_card_text(), parse_mode="HTML",
+            reply_markup=render_progress_card_keyboard(),
+        )
+    except Exception:
+        pass
+
+
 async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_name: str, file_size: int, mime_type: str, user_id: int, user_title: str, orig_caption: str = "") -> str:
-    """Returns 'forwarded', 'duplicate', or 'filtered'."""
     storage_id = get_config("storage_channel_id", fallback_env="STORAGE_GROUP_ID")
     if not storage_id:
         return "filtered"
@@ -196,17 +266,19 @@ async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_na
     if get_file_by_unique_id_db(file_unique_id):
         return "duplicate"
 
-    book_meta = await fetch_goodreads_metadata(file_name)
+    is_audio = ext in AUDIO_EXTENSIONS
+    if is_audio:
+        meta = await fetch_audible_metadata(file_name)
+        cat = "audiobook"
+    else:
+        meta = await fetch_goodreads_metadata(file_name)
+        cat = "book"
+
     size_mb = (file_size or 0) / (1024 * 1024)
     size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{(file_size or 0) / 1024:.1f} KB"
 
-    caption_html = format_index_channel_caption(file_name, size_str, ext.lstrip("."), mime_type, book_meta)
-    if ext in {".mp3", ".m4b", ".aax"}:
-        target_msg = await bot.send_document(chat_id=int(storage_id), document=file_id, caption=caption_html, parse_mode="HTML")
-        cat = "audiobook"
-    else:
-        target_msg = await bot.send_document(chat_id=int(storage_id), document=file_id, caption=caption_html, parse_mode="HTML")
-        cat = "book"
+    caption_html = format_index_caption(file_name, size_str, ext.lstrip("."), mime_type, meta)
+    target_msg = await bot.send_document(chat_id=int(storage_id), document=file_id, caption=caption_html, parse_mode="HTML")
 
     save_indexed_file_db(
         file_unique_id=file_unique_id,
@@ -221,42 +293,30 @@ async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_na
         extension=ext,
         file_type=mime_type,
         category=cat,
-        title=book_meta.get("book_title", ""),
-        author=book_meta.get("book_author", ""),
-        publisher=book_meta.get("book_published", ""),
-        release_date=book_meta.get("book_published", ""),
+        title=meta.get("title", file_name),
+        author=meta.get("author", "Unknown Author"),
+        narrator=meta.get("narrator", "N/A"),
+        series=meta.get("series", ""),
+        publisher=meta.get("publisher", ""),
+        release_date=meta.get("release_date", ""),
+        length_str=meta.get("length_str", ""),
         keywords=clean_filename_for_search(file_name),
     )
 
+    log_label = "🎧 <b>Audiobook Indexed</b>" if is_audio else "📚 <b>Book Indexed</b>"
     log_txt = (
-        f"📥 <b>File Indexed Successfully</b>\n\n"
-        f"📚 <b>Title:</b> {html.escape(book_meta.get('book_title', file_name))}\n"
+        f"{log_label}\n\n"
+        f"📖 <b>Title:</b> {html.escape(meta.get('title', file_name))}\n"
+        f"✍️ <b>Author:</b> {html.escape(meta.get('author', 'Unknown'))}\n"
         f"📂 <b>File:</b> <code>{html.escape(file_name)}</code>\n"
         f"🆔 <b>Unique ID:</b> <code>{file_unique_id}</code>\n"
-        f"👤 <b>Indexed By:</b> {html.escape(user_title)} (<code>{user_id}</code>)"
+        f"👤 <b>By:</b> {html.escape(user_title)} (<code>{user_id}</code>)"
     )
     await send_log_with_fallback(bot, log_txt, "general_log_group_id", "index_log_topic_id")
     return "forwarded"
 
 
-async def _refresh_progress_card(bot):
-    cid, mid = QUEUE_STATE["card_chat_id"], QUEUE_STATE["card_msg_id"]
-    if not cid or not mid:
-        return
-    try:
-        await bot.edit_message_text(
-            chat_id=int(cid),
-            message_id=int(mid),
-            text=render_progress_card_text(),
-            parse_mode="HTML",
-            reply_markup=render_progress_card_keyboard(),
-        )
-    except Exception:
-        pass
-
-
 async def process_global_indexing_queue(bot):
-    """Processes global queue in batches of max 10 files with 10s cooldown sleep after each batch."""
     if QUEUE_STATE["running"]:
         return
     QUEUE_STATE["running"] = True
@@ -379,14 +439,12 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
     if role == "Banned":
         return
 
-    # Volunteers, Admins, Owners index directly (high priority = 10)
     if role in ("Volunteer", "Admin", "Owner"):
         enqueue_file_for_indexing(file_id, file_unique_id, file_name, file_size, mime_type, uid, utitle, msg.caption or "", priority=10, source="direct")
         if update.message and update.effective_chat.type == "private":
-            await update.message.reply_text("📥 <b>File added to Priority Indexing Queue!</b> (Batch cap: 10 files / 10s throttle)", parse_mode="HTML")
+            await update.message.reply_text("📥 <b>File added to Priority Indexing Queue!</b>", parse_mode="HTML")
         asyncio.create_task(process_global_indexing_queue(context.bot))
     else:
-        # Normal Users & Promoters require Admin/Owner upload approval
         conn = get_file_conn()
         cur = conn.cursor()
         cur.execute("""
@@ -413,7 +471,6 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 def _parse_tme_link(link_str: str):
-    """Parses t.me/c/12345/678 or t.me/channel/678-900."""
     m_priv = re.search(r"t\.me/c/(\d+)(?:/(\d+)(?:-(\d+))?)?", link_str)
     if m_priv:
         cid = int(f"-100{m_priv.group(1)}")
@@ -445,7 +502,6 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Direct one-line /index parsing
     links = re.findall(r"(?:https?://)?t\.me/[^\s]+", raw_args)
     chat_ref, start_id, end_id = (None, 1, 500)
     skip_range = None
@@ -482,12 +538,9 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_id = start_id + int(m_lim.group(1)) - 1
 
     context.user_data["index_wizard"] = {
-        "step": "confirm",
-        "source_chat": chat_ref,
-        "start_id": start_id,
-        "end_id": end_id,
-        "skip_count": start_id - 1,
-        "skip_range": skip_range,
+        "step": "confirm", "source_chat": chat_ref,
+        "start_id": start_id, "end_id": end_id,
+        "skip_count": start_id - 1, "skip_range": skip_range,
     }
     await _send_double_check_card(update.effective_message, user.first_name, chat_ref, start_id - 1)
 
@@ -513,7 +566,6 @@ async def _send_double_check_card(msg, user_name, source_chat, skip_num):
 
 
 async def handle_index_wizard_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Handles conversational steps for /index wizard. Returns True if consumed."""
     wiz = context.user_data.get("index_wizard")
     if not wiz or not update.message:
         return False
@@ -583,7 +635,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
     if d == "idx_ctrl_pause":
         QUEUE_STATE["paused"] = True
         QUEUE_STATE["status"] = "paused"
-        await q.answer("⏸ Queue paused. Active file will finish safely.")
+        await q.answer("⏸ Queue paused.")
         await _refresh_progress_card(context.bot)
     elif d == "idx_ctrl_resume":
         QUEUE_STATE["paused"] = False
@@ -592,7 +644,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
         await _refresh_progress_card(context.bot)
         asyncio.create_task(process_global_indexing_queue(context.bot))
     elif d == "idx_ctrl_wait":
-        await q.answer("⏳ Task held in queue until active batch completes.", show_alert=True)
+        await q.answer("⏳ Task held in queue.", show_alert=True)
     elif d == "idx_ctrl_cancel":
         QUEUE_STATE["cancelled"] = True
         QUEUE_STATE["paused"] = False
@@ -601,7 +653,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
         conn.execute("UPDATE indexing_queue SET status = 'cancelled' WHERE status = 'queued'")
         conn.commit()
         conn.close()
-        await q.answer("❌ Indexing cancelled and pending queue cleared.")
+        await q.answer("❌ Indexing cancelled.")
         await _refresh_progress_card(context.bot)
     elif d.startswith("idx_app_yes_") or d.startswith("idx_app_no_"):
         if role not in ("Admin", "Owner"):
@@ -612,7 +664,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
         row = conn.execute("SELECT * FROM indexing_queue WHERE id = ?", (qid,)).fetchone()
         if not row:
             conn.close()
-            await q.answer("⚠️ Upload entry not found.", show_alert=True)
+            await q.answer("⚠️ Entry not found.", show_alert=True)
             return
         if d.startswith("idx_app_yes_"):
             conn.execute("UPDATE indexing_queue SET status = 'queued', priority = 10 WHERE id = ?", (qid,))
@@ -649,26 +701,17 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
             await q.answer("⚠️ Session expired.", show_alert=True)
             return
         QUEUE_STATE.update({
-            "fetched": 0,
-            "forwarded": 0,
-            "duplicates": 0,
-            "deleted": 0,
-            "skipped": wiz.get("skip_count", 0),
-            "filtered": 0,
+            "fetched": 0, "forwarded": 0, "duplicates": 0, "deleted": 0,
+            "skipped": wiz.get("skip_count", 0), "filtered": 0,
             "remaining": max(0, int(wiz.get("end_id", 100)) - int(wiz.get("start_id", 1)) + 1),
-            "status": "forwarding",
-            "paused": False,
-            "cancelled": False,
-            "start_time": time.time(),
-            "card_chat_id": q.message.chat_id,
-            "card_msg_id": q.message.message_id,
+            "status": "forwarding", "paused": False, "cancelled": False,
+            "start_time": time.time(), "card_chat_id": q.message.chat_id, "card_msg_id": q.message.message_id,
         })
         await _refresh_progress_card(context.bot)
         asyncio.create_task(_run_channel_range_scan(context.bot, wiz, q.from_user))
 
 
 async def _run_channel_range_scan(bot, wiz: dict, user):
-    """Scans source channel messages in batches of 10 with 10s sleep."""
     src = wiz.get("source_chat")
     start_id = int(wiz.get("start_id", 1))
     end_id = int(wiz.get("end_id", start_id))
