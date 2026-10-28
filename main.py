@@ -1,7 +1,8 @@
-from server import start_server_in_background
 import os
 import asyncio
 import logging
+import fcntl
+
 import telegram
 from telegram.error import BadRequest
 
@@ -9,6 +10,7 @@ from telegram.error import BadRequest
 _orig_msg_edit_text = telegram.Message.edit_text
 _orig_msg_edit_rm = telegram.Message.edit_reply_markup
 _orig_bot_edit_text = telegram.Bot.edit_message_text
+
 
 async def _safe_msg_edit_text(self, *args, **kwargs):
     try:
@@ -18,6 +20,7 @@ async def _safe_msg_edit_text(self, *args, **kwargs):
             return self
         raise
 
+
 async def _safe_msg_edit_rm(self, *args, **kwargs):
     try:
         return await _orig_msg_edit_rm(self, *args, **kwargs)
@@ -26,6 +29,7 @@ async def _safe_msg_edit_rm(self, *args, **kwargs):
             return self
         raise
 
+
 async def _safe_bot_edit_text(self, *args, **kwargs):
     try:
         return await _orig_bot_edit_text(self, *args, **kwargs)
@@ -33,6 +37,7 @@ async def _safe_bot_edit_text(self, *args, **kwargs):
         if "message is not modified" in str(e).lower():
             return None
         raise
+
 
 telegram.Message.edit_text = _safe_msg_edit_text
 telegram.Message.edit_reply_markup = _safe_msg_edit_rm
@@ -44,6 +49,7 @@ async def global_telegram_error_handler(update, context):
     if isinstance(err, BadRequest) and "message is not modified" in str(err).lower():
         return
     logging.getLogger(__name__).error(f"Unhandled exception: {err}", exc_info=err)
+
 
 from telegram.ext import (
     ApplicationBuilder,
@@ -102,7 +108,16 @@ def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
     if not token:
         print("❌ Please set TELEGRAM_BOT_TOKEN in env.txt")
-        exit(1)
+        raise SystemExit(1)
+
+    # Prevent duplicate bot instances for the same app environment.
+    lock_path = "/tmp/mastermind_bot.lock"
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("❌ Another bot instance is already running. Exiting.")
+        raise SystemExit(0)
 
     logging.basicConfig(level=logging.INFO)
     setup_in_memory_logger()
@@ -165,7 +180,7 @@ def main():
     # Callback Routers
     app.add_handler(CallbackQueryHandler(fsub_verify_callback, pattern=r"^fsub_"))
     app.add_handler(CallbackQueryHandler(menu_callback_router, pattern=r"^(help_button|help_menu|help_open_admin|help_sec_|adm_sec_|search_menu|stats_menu|start_menu|quota|quota_menu|bot_owner)"))
-    app.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|spg\||sendall\||search_cancel|noop)"))
+    app.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|dl_|search_page_|spg\||sendall\||search_cancel|noop)"))
     app.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     app.add_handler(CallbackQueryHandler(indexing_callback_handler, pattern=r"^idx_"))
     app.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^(cust_|es_)"))
@@ -182,7 +197,14 @@ def main():
     app.post_init = post_init
     start_server_in_background()
     print("🤖 Mastermind Library Bot is online and polling...")
-    app.run_polling()
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=None,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30,
+        pool_timeout=30,
+    )
 
 
 if __name__ == "__main__":
