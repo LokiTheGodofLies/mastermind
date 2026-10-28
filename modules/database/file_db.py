@@ -158,3 +158,76 @@ def mark_delivery_deleted_db(log_id: int):
     return now_str
 
 init_file_db()
+
+
+def _init_queue_tables():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS indexing_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT,
+            file_unique_id TEXT,
+            file_name TEXT,
+            file_size INTEGER DEFAULT 0,
+            mime_type TEXT DEFAULT '',
+            caption TEXT DEFAULT '',
+            channel_id INTEGER DEFAULT 0,
+            message_id INTEGER DEFAULT 0,
+            user_id INTEGER DEFAULT 0,
+            user_title TEXT DEFAULT '',
+            source TEXT DEFAULT 'upload',
+            priority INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'queued',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            processed_at TEXT DEFAULT ''
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS requests_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            user_name TEXT,
+            request_type TEXT DEFAULT 'Book/Audiobook',
+            title TEXT,
+            author TEXT DEFAULT '',
+            series TEXT DEFAULT '',
+            format TEXT DEFAULT 'Any',
+            source TEXT DEFAULT 'Manual',
+            audible_url TEXT DEFAULT '',
+            status TEXT DEFAULT 'Pending',
+            log_chat_id INTEGER DEFAULT 0,
+            log_message_id INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT ''
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS delivery_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT,
+            file_name TEXT,
+            sender_bot TEXT,
+            receiver_id INTEGER,
+            channel_link TEXT,
+            message_link TEXT,
+            posting_message_id INTEGER DEFAULT 0,
+            delivery_status TEXT DEFAULT 'delivered',
+            deleted_at TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def reset_file_db():
+    _init_queue_tables()
+    conn = get_connection()
+    for t in ("indexed_files", "indexing_queue", "requests_queue", "delivery_logs"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.commit()
+    conn.close()
+
+
+_init_queue_tables()
