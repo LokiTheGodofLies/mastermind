@@ -41,6 +41,7 @@ from modules.converter.formats import (
     detect_input_format,
     output_choices,
 )
+from modules.converter.progress import TelegramProgress
 from modules.database.config_db import get_config_bool, get_config_int
 from modules.database.user_db import get_user_role_db
 
@@ -275,28 +276,24 @@ async def _run_conversion(q, context: ContextTypes.DEFAULT_TYPE, out_fmt: str, t
                 f"⏳ <b>Converting to {out_fmt.upper()}…</b>\n📘 <code>{name}</code>",
                 parse_mode="HTML",
             )
-            async def _update_progress(stage: str):
-                try:
-                    await q.message.edit_text(
-                        f"⏳ <b>Converting to {out_fmt.upper()}</b> (<code>{html.escape(stage)}</code>)\n📘 <code>{name}</code>",
-                        parse_mode="HTML",
+            async with TelegramProgress(
+                q.message, title=f"Converting to {out_fmt.upper()}", file_name=job["file_name"]
+            ) as progress:
+                with tempfile.TemporaryDirectory(prefix="mm_convert_") as tmp:
+                    src = Path(tmp) / f"input.{job['format']}"
+                    progress.stage("Downloading from Telegram")
+                    tg_file = await context.bot.get_file(job["file_id"])
+                    await tg_file.download_to_drive(custom_path=src)
+                    result = await convert_file(
+                        src,
+                        out_fmt,
+                        timeout=get_config_int("convert_timeout_seconds", 300),
+                        force_rtl=job.get("force_rtl", False),
+                        compress_images=job.get("compress_images", False),
+                        progress=progress,
                     )
-                except Exception:
-                    pass
-
-            with tempfile.TemporaryDirectory(prefix="mm_convert_") as tmp:
-                src = Path(tmp) / f"input.{job['format']}"
-                tg_file = await context.bot.get_file(job["file_id"])
-                await tg_file.download_to_drive(custom_path=src)
-                result = await convert_file(
-                    src,
-                    out_fmt,
-                    timeout=get_config_int("convert_timeout_seconds", 300),
-                    force_rtl=job.get("force_rtl", False),
-                    compress_images=job.get("compress_images", False),
-                    progress_callback=_update_progress,
-                )
-                await _deliver(q, context, job, out_fmt, result, started)
+                    progress.stage("Uploading result" if result.ok else "Failed")
+            await _deliver(q, context, job, out_fmt, result, started)
     except Exception as exc:  # network / Telegram errors must not leave the button hanging
         logger.exception("Conversion failed for user %s", q.from_user.id)
         await q.message.edit_text(
@@ -311,7 +308,7 @@ async def _deliver(q, context, job: dict, out_fmt: str, result: ConversionResult
     name = html.escape(job["file_name"])
     if not result.ok:
         await q.message.edit_text(
-            f"❌ <b>Conversion failed</b>\n📘 <code>{name}</code>\n\n<pre>{html.escape(result.error[:500])}</pre>",
+            f"❌ <b>Conversion failed</b>\n📘 <code>{name}</code>\n\n<pre>{html.escape(result.error[-2500:])}</pre>",
             parse_mode="HTML",
         )
         return
