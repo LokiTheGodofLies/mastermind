@@ -1,8 +1,13 @@
 import os
 import sqlite3
+import logging
 from datetime import datetime
+from modules.log.logger import get_ist_str
 
-DB_PATH = "database/files.db"
+logger = logging.getLogger(__name__)
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+DB_PATH = os.path.join(BASE_DIR, "database", "files.db")
 
 def get_connection():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -45,79 +50,55 @@ def init_file_db():
     for col in ["title", "author", "narrator", "series", "publisher", "release_date", "length_str", "description", "keywords"]:
         if col not in fcols:
             c.execute(f"ALTER TABLE indexed_files ADD COLUMN {col} TEXT DEFAULT ''")
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS indexing_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id TEXT,
-            file_unique_id TEXT,
-            file_name TEXT,
-            file_size INTEGER DEFAULT 0,
-            mime_type TEXT DEFAULT '',
-            caption TEXT DEFAULT '',
-            channel_id INTEGER DEFAULT 0,
-            message_id INTEGER DEFAULT 0,
-            user_id INTEGER DEFAULT 0,
-            user_title TEXT DEFAULT '',
-            source TEXT DEFAULT 'upload',
-            priority INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'queued',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            processed_at TEXT DEFAULT ''
-        )
-    """)
     conn.commit()
     conn.close()
 
-def _init_extra_file_tables():
+def search_books_by_mode_db(keyword: str, mode: str = "all", limit: int = 80) -> list:
+    cleaned = (keyword or "").strip()
+    if not cleaned:
+        return []
+
+    tokens = [t.strip() for t in cleaned.split() if len(t.strip()) > 0]
+    if not tokens:
+        return []
+
+    audio_exts = (".mp3", ".m4b", ".aax", "mp3", "m4b", "aax")
+    where_clauses, params = [], []
+
+    for tok in tokens:
+        p = f"%{tok}%"
+        where_clauses.append("(title LIKE ? OR author LIKE ? OR series LIKE ? OR file_name LIKE ? OR keywords LIKE ? OR description LIKE ? OR caption LIKE ?)")
+        params.extend([p] * 7)
+
+    sql = f"SELECT * FROM indexed_files WHERE {' AND '.join(where_clauses)} ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS requests_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            user_name TEXT,
-            request_type TEXT DEFAULT 'Book/Audiobook',
-            title TEXT,
-            author TEXT DEFAULT '',
-            series TEXT DEFAULT '',
-            format TEXT DEFAULT 'Any',
-            source TEXT DEFAULT 'Manual',
-            audible_url TEXT DEFAULT '',
-            status TEXT DEFAULT 'Pending',
-            log_chat_id INTEGER DEFAULT 0,
-            log_message_id INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT ''
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS delivery_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id TEXT,
-            file_name TEXT,
-            sender_bot TEXT,
-            receiver_id INTEGER,
-            channel_link TEXT,
-            message_link TEXT,
-            posting_message_id INTEGER DEFAULT 0,
-            delivery_status TEXT DEFAULT 'delivered',
-            deleted_at TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
 
-def get_file_by_unique_id_db(file_unique_id: str):
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM indexed_files WHERE file_unique_id = ?", (file_unique_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    results = []
+    for r in rows:
+        d = dict(r)
+        ext = (d.get("extension") or "").lower()
+        cat = (d.get("category") or "").lower()
+        is_audio = ext in audio_exts or cat == "audiobook"
+        if mode == "ebook" and is_audio:
+            continue
+        if mode == "audiobook" and not is_audio:
+            continue
+        results.append(d)
+    return results
 
 def get_file_by_id_db(row_id: int):
     conn = get_connection()
     row = conn.execute("SELECT * FROM indexed_files WHERE id = ?", (int(row_id),)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_file_by_unique_id_db(file_unique_id: str):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM indexed_files WHERE file_unique_id = ?", (file_unique_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -141,21 +122,24 @@ def save_indexed_file_db(
     conn.commit()
     conn.close()
 
-def search_indexed_files_db(keyword: str, limit: int = 50) -> list:
-    conn = get_connection()
-    q = f"%{keyword.strip()}%"
-    rows = conn.execute("""
-        SELECT * FROM indexed_files
-        WHERE file_name LIKE ? OR caption LIKE ? OR title LIKE ? OR author LIKE ?
-           OR narrator LIKE ? OR series LIKE ? OR category LIKE ? OR description LIKE ? OR keywords LIKE ?
-        ORDER BY id DESC LIMIT ?
-    """, (q, q, q, q, q, q, q, q, q, limit)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
 def log_file_delivery_db(file_id, file_name, sender_bot, receiver_id, channel_link, message_link, posting_msg_id, status="delivered"):
     conn = get_connection()
     cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS delivery_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT,
+            file_name TEXT,
+            sender_bot TEXT,
+            receiver_id INTEGER,
+            channel_link TEXT,
+            message_link TEXT,
+            posting_message_id INTEGER DEFAULT 0,
+            delivery_status TEXT DEFAULT 'delivered',
+            deleted_at TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     cur.execute("""
         INSERT INTO delivery_logs (file_id, file_name, sender_bot, receiver_id, channel_link, message_link, posting_message_id, delivery_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -167,45 +151,10 @@ def log_file_delivery_db(file_id, file_name, sender_bot, receiver_id, channel_li
 
 def mark_delivery_deleted_db(log_id: int):
     conn = get_connection()
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = get_ist_str("%Y-%m-%d %H:%M:%S IST")
     conn.execute("UPDATE delivery_logs SET deleted_at = ?, delivery_status = 'auto_deleted' WHERE id = ?", (now_str, int(log_id)))
     conn.commit()
     conn.close()
     return now_str
 
-def reset_file_db():
-    conn = get_connection()
-    for t in ["indexed_files", "indexing_queue", "requests_queue", "delivery_logs"]:
-        conn.execute(f"DELETE FROM {t}")
-    conn.commit()
-    conn.close()
-
 init_file_db()
-_init_extra_file_tables()
-
-
-def search_books_by_mode_db(keyword: str, mode: str = "all", limit: int = 80) -> list:
-    """Matches keyword in book title, author name, or series name (plus filename), filtered by ebook or audiobook."""
-    conn = get_connection()
-    q = f"%{keyword.strip()}%"
-    audio_exts = (".mp3", ".m4b", ".aax", "mp3", "m4b", "aax")
-
-    rows = conn.execute("""
-        SELECT * FROM indexed_files
-        WHERE (title LIKE ? OR author LIKE ? OR series LIKE ? OR file_name LIKE ? OR caption LIKE ?)
-        ORDER BY id DESC LIMIT ?
-    """, (q, q, q, q, q, limit)).fetchall()
-    conn.close()
-
-    results = []
-    for r in rows:
-        d = dict(r)
-        ext = (d.get("extension") or "").lower()
-        cat = (d.get("category") or "").lower()
-        is_audio = ext in audio_exts or cat == "audiobook"
-        if mode == "ebook" and is_audio:
-            continue
-        if mode == "audiobook" and not is_audio:
-            continue
-        results.append(d)
-    return results

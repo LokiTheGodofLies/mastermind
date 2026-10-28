@@ -1,5 +1,6 @@
 import html
 import asyncio
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.bot_manager import get_helper_bot, get_selected_helper_bot_details
@@ -8,17 +9,12 @@ from modules.database.config_db import get_config, get_config_int, get_config_bo
 from modules.database.user_db import has_started_helper_bot_db, set_helper_started_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota, get_user_quota_summary
 from modules.log.startup_log import send_log_with_fallback
+from modules.log.logger import get_ist_str
 
+logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 8
 
-
 def _format_book_entry(idx: int, row: dict, bot_username: str) -> str:
-    """Formats each matched file as:
-    book title
-    series name
-    author name
-    extension - download (hyperlink)
-    """
     title = html.escape(row.get("title") or row.get("file_name") or "Unknown Title")
     series = html.escape(row.get("series") or "Standalone / No Series")
     author = html.escape(row.get("author") or "Unknown Author")
@@ -32,30 +28,29 @@ def _format_book_entry(idx: int, row: dict, bot_username: str) -> str:
         f"📂 <code>.{ext}</code> — <a href=\"{dl_url}\"><b>download</b></a>"
     )
 
-
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1, mode: str = "all"):
     search_term = search_term.strip()
+    user = update.effective_user
+    uid = user.id if user else 0
+    uname = user.first_name if user else "Unknown"
+
+    logger.info(f"[SEARCH] User={uid} ({uname}) | Term='{search_term}' | Mode={mode} | Page={page} | IST={get_ist_str()}")
     results = search_books_by_mode_db(search_term, mode=mode, limit=100)
     total = len(results)
     bot_title = get_config("bot_title", "Mastermind Library Bot")
     bot_uname = (context.bot.username or get_config("bot_username", "MastermindBot")).lstrip("@")
-
     mode_badge = {"all": "All Formats (📚 + 🎧)", "ebook": "eBooks Only 📚", "audiobook": "Audiobooks Only 🎧"}.get(mode, "All")
+
     q_short = search_term.encode("utf-8")[:20].decode("utf-8", errors="ignore")
     q_req = search_term.encode("utf-8")[:34].decode("utf-8", errors="ignore")
-
     kb = []
+
     if total > 0:
         tp = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
         page = max(1, min(page, tp))
         slice_rows = results[(page - 1) * ITEMS_PER_PAGE : page * ITEMS_PER_PAGE]
+        blocks = [_format_book_entry(i, r, bot_uname) for i, r in enumerate(slice_rows, start=(page - 1) * ITEMS_PER_PAGE + 1)]
 
-        blocks = [
-            _format_book_entry(i, r, bot_uname)
-            for i, r in enumerate(slice_rows, start=(page - 1) * ITEMS_PER_PAGE + 1)
-        ]
-
-        # Row 1: Pagination (Back | current_page/n | Next)
         nav = []
         if page > 1:
             nav.append(InlineKeyboardButton("« Back", callback_data=f"spg|{mode}|{page-1}|{q_short}"))
@@ -64,13 +59,11 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
             nav.append(InlineKeyboardButton("Next »", callback_data=f"spg|{mode}|{page+1}|{q_short}"))
         kb.append(nav)
 
-        # Row 2: [📚 eBook Filter] [📤 Send All] [🎧 Audiobook Filter]
         kb.append([
             InlineKeyboardButton("📚" + (" ✓" if mode == "ebook" else ""), callback_data=f"spg|ebook|1|{q_short}"),
             InlineKeyboardButton("📤 Send All", callback_data=f"sendall|{mode}|{page}|{q_short}"),
             InlineKeyboardButton("🎧" + (" ✓" if mode == "audiobook" else ""), callback_data=f"spg|audiobook|1|{q_short}"),
         ])
-
         txt = (
             f"🔍 <b>Search Results — {html.escape(bot_title)}</b>\n"
             f"🔎 <b>Query:</b> <code>{html.escape(search_term)}</code> | <b>Filter:</b> {mode_badge} ({total} matches)\n\n"
@@ -98,7 +91,6 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
     else:
         await update.effective_message.reply_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb), disable_web_page_preview=True)
 
-
 async def _auto_delete_posted_file(bot, posting_chat_id: int, message_id: int, log_id: int, delay_seconds: int, file_name: str, receiver_id: int):
     await asyncio.sleep(delay_seconds)
     try:
@@ -111,15 +103,13 @@ async def _auto_delete_posted_file(bot, posting_chat_id: int, message_id: int, l
         f"📁 <b>File:</b> <code>{html.escape(file_name)}</code>\n"
         f"👤 <b>Receiver:</b> <code>{receiver_id}</code>\n"
         f"📢 <b>Msg:</b> <code>{posting_chat_id}/{message_id}</code>\n"
-        f"⏱ <b>Deleted At:</b> <code>{deleted_at}</code>"
+        f"⏱ <b>Deleted At (IST):</b> <code>{deleted_at}</code>"
     )
     await send_log_with_fallback(bot, audit_txt, "admin_log_group_id", "channel_log_topic_id")
 
-
 async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Dual-delivery engine: posts file to temporary Posting Channel AND mirrors to User DM via Helper Bot pool."""
     if not can_user_search(user.id):
-        await reply_target_msg.reply_text("⚠️ <b>Daily search quota reached!</b> Use <code>/refer</code> to earn +10 bonus quota or wait for daily reset.", parse_mode="HTML")
+        await reply_target_msg.reply_text("⚠️ <b>Daily search quota reached!</b> Use <code>/refer</code> to earn +10 bonus quota.", parse_mode="HTML")
         return False
 
     if get_config_bool("require_helper_bot_start", True) and not has_started_helper_bot_db(user.id):
@@ -147,16 +137,11 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
     try:
         h_details = await get_selected_helper_bot_details()
         delivery_bot = h_details["bot"]
-        helper_uname = h_details.get("username") or getattr(context.bot, "username", "Bot")
-        helper_title = h_details.get("title") or "Helper Bot"
     except Exception:
         delivery_bot = context.bot
-        helper_uname = getattr(context.bot, "username", "Bot")
-        helper_title = getattr(context.bot, "first_name", "Bot")
 
     posted_msg, dm_ok = None, False
 
-    # 1. Post to Temporary Posting Channel
     if posting_id:
         try:
             if storage_msg_id and storage_id:
@@ -164,9 +149,8 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
             elif file_id:
                 posted_msg = await delivery_bot.send_document(chat_id=int(posting_id), document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>", parse_mode="HTML")
         except Exception as ch_err:
-            await send_log_with_fallback(context.bot, f"⚠️ <b>Helper Bot Channel Admin Error</b> on <code>{posting_id}</code>: <code>{ch_err}</code>", "admin_log_group_id", "channel_log_topic_id")
+            await send_log_with_fallback(context.bot, f"⚠️ <b>Helper Channel Error</b>: <code>{ch_err}</code>", "admin_log_group_id", "channel_log_topic_id")
 
-    # 2. Mirror to User DM
     try:
         if storage_msg_id and storage_id:
             await delivery_bot.copy_message(chat_id=user.id, from_chat_id=int(storage_id), message_id=int(storage_msg_id))
@@ -195,16 +179,15 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
         f"📁 <b>File:</b> <code>{html.escape(file_name)}</code>\n"
         f"📢 <b>Channel Link:</b> <a href=\"{ch_link}\">Open Channel</a>\n"
         f"🔗 <b>Message Link:</b> <a href=\"{msg_link}\">Message #{post_mid}</a>\n"
-        f"💬 <b>DM Mirror:</b> {'Sent to your DM ✅' if dm_ok else 'Channel Link Only'}\n"
+        f"💬 <b>DM Mirror:</b> {'Sent to DM ✅' if dm_ok else 'Channel Only'}\n"
         f"📊 <b>Searches Left:</b> <code>{q_sum['searches_left']}</code>\n"
-        f"⏳ <i>Auto-deletes from posting channel in {del_secs // 60} minutes.</i>",
+        f"⏳ <i>Auto-deletes from channel in {del_secs // 60} minutes.</i>",
         parse_mode="HTML",
     )
     log_id = log_file_delivery_db(file_id or "", file_name, getattr(delivery_bot, "username", None) or "HelperBot", user.id, ch_link, msg_link, post_mid, "delivered")
     if posted_msg and post_mid and get_config_bool("auto_delete_enabled", True):
         asyncio.create_task(_auto_delete_posted_file(delivery_bot, int(posting_id), post_mid, log_id, del_secs, file_name, user.id))
     return True
-
 
 async def _run_search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str = "all"):
     msg = update.effective_message
@@ -221,7 +204,7 @@ async def _run_search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, mo
         "• <code>/search &lt;keyword&gt;</code> — Search all books & audiobooks\n"
         "• <code>/searchebook &lt;keyword&gt;</code> — Search eBooks only 📚\n"
         "• <code>/searchaudiobook &lt;keyword&gt;</code> — Search Audiobooks only 🎧\n\n"
-        "<i>Matches keywords in book title, series name, or author name!</i>"
+        "<i>Matches title, author, series, or keywords!</i>"
     )
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back to Start", callback_data="start_menu")]])
     if update.callback_query:
@@ -230,18 +213,14 @@ async def _run_search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, mo
     else:
         await msg.reply_text(txt, parse_mode="HTML", reply_markup=kb)
 
-
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _run_search_cmd(update, context, mode="all")
-
 
 async def searchebook_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _run_search_cmd(update, context, mode="ebook")
 
-
 async def searchaudiobook_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _run_search_cmd(update, context, mode="audiobook")
-
 
 async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
