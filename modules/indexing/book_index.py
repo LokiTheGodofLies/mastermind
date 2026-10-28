@@ -168,8 +168,11 @@ def format_index_caption(file_name: str, size_str: str, ext: str, mime: str, met
         esc_rc = html.escape(meta.get("ratings_count") or "0")
         esc_len = html.escape(meta.get("length_str") or "N/A")
         esc_rel = html.escape(meta.get("release_date") or "N/A")
-        lines = [
-            f"📚 <b>Book:</b> {t_disp}",
+        esc_s = html.escape(meta.get("series") or "")
+        lines = [f"📚 <b>Book:</b> {t_disp}"]
+        if esc_s:
+            lines.append(f"📖 <b>Series:</b> <code>{esc_s}</code>")
+        lines += [
             f"✍️ <b>Author:</b> <code>{esc_a}</code>",
             f"⭐ <b>Rating:</b> <code>{esc_r}</code> (<code>{esc_rc}</code> ratings)",
             f"📄 <b>Pages:</b> <code>{esc_len}</code> | 📅 <code>{esc_rel}</code>",
@@ -375,7 +378,9 @@ async def process_global_indexing_queue(bot):
                     else:
                         QUEUE_STATE["filtered"] += 1
                     st_val = "completed"
-                except Exception:
+                except Exception as idx_err:
+                    logger.error(f"[INDEXING ERROR] File={r['file_name']}: {idx_err}", exc_info=True)
+                    await send_log_with_fallback(bot, f"❌ <b>Indexing Error</b>\n📂 File: <code>{html.escape(str(r['file_name']))}</code>\n⚠️ Error: <code>{html.escape(str(idx_err))}</code>", "general_log_group_id", "error_log_topic_id")
                     QUEUE_STATE["filtered"] += 1
                     st_val = "failed"
 
