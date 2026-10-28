@@ -5,7 +5,7 @@ Every sub-folder is one feature and ships its own help.txt. main.py wires them t
   allowance/   Daily search/request quotas, /quota, /gift, referrals (/refer).
   ban/         User/chat bans (all | pm | support) and the ban middleware.
   broadcast/   Admin broadcast to everyone or to one role, with confirmation.
-  converter/   Ebook converter (/convert): 61 in / 31 out formats via Calibre, Pandoc, PyMuPDF, Anydoc.
+  converter/   Ebook converter (/convert) with inline format buttons (Calibre).
   database/    SQLite layer (files, users, config) + Telegram-hosted backup/restore.
   editscript/  /customize dashboard, /setconfig, templates, Render restart/redeploy.
   fsub/        Force-subscribe gate (normal and join-request channels).

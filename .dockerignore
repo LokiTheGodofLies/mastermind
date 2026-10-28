@@ -1,7 +1,0 @@
-.git
-env.txt
-.env
-database/
-*.db
-__pycache__/
-tests/

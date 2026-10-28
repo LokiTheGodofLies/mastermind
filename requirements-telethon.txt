@@ -1,2 +1,0 @@
-# Only needed for modules/converter/telethon_adapter.py (a separate Telethon bot).
-Telethon>=1.36.0

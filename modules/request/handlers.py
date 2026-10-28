@@ -449,3 +449,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
                 pass
         await q.answer(f"Status updated to: {new_status}")
 
+
+
+async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return

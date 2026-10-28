@@ -57,9 +57,9 @@ USER_HELP_SECTIONS.update({
     "help_sec_convert": (
         "🔄 <b>Ebook Converter</b>\n\n"
         "1. Reply to an ebook file with <code>/convert</code> — or send <code>/convert</code> and then upload the file.\n"
-        "2. Tap the format you want (EPUB, MOBI, AZW3, PDF, DOCX, FB2, RTF, TXT, HTMLZ, TXTZ).\n"
+        "2. Toggle optional settings (Force RTL, Compress Images) and tap any of the 31 output formats (EPUB, MOBI, AZW3, PDF, DOCX, KFX, MD, FB2, RTF, TXT, HTMLZ, LaTeX, Typst, PPTX, etc.).\n"
         "3. The bot converts it and sends the new file back.\n\n"
-        "• Max input size: <b>20 MB</b>. Reads EPUB, MOBI, AZW3, PDF, DOCX, FB2, TXT, RTF, CBZ and many more.\n"
+        "• Max input size: <b>20 MB</b>. Supports all 62 input formats (including EPUB, MOBI, AZW3, PDF, DOCX, KFX, Shamela .bok, Markdown, LaTeX, Typst, Legacy Office, CBZ/CBR) and 31 output formats.\n"
         "• Converting is free — it does not use your search/request quota.\n"
         "• One conversion at a time per user."
     ),
