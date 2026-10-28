@@ -48,6 +48,7 @@ from modules.database import persistence  # noqa: E402
 persistence.restore_if_fresh()
 
 from server import start_server_in_background  # noqa: E402
+start_server_in_background()
 from modules.database.config_db import init_config_db, reload_config_cache  # noqa: E402
 from modules.database.user_db import init_user_db  # noqa: E402
 from modules.database.file_db import init_file_db  # noqa: E402
@@ -201,7 +202,6 @@ def main() -> None:
     app.add_error_handler(global_error_handler)
     register_handlers(app)
 
-    start_server_in_background()
     print("🤖 Mastermind Library Bot is online and polling...")
     app.run_polling(drop_pending_updates=True, allowed_updates=None)
 
