@@ -1,5 +1,6 @@
 import sqlite3
 from modules.database.config_db import get_config
+from modules.database.user_db import DB_FILE
 
 
 def get_support_chat_id():
@@ -11,7 +12,7 @@ def get_support_chat_id():
 
 
 def set_ban_db(target_id: int, ban_type: str, reason: str):
-    conn = sqlite3.connect("mastermind_users.db")
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS bans (target_id INTEGER PRIMARY KEY, ban_type TEXT, reason TEXT)")
     c.execute("INSERT OR REPLACE INTO bans (target_id, ban_type, reason) VALUES (?, ?, ?)", (int(target_id), ban_type, reason))
@@ -21,7 +22,7 @@ def set_ban_db(target_id: int, ban_type: str, reason: str):
 
 
 def remove_ban_db(target_id: int):
-    conn = sqlite3.connect("mastermind_users.db")
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS bans (target_id INTEGER PRIMARY KEY, ban_type TEXT, reason TEXT)")
     c.execute("DELETE FROM bans WHERE target_id = ?", (int(target_id),))
@@ -32,7 +33,7 @@ def remove_ban_db(target_id: int):
 
 def get_ban_status(target_id: int):
     try:
-        conn = sqlite3.connect("mastermind_users.db")
+        conn = sqlite3.connect(DB_FILE)
         row = conn.execute("SELECT ban_type, reason FROM bans WHERE target_id = ?", (int(target_id),)).fetchone()
         conn.close()
         if row:

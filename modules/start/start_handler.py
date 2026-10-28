@@ -82,7 +82,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_user_role_db(user.id)
     if role in ("Admin", "Owner"):
-        kb.append([InlineKeyboardButton("🪄 Customize Bot (/customize)", callback_data="cust_open_main"), InlineKeyboardButton("👑 Admin Help", callback_data="help_open_admin")])
+        kb.append([InlineKeyboardButton("🪄 Customize Bot", callback_data="cust_open_main"), InlineKeyboardButton("👑 Admin Help", callback_data="help_open_admin")])
 
     markup = InlineKeyboardMarkup(kb)
     if update.callback_query:

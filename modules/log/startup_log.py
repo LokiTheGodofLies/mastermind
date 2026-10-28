@@ -3,6 +3,7 @@ from modules.database.config_db import get_config, get_config_int, set_config
 from modules.database.user_db import get_owner_ids
 from modules.log.logger import get_ist_str
 from modules.bot_manager import get_helper_bot_tokens, get_bot_info_by_token
+from modules.database import persistence
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +48,55 @@ async def _chk(bot, lbl, cid):
         return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
 
 async def send_startup_notification(app):
+    """
+    Startup log.  Tokens are NEVER shown when everything is fine - a token only appears
+    next to the bot that failed to authenticate (invalid / revoked token), so it can be fixed.
+    """
     try:
         bot = app.bot
-        me = await bot.get_me()
-        mt = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or "N/A"
+        mt = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or ""
+        errors = []
+
+        # --- main bot ---
+        try:
+            me = await bot.get_me()
+            main_line = f"🤖 <b>Main Bot:</b> {html.escape(me.first_name or 'Bot')} (@{me.username}) | <code>{me.id}</code>"
+        except Exception as e:
+            main_line = f"🤖 <b>Main Bot:</b> ❌ Error: <code>{html.escape(str(e)[:80])}</code>\n🔑 <code>{html.escape(mt)}</code>"
+            errors.append("main bot")
+
+        # --- helper bots ---
         hl = []
         for i, ht in enumerate(get_helper_bot_tokens(), 1):
-            if ht == mt: continue
+            if ht == mt:
+                continue
             hi = await get_bot_info_by_token(ht)
             u = hi.get("username")
-            hl.append(f"  {i}. ✅ <b>{html.escape(hi['title'])}</b> (@{u}) | <code>{hi['id']}</code>\n      🔑 <code>{html.escape(ht)}</code>" if u else f"  {i}. ❌ Error | 🔑 <code>{html.escape(ht)}</code>")
-        if not hl: hl.append("  • None (using Main Bot)")
-        chks = [("Storage","storage_channel_id"),("Posting","posting_channel_id"),("Logs Group","general_log_group_id"),("Index Ch","index_channel_id"),("Request Ch","request_channel_id"),("Support","support_chat_id")]
+            if u and not hi.get("error"):
+                hl.append(f"  {i}. ✅ <b>{html.escape(hi['title'])}</b> (@{u}) | <code>{hi['id']}</code>")
+            else:
+                reason = html.escape(str(hi.get("error") or "unknown error")[:80])
+                hl.append(f"  {i}. ❌ Invalid token: <code>{reason}</code>\n      🔑 <code>{html.escape(ht)}</code>")
+                errors.append(f"helper bot {i}")
+        if not hl:
+            hl.append("  • None (using Main Bot)")
+
+        # --- chats ---
+        chks = [("Storage", "storage_channel_id"), ("Posting", "posting_channel_id"), ("Logs Group", "general_log_group_id"),
+                ("Index Ch", "index_channel_id"), ("Request Ch", "request_channel_id"), ("Support", "support_chat_id")]
         cl = [await _chk(bot, l, get_config(k)) for l, k in chks]
-        tp = [("Gen","general_topic_id",1),("Usr","user",2),("Idx","index",20),("Grp","group",23),("Ch","channel",26),("Req","request",30),("Err","error",33)]
-        ts = " | ".join(f"{k}:{get_config_int(v if '_' in v else f'{v}_log_topic_id',d)}" for k,v,d in tp)
-        txt = f"🔄 <b>Bot Restarted Successfully</b>\n\n🤖 <b>Main Bot:</b> {html.escape(me.first_name or 'Bot')} (@{me.username}) | <code>{me.id}</code>\n🔑 <b>Token:</b> <code>{html.escape(mt)}</code>\n\n🤝 <b>Helper Bots:</b>\n" + "\n".join(hl) + "\n\n📡 <b>Groups & Channels:</b>\n" + "\n".join(cl) + f"\n\n🧵 <b>Topics:</b> <code>{ts}</code>"
+
+        tp = [("Gen", "general_topic_id", 1), ("Usr", "user", 2), ("Idx", "index", 20), ("Grp", "group", 23), ("Ch", "channel", 26), ("Req", "request", 30), ("Err", "error", 33)]
+        ts = " | ".join(f"{k}:{get_config_int(v if '_' in v else f'{v}_log_topic_id', d)}" for k, v, d in tp)
+
+        head = "⚠️ <b>Bot Restarted With Errors</b>" if errors else "🔄 <b>Bot Restarted Successfully</b>"
+        txt = (
+            f"{head}\n\n{main_line}\n\n"
+            "🤝 <b>Helper Bots:</b>\n" + "\n".join(hl) +
+            "\n\n📡 <b>Groups & Channels:</b>\n" + "\n".join(cl) +
+            f"\n\n🧵 <b>Topics:</b> <code>{ts}</code>"
+            f"\n\n{persistence.status_line_html()}"
+        )
         await send_log_with_fallback(bot, txt, "general_log_group_id", "general_topic_id")
     except Exception as e:
         print(f"[STARTUP LOG WARNING]: {e}")

@@ -63,6 +63,24 @@ from telegram.ext import (
     filters,
 )
 
+def load_env():
+    for env_path in ("env.txt", ".env"):
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    if "=" in line and not line.strip().startswith("#"):
+                        k, v = line.strip().split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip())
+
+
+# --- Persistence: restore databases from the Telegram backup on a fresh container. ---
+# MUST run before any module below is imported: several of them open / create their
+# SQLite files at import time, which would otherwise race the restore.
+load_env()
+from modules.database import persistence  # noqa: E402
+
+persistence.restore_if_fresh()
+
 from modules.database.config_db import init_config_db, reload_config_cache
 from modules.database.user_db import init_user_db
 from modules.database.file_db import init_file_db
@@ -83,21 +101,11 @@ from modules.editscript.handlers import (
     setconfig_command, getconfig_command, template_cli_command,
 )
 from modules.broadcast.handlers import broadcast_command, broadcast_confirm_command, broadcast_callback_handler
-from modules.stats.handlers import stats_command
+from modules.stats.handlers import stats_command, backup_command
 from modules.support.handlers import support_command, support_callback_handler
 from modules.id.handlers import id_command
 from modules.utility.ping import ping_command
 from modules.message.message_handler import handle_normal_text
-
-
-def load_env():
-    for env_path in ("env.txt", ".env"):
-        if os.path.exists(env_path):
-            with open(env_path, "r") as f:
-                for line in f:
-                    if "=" in line and not line.strip().startswith("#"):
-                        k, v = line.strip().split("=", 1)
-                        os.environ.setdefault(k.strip(), v.strip())
 
 
 def main():
@@ -128,7 +136,15 @@ def main():
     init_user_db()
     init_file_db()
 
-    app = ApplicationBuilder().token(token).pool_timeout(30).build()
+    async def post_stop(application):
+        # Final snapshot while Render is shutting the old instance down (deploy / restart).
+        try:
+            ok, detail = persistence.final_backup()
+            print(f"💾 Shutdown backup: {'ok' if ok else 'FAILED'} - {detail}")
+        except Exception as exc:
+            print(f"💾 Shutdown backup error: {exc}")
+
+    app = ApplicationBuilder().token(token).pool_timeout(30).post_stop(post_stop).build()
     app.add_error_handler(global_telegram_error_handler)
 
     # Middlewares: Group -3 Ban check, Group -2 Group Topic filter, Group -1 Force Subscribe
@@ -156,6 +172,7 @@ def main():
     # Admin & Role Commands
     app.add_handler(CommandHandler(["adminhelp", "ownerhelp"], adminhelp_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(CommandHandler("log", log_command))
     app.add_handler(CommandHandler("gift", gift_command))
     app.add_handler(CommandHandler("ban", ban_command))
@@ -195,6 +212,8 @@ def main():
 
     async def post_init(application):
         await send_startup_notification(application)
+        # Keep the databases safe across Render redeploys (see modules/database/persistence.py)
+        application.bot_data["backup_task"] = asyncio.create_task(persistence.backup_loop())
 
     app.post_init = post_init
     start_server_in_background()
