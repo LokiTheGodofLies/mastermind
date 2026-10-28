@@ -128,3 +128,48 @@ def test_semaphore_rebuilds_on_limit_change():
         assert engine.get_semaphore(2) is a
         assert engine.get_semaphore(3) is not a
     run(go())
+
+
+class _Sink(engine.ProgressSink):
+    def __init__(self):
+        self.lines, self.stages, self.tools = [], [], []
+
+    def line(self, text):
+        self.lines.append(text)
+
+    def stage(self, text):
+        self.stages.append(text)
+
+    def started(self, pid, tool):
+        self.tools.append(tool)
+
+
+def test_progress_streams_lines_live(tmp_path, monkeypatch):
+    _fake_converter(
+        tmp_path, monkeypatch,
+        'echo "Parsing all content..."\nprintf "34%% Running transforms\\r67%% PDF Output plugin\\n"\necho done > "$2"\n',
+    )
+    src = tmp_path / "input.epub"
+    src.write_text("x")
+    sink = _Sink()
+    res = run(engine.convert_file(src, "pdf", timeout=10, progress=sink))
+    assert res.ok
+    assert sink.lines == ["Parsing all content...", "34% Running transforms", "67% PDF Output plugin"]
+    assert sink.tools == ["ebook-convert"] and any("Calibre" in s for s in sink.stages)
+
+
+def test_sigkill_is_reported_as_oom(tmp_path, monkeypatch):
+    _fake_converter(tmp_path, monkeypatch, 'echo "68%% Parsed all content for"\nkill -9 $$\n')
+    src = tmp_path / "input.epub"
+    src.write_text("x")
+    res = run(engine.convert_file(src, "pdf", timeout=10))
+    assert not res.ok
+    assert "SIGKILL" in res.error and "memory" in res.error and "Parsed all content for" in res.error
+
+
+def test_pdf_no_cover_default(tmp_path, monkeypatch):
+    _fake_converter(tmp_path, monkeypatch, 'echo "$@" > "$2.args"\necho x > "$2"\n')
+    src = tmp_path / "input.epub"
+    src.write_text("x")
+    res = run(engine.convert_file(src, "pdf", timeout=10))
+    assert res.ok and "--pdf-no-cover" in (tmp_path / "input.out.pdf.args").read_text()

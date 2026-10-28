@@ -8,7 +8,7 @@ standalone/Telethon callers (`ebook_converter`).
 from __future__ import annotations
 
 import asyncio
-import time
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,7 +20,7 @@ import re
 import shutil
 import signal
 from tempfile import NamedTemporaryFile
-from typing import ClassVar, Optional, Callable, Awaitable
+from typing import ClassVar, Optional
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 from modules.converter.formats import (
@@ -44,7 +44,10 @@ logger = logging.getLogger(__name__)
 
 CONVERTER_BINARY = "ebook-convert"
 PANDOC_BINARY = "pandoc"
-MAX_ERROR_CHARS = 600
+MAX_ERROR_CHARS = 1800
+ERROR_TAIL_LINES = 25
+KEEP_LOG_LINES = 400
+SAMPLE_INTERVAL = 1.0
 DEFAULT_TIMEOUT = 300
 
 
@@ -86,6 +89,80 @@ def safe_output_name(original_name: str, output_format: str) -> str:
     stem = re.sub(r"[\x00-\x1f\\/:*?\"<>|]+", " ", stem)
     stem = re.sub(r"\s+", " ", stem).strip(" .") or "book"
     return f"{stem[:100].strip()}.{output_format.lstrip('.')}"
+
+
+class ProgressSink:
+    """Receives live events from a running conversion. All methods are sync and must not block."""
+
+    def stage(self, text: str) -> None:  # a high-level step ("Extracting PDF text", ...)
+        ...
+
+    def line(self, text: str) -> None:  # one line of converter output
+        ...
+
+    def started(self, pid: int, tool: str) -> None:  # a CLI tool was launched
+        ...
+
+    def stats(self, proc_rss: int | None, cg_used: int | None, cg_limit: int | None) -> None:  # memory sample
+        ...
+
+
+NULL_PROGRESS = ProgressSink()
+
+
+def _group_rss_bytes(pgid: int) -> int | None:
+    """Sum RSS of every process in process group ``pgid`` (Linux only)."""
+    page = os.sysconf("SC_PAGE_SIZE")
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return None
+    total = 0
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", encoding="utf-8", errors="replace") as handle:
+                rest = handle.read().rsplit(")", 1)[1].split()
+            if int(rest[2]) != pgid:
+                continue
+            with open(f"/proc/{entry}/statm", encoding="utf-8") as handle:
+                total += int(handle.read().split()[1]) * page
+        except (OSError, ValueError, IndexError):
+            continue
+    return total
+
+
+def _read_int(*paths: str) -> int | None:
+    for path in paths:
+        try:
+            raw = Path(path).read_text().strip()
+        except OSError:
+            continue
+        if raw.isdigit() and int(raw) < (1 << 60):
+            return int(raw)
+    return None
+
+
+def _cgroup_memory() -> tuple[int | None, int | None]:
+    """(used, limit) in bytes for the whole container, cgroup v2 or v1."""
+    used = _read_int("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory/memory.usage_in_bytes")
+    limit = _read_int("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    return used, limit
+
+
+def describe_exit(rc: int | None) -> str:
+    """Human readable exit status; negative codes are signals."""
+    if rc is None:
+        return "no exit code"
+    if rc < 0:
+        try:
+            name = signal.Signals(-rc).name
+        except ValueError:
+            name = f"signal {-rc}"
+        hint = " - the process was killed, most likely the container ran out of memory (OOM)" if -rc == 9 else ""
+        return f"killed by {name} (exit {rc}){hint}"
+    return f"exit code {rc}"
 
 
 def _tail(text: str) -> str:
@@ -268,37 +345,16 @@ def bok_to_epub(input_bok: Path, out_epub: Path) -> None:
         )
 
 
-async def _drain(stream, buf: bytearray):
-    try:
-        while chunk := await stream.read(4096):
-            buf.extend(chunk)
-            del buf[:-50000]
-    except Exception:
-        pass
-
-
 async def _run_subprocess(
     command: list[str],
     timeout: int | None = DEFAULT_TIMEOUT,
-    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    progress: ProgressSink | None = None,
 ) -> tuple[int | None, str]:
-    """Run a CLI tool with live progress streaming, timeout, and clean error extraction."""
-    logger.info("[SUBPROCESS START] %s", " ".join(command))
-    env = dict(os.environ)
-    calibre_home = Path("/tmp")
-    calibre_cfg = Path("/tmp/calibre-config")
-    calibre_cfg.mkdir(parents=True, exist_ok=True)
-    env["HOME"] = str(calibre_home)
-    env["CALIBRE_CONFIG_DIRECTORY"] = str(calibre_cfg)
-    env["XDG_CONFIG_HOME"] = str(calibre_cfg)
-    env["XDG_CACHE_HOME"] = "/tmp/.cache"
-    env["QT_QPA_PLATFORM"] = "offscreen"
-    env["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
-    env["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu --headless --disable-dev-shm-usage --single-process --no-zygote"
-    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
-    env["DBUS_SESSION_BUS_ADDRESS"] = "/dev/null"
+    """Run a CLI tool in its own process group, streaming its output line by line to ``progress``.
 
-    t0 = time.monotonic()
+    Returns ``(returncode, error_text)``; ``error_text`` is empty on success.
+    """
+    progress = progress or NULL_PROGRESS
     try:
         proc = await asyncio.create_subprocess_exec(
             *command,
@@ -306,73 +362,81 @@ async def _run_subprocess(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
-            env=env,
         )
     except FileNotFoundError:
         return None, f"{command[0]} is not installed on this host."
     except OSError as exc:
         return None, f"Could not start {command[0]}: {exc}"
 
-    output_lines = []
-    last_callback_time = 0.0
+    tool = Path(command[0]).name
+    progress.started(proc.pid, tool)
+    lines: deque[str] = deque(maxlen=KEEP_LOG_LINES)
+    peak = {"rss": 0}
 
-    try:
-        while True:
-            line_bytes = await (
-                proc.stdout.readline()
-                if timeout is None
-                else asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
-            )
-            if not line_bytes:
-                break
-            line_str = line_bytes.decode("utf-8", errors="replace").strip()
-            if line_str:
-                output_lines.append(line_str)
-                if len(output_lines) > 500:
-                    output_lines.pop(0)
+    def emit(raw: bytes) -> None:
+        text = raw.decode("utf-8", errors="replace").strip()
+        if not text or any(noise in text for noise in (":fixme:", "DEBUG -", "INFO -")):
+            return
+        lines.append(text)
+        logger.info("[%s] %s", tool, text)
+        progress.line(text)
 
-                m_pct = re.search(r"(\d{1,3}%.*)", line_str)
-                if m_pct:
-                    progress_text = m_pct.group(1).strip()
-                    logger.info("[CONVERT PROGRESS] %s", progress_text)
-                    now = time.monotonic()
-                    if progress_callback and (now - last_callback_time >= 3.0):
-                        last_callback_time = now
-                        with suppress(Exception):
-                            await progress_callback(progress_text)
-                elif any(k in line_str for k in ("Converting", "Rendering", "Writing", "error", "Error")):
-                    logger.info("[CONVERT LOG] %s", line_str)
-
+    async def pump() -> None:
+        assert proc.stdout is not None
+        buf = b""
+        while chunk := await proc.stdout.read(4096):
+            buf += chunk
+            *complete, buf = re.split(rb"[\r\n]+", buf)  # Calibre also uses \r for progress
+            for raw in complete:
+                emit(raw)
+        if buf:
+            emit(buf)
         await proc.wait()
+
+    async def sampler() -> None:
+        while True:
+            rss = await asyncio.to_thread(_group_rss_bytes, proc.pid)
+            used, limit = _cgroup_memory()
+            if rss:
+                peak["rss"] = max(peak["rss"], rss)
+            progress.stats(rss, used, limit)
+            await asyncio.sleep(SAMPLE_INTERVAL)
+
+    sampler_task = asyncio.create_task(sampler())
+    try:
+        await (pump() if timeout is None else asyncio.wait_for(pump(), timeout=timeout))
     except asyncio.TimeoutError:
         _kill_group(proc.pid)
         with suppress(Exception):
             await proc.wait()
-        tail_output = _tail(chr(10).join(output_lines))
-        logger.error("[SUBPROCESS TIMEOUT] Timed out after %ss: %s\nLast output:\n%s", timeout, " ".join(command), tail_output)
-        return None, f"Conversion timed out after {timeout} seconds.\nLast output:\n{tail_output}"
+        return None, f"Conversion timed out after {timeout} seconds."
     except asyncio.CancelledError:
         _kill_group(proc.pid)
         raise
     finally:
-        if proc.returncode is None:
-            _kill_group(proc.pid)
+        sampler_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sampler_task
+        _kill_group(proc.pid)  # reap any leftover helper processes (QtWebEngine etc.)
 
-    elapsed = time.monotonic() - t0
-    log_text = chr(10).join(output_lines)
-    logger.info("[SUBPROCESS END] rc=%s elapsed=%.1fs | tail=%s", proc.returncode, elapsed, log_text[-200:].strip())
+    rc = proc.returncode
+    if rc == 0:
+        return 0, ""
 
-    if proc.returncode != 0:
-        if matches := re.findall(
-            r"(Conversion Failure Reason\s+\*{5,}\s+[E\d]+:.*)|(Conversion error: .*)",
-            log_text,
-        ):
-            err = "\n".join(m[0].strip() or m[1].strip() for m in matches).replace("*", "")
-            return proc.returncode, _tail(err)
-        logger.warning("%s failed (%s): %s", command[0], proc.returncode, _tail(log_text))
-        return proc.returncode, _tail(log_text) or f"{command[0]} exited with code {proc.returncode}."
+    log_text = "\n".join(lines)
+    if matches := re.findall(
+        r"(Conversion Failure Reason\s+\*{5,}\s+[E\d]+:.*)|(Conversion error: .*)",
+        log_text,
+    ):
+        err = "\n".join(m[0].strip() or m[1].strip() for m in matches).replace("*", "")
+        return rc, _tail(err)
 
-    return 0, ""
+    header = f"{tool}: {describe_exit(rc)}"
+    if peak["rss"]:
+        header += f"; peak memory ~{peak['rss'] / 1048576:.0f} MB"
+    tail = "\n".join(list(lines)[-ERROR_TAIL_LINES:])
+    logger.warning("%s", header)
+    return rc, _tail(f"{header}\n{tail}" if tail else header)
 
 
 async def convert_file(
@@ -383,10 +447,12 @@ async def convert_file(
     force_rtl: bool = False,
     compress_images: bool = False,
     extra_calibre_args: list[str] | None = None,
-    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+    pdf_no_cover: bool = True,
+    progress: ProgressSink | None = None,
 ) -> ConversionResult:
     """Convert ``src`` (any of 62 formats) to ``output_format`` (any of 31 formats)."""
     src = Path(src)
+    progress = progress or NULL_PROGRESS
     out_fmt = output_format.lower().lstrip(".")
     if not src.exists():
         return ConversionResult(False, error=f"Input file not found: {src}")
@@ -403,6 +469,7 @@ async def convert_file(
     # 1. Shamela .bok input -> EPUB -> target format
     if in_fmt == "bok":
         epub_tmp = src.with_name(f"{src.stem}.bok_tmp.epub")
+        progress.stage("Reading Shamela .bok database")
         try:
             coro = asyncio.to_thread(bok_to_epub, src, epub_tmp)
             await (coro if timeout is None else asyncio.wait_for(coro, timeout=timeout))
@@ -423,6 +490,8 @@ async def convert_file(
                 force_rtl=False,
                 compress_images=compress_images,
                 extra_calibre_args=extra_calibre_args,
+                pdf_no_cover=pdf_no_cover,
+                progress=progress,
             )
             if res.ok and res.path and res.path.exists():
                 res.path.replace(dst)
@@ -437,6 +506,7 @@ async def convert_file(
             # Allow direct Calibre fallback if anydoc is not installed
             pass
         else:
+            progress.stage("Extracting document text (anydoc)")
             try:
                 import anydoc
             except ImportError:
@@ -464,6 +534,8 @@ async def convert_file(
                     force_rtl=force_rtl,
                     compress_images=compress_images,
                     extra_calibre_args=extra_calibre_args,
+                    pdf_no_cover=pdf_no_cover,
+                    progress=progress,
                 )
                 if res.ok and res.path and res.path.exists():
                     res.path.replace(dst)
@@ -480,6 +552,7 @@ async def convert_file(
             import pymupdf as _pymupdf  # noqa: F401
             # Only use pdf_to_htmlz when the file is a valid PDF signature (%PDF)
             if src.read_bytes()[:4] == b"%PDF":
+                progress.stage("Extracting text from PDF (PyMuPDF)")
                 pdf_err = pdf_to_htmlz(src, htmlz_tmp)
         except Exception:
             pdf_err = None
@@ -495,6 +568,8 @@ async def convert_file(
                     force_rtl=force_rtl,
                     compress_images=compress_images,
                     extra_calibre_args=extra_calibre_args,
+                    pdf_no_cover=pdf_no_cover,
+                    progress=progress,
                 )
                 if res.ok and res.path and res.path.exists():
                     res.path.replace(dst)
@@ -507,7 +582,8 @@ async def convert_file(
 
     # 4. KFX input -> Calibre KFX Input plugin -> EPUB -> target format
     if in_fmt in KFX_INPUT_FORMATS:
-        rc, err = await _run_subprocess(["calibre-debug", "-r", "KFX Input", "--", str(src)], timeout=timeout)
+        progress.stage("Converting KFX input")
+        rc, err = await _run_subprocess(["calibre-debug", "-r", "KFX Input", "--", str(src)], timeout=timeout, progress=progress)
         epub_inter = src.with_suffix(".epub")
         if rc != 0 or not epub_inter.exists():
             epub_inter.unlink(missing_ok=True)
@@ -525,6 +601,8 @@ async def convert_file(
                 force_rtl=force_rtl,
                 compress_images=compress_images,
                 extra_calibre_args=extra_calibre_args,
+                pdf_no_cover=pdf_no_cover,
+                progress=progress,
             )
             if res.ok and res.path and res.path.exists():
                 res.path.replace(dst)
@@ -541,7 +619,8 @@ async def convert_file(
     if out_fmt == "kfx":
         if in_fmt not in KFX_ALLOWED_SOURCES:
             return ConversionResult(False, error=f"Cannot convert .{in_fmt} directly to KFX.")
-        rc, err = await _run_subprocess(["calibre-debug", "-r", "KFX Output", "--", str(src)], timeout=timeout)
+        progress.stage("Building KFX output")
+        rc, err = await _run_subprocess(["calibre-debug", "-r", "KFX Output", "--", str(src)], timeout=timeout, progress=progress)
         kfx_out = src.with_suffix(".kfx")
         if rc != 0 or not kfx_out.exists() or kfx_out.stat().st_size == 0:
             kfx_out.unlink(missing_ok=True)
@@ -566,16 +645,18 @@ async def convert_file(
             "-o",
             str(dst),
         ]
-        rc, err = await _run_subprocess(cmd, timeout=timeout)
+        progress.stage(f"Running Pandoc (.{in_fmt} -> .{out_fmt})")
+        rc, err = await _run_subprocess(cmd, timeout=timeout, progress=progress)
     else:
         if not shutil.which(CONVERTER_BINARY):
             return ConversionResult(False, error="Calibre (ebook-convert) is not installed on this host.")
         cmd = [CONVERTER_BINARY, str(src), str(dst)]
-        if out_fmt == "pdf":
-            cmd.append("--pdf-no-cover")
+        if out_fmt == "pdf" and pdf_no_cover:
+            cmd.append("--pdf-no-cover")  # same default as the original bot: skips the cover render pass
         if extra_calibre_args:
             cmd.extend(extra_calibre_args)
-        rc, err = await _run_subprocess(cmd, timeout=timeout)
+        progress.stage(f"Running Calibre (.{in_fmt} -> .{out_fmt})")
+        rc, err = await _run_subprocess(cmd, timeout=timeout, progress=progress)
 
     if rc != 0:
         dst.unlink(missing_ok=True)
@@ -589,7 +670,8 @@ async def convert_file(
         set_epub_rtl(dst)
 
     if compress_images and out_fmt in {"azw3", "epub", "kepub"} and shutil.which("ebook-polish"):
-        await _run_subprocess(["ebook-polish", "--compress-images", str(dst)], timeout=timeout)
+        progress.stage("Compressing images")
+        await _run_subprocess(["ebook-polish", "--compress-images", str(dst)], timeout=timeout, progress=progress)
 
     return ConversionResult(True, path=dst)
 
@@ -626,8 +708,8 @@ class Converter:
         force_rtl: bool = False,
         compress_images: bool = False,
         extra_calibre_args: list[str] | None = None,
-    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         timeout: int = DEFAULT_TIMEOUT,
+        progress: ProgressSink | None = None,
     ) -> ConversionResult:
         return await convert_file(
             Path(input_file),
@@ -636,6 +718,7 @@ class Converter:
             force_rtl=force_rtl,
             compress_images=compress_images,
             extra_calibre_args=extra_calibre_args,
+            progress=progress,
         )
 
 
