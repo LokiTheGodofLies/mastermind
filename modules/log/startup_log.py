@@ -58,7 +58,7 @@ async def _chk(bot, lbl, cid):
         if not u:
             try: u = await bot.export_chat_invite_link(int(cid))
             except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href="{html.escape(u)}">Invite Link</a>"
+        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href='{html.escape(u)}'>Invite Link</a>"
     except Exception as e:
         return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
 
@@ -71,7 +71,7 @@ async def _chk(bot, lbl, cid):
         if not u:
             try: u = await bot.export_chat_invite_link(int(cid))
             except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href="{html.escape(u)}">Invite Link</a>"
+        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href='{html.escape(u)}'>Invite Link</a>"
     except Exception as e:
         return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
 
@@ -84,7 +84,7 @@ async def _chk(bot, lbl, cid):
         if not u:
             try: u = await bot.export_chat_invite_link(int(cid))
             except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href="{html.escape(u)}">Invite Link</a>"
+        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href='{html.escape(u)}'>Invite Link</a>"
     except Exception as e:
         return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
 
