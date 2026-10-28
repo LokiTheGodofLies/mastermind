@@ -1,5 +1,5 @@
-import urllib.parse
 from datetime import datetime
+from urllib.parse import quote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.user_db import add_or_update_user_db, get_user_role_db, set_helper_started_db
@@ -21,11 +21,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_helper_started_db(user.id, True)
 
     referral_notice = ""
-    args = context.args
+    args = context.args or []
+
     if args and args[0].startswith(("dl_", "file_")):
         try:
+            file_row_id = int(args[0].split("_", 1)[1])
             from modules.search.handlers import deliver_file_to_user
-            await deliver_file_to_user(target_msg, user, args[0], context)
+            await deliver_file_to_user(target_msg, user, file_row_id, context)
             return
         except Exception as e:
             await target_msg.reply_text(f"❌ Error delivering file: {e}")
@@ -50,14 +52,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot_uname = context.bot.username or "Bot"
     ref_link = f"https://t.me/{bot_uname}?start=ref_{user.id}"
-    enc_u = urllib.parse.quote(ref_link, safe="")
-    enc_t = urllib.parse.quote("Join and earn +10 bonus quota", safe="")
-    share_url = f"https://t.me/share/url?url={enc_u}&text={enc_t}"
+    share_url = (
+        "https://t.me/share/url?"
+        f"url={quote(ref_link, safe='')}"
+        f"&text={quote('Join and earn +10 bonus quota', safe='')}"
+    )
 
     kb = [
         [InlineKeyboardButton("🔍 Search Library", callback_data="search_menu"), InlineKeyboardButton("📖 Help Menu", callback_data="help_button")],
         [InlineKeyboardButton("📊 My Quota", callback_data="quota_menu"), InlineKeyboardButton("📤 Refer & Earn +10", url=share_url)],
+        [InlineKeyboardButton("💬 Join Community", url="https://t.me/heyucutie")],
     ]
+
     for b in tpl.get("buttons", []):
         if b.get("type") == "url":
             kb.append([InlineKeyboardButton(b["label"], url=b["target"])])
