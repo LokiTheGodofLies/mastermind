@@ -1,3 +1,4 @@
+from __future__ import annotations
 # ============================================================================
 # modules/indexing/book_fetcher.py
 # Multi-source Book & Audiobook metadata fetcher (Goodreads, Audible, Storytel,
@@ -9,7 +10,10 @@ import asyncio
 import logging
 import urllib.parse
 from html.parser import HTMLParser
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 
 from lib.mediagoer import Mediagoer
 

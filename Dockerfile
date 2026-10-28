@@ -1,4 +1,4 @@
-# Full image: Calibre + Pandoc + the optional converter packages, so every /convert route works.
+# Docker image with Calibre + Pandoc so all 62 input and 31 output formats work in /convert.
 # Render: create the service with "Docker" instead of "Python" and point it at this file.
 FROM python:3.11-slim
 
@@ -11,8 +11,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt requirements-converter.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-converter.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 CMD ["python", "main.py"]

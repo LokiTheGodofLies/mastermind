@@ -1,4 +1,4 @@
-from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata
+from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata, clean_book_filename
 import os
 import re
 import html

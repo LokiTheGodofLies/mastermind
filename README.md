@@ -27,7 +27,7 @@ converts ebooks between formats, and gives admins full control from inside Teleg
 | **Delivery** | Rotating helper bots copy the file to a temporary channel + your DM; channel copy auto-deletes |
 | **Indexing** | Upload queue with admin approval, `/index` range scanner, multi-source metadata, progress card |
 | **Requests** | Goodreads/Audible matching, manual wizard, moderator status buttons, user notifications |
-| **Converter** | `/convert` + inline format buttons; 61 input / 31 output formats via Calibre, Pandoc, PyMuPDF and Anydoc; optional RTL and KFX |
+| **Converter** | `/convert` + inline format buttons, powered by Calibre |
 | **Quotas & referrals** | Per-role daily quotas, gifts, invite bonuses |
 | **Moderation** | 3 ban types (user or chat), force-subscribe, support quiz, topic-restricted groups |
 | **Admin tools** | `/customize` dashboard, live config, template editor, broadcast, logs, Render redeploy |
@@ -44,11 +44,8 @@ modules/                one folder per feature, each with help.txt  (see modules
   allowance/ ban/ broadcast/ converter/ database/ editscript/ fsub/ help/ id/ indexing/
   log/ message/ request/ roles/ search/ start/ stats/ support/ utility/  bot_manager.py
 scripts/push_sync.sh    optional git push helper
-tests/                  pytest suite (converter engine + routing, config/secrets, filename parser)
-examples/               convert_cli.py (engine without a bot) and a standalone Telethon converter bot
-Dockerfile              optional image with Calibre + Pandoc + converter extras (needed by /convert)
-requirements-converter.txt  optional converter packages (pymupdf, firecrawl-anydoc)
-requirements-telethon.txt   only for modules/converter/telethon_adapter.py
+tests/                  pytest suite (converter engine, config/secrets, filename parser)
+Dockerfile              optional image that includes Calibre (needed by /convert)
 env.example             every setting, documented
 ```
 
@@ -125,7 +122,6 @@ Value priority (highest first): **edited in Telegram** (`/setconfig`, `/customiz
 | `CONVERT_TIMEOUT_SECONDS` | `300` | Per-conversion time limit |
 | `CONVERT_MAX_CONCURRENT` | `2` | Parallel conversions on the host |
 | `CONVERT_MAX_INPUT_MB` | `20` | Input size cap (Bot API maximum is 20) |
-| `CONVERT_KFX_ENABLED` | `false` | Offer KFX in/out (requires Calibre's KFX Input/Output plugins) |
 
 ### Optional integrations
 `COMMUNITY_URL` (button on start menu / captions), `GITHUB_REPO` (`owner/name`, deploy target
@@ -248,22 +244,14 @@ accept a pending request; admins are exempt.
 
 `/convert` → send/reply to a file → tap a format → receive the converted file.
 
-* **Reads 61 formats**, e.g. epub, mobi, azw3, fb2, pdf, docx, doc, rtf, odt, htmlz, cbz, djvu, lit, lrf,
-  md, rst, tex, org, typst, xlsx, pptx … (full list: `modules/converter/formats.py::INPUT_FORMATS`)
-* **Writes 31 formats**: EPUB, MOBI, AZW3, PDF, DOCX, FB2, RTF, TXT, HTMLZ, TXTZ, MD, HTML, ODT, RST, TeX,
-  Typst, AsciiDoc, Org, PPTX, KEPUB, LIT, LRF, PDB, … The buttons only offer what is possible for the input
-  *and* installed on the host.
-* **Backends**: Calibre `ebook-convert` (most ebook formats) · Pandoc (markup/office formats) ·
-  PyMuPDF (PDF text → cleaner conversions, optional) · Anydoc (legacy `.doc/.xls/.ppt/.odp/.ods`, optional) ·
-  Calibre KFX plugins (opt-in via `CONVERT_KFX_ENABLED`)
-* **Force RTL** button for right-to-left books (EPUB page progression + CSS direction)
+* Reads: azw, azw3, azw4, cb7, cbc, cbr, cbz, chm, djvu, doc, docx, epub, fb2, fbz, htm, html, htmlz,
+  kepub, lit, lrf, mobi, odt, opf, pdb, pdf, pml, prc, rb, rtf, snb, tcr, txt, txtz, xhtml
+* Writes: EPUB, MOBI, AZW3, PDF, DOCX, FB2, RTF, TXT, HTMLZ, TXTZ
 * Limits: 20 MB input, ~49 MB output, one conversion per user at a time, `CONVERT_MAX_CONCURRENT`
-  globally, `CONVERT_TIMEOUT_SECONDS` per run (the whole process group is killed on timeout)
+  globally, `CONVERT_TIMEOUT_SECONDS` per run (the whole Calibre process group is killed on timeout)
 * Temporary files live in a private temp folder that is always deleted
-* **Needs Calibre and/or Pandoc.** Use the provided `Dockerfile` (Render: *Docker* runtime), which installs
-  both plus `requirements-converter.txt`. Without them the bot politely says the converter is unavailable
-* Use the engine without Telegram: `python examples/convert_cli.py book.epub pdf`. A Telethon front-end
-  (`modules/converter/telethon_adapter.py`, `requirements-telethon.txt`) is included for a separate MTProto bot
+* **Needs Calibre** (`ebook-convert`). Use the provided `Dockerfile` (Render: *Docker* runtime). Without
+  Calibre the bot politely says the converter is unavailable
 
 ## Database & persistence
 
@@ -284,7 +272,7 @@ library after data loss run `/index t.me/c/<storage id>/<first>-<last>` on the s
 ## Deployment
 
 **Render (free, Python runtime)** – connect the repo; `render.yaml` defines build/start commands.
-Add the environment variables from `env.example`. Everything works except `/convert` (no Calibre/Pandoc there).
+Add the environment variables from `env.example`. Everything works except `/convert`.
 **Render with converter** – create the service with the *Docker* runtime (uses `Dockerfile`).
 **Keep-alive** – point UptimeRobot (HTTP, 5 min) at `https://<service>.onrender.com`; the built-in
 server answers `Mastermind Bot is alive and running!`.

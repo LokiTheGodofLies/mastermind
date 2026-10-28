@@ -1,15 +1,18 @@
-"""Telegram front-end of the ebook converter: ``/convert`` plus the inline format buttons.
+"""Telegram front-end of the unified ebook converter: ``/convert`` plus inline format & option buttons.
 
 Flow
 ----
 1. ``/convert`` while replying to a file, or ``/convert`` and then sending a file.
-2. The bot validates type and size and shows one inline button per output format.
-3. A tap downloads the file, converts it with Calibre, sends the result and cleans up.
+2. The bot validates type (62 input formats) and size, and shows inline buttons for all compatible
+   output formats (up to 31 formats) plus Force RTL and Compress Images toggles.
+3. A tap downloads the file, converts it via Calibre / Pandoc / PyMuPDF / Shamela .bok / Anydoc,
+   sends the result and cleans up temporary files.
 
 Callback data (all start with ``cv|``):
     cv|menu                 open the convert screen (start menu button)
     cv|fmt|<format>|<token> convert the pending file to <format>
-    cv|rtl|<token>          toggle "Force RTL" for the pending file
+    cv|rtl|<token>          toggle Force RTL for the pending file
+    cv|cmp|<token>          toggle Compress Images for the pending file
     cv|cancel|<token>       drop the pending file
     cv|wait_cancel          stop waiting for an upload
 """
@@ -25,11 +28,9 @@ from telegram.ext import ContextTypes
 
 from modules.converter.engine import (
     ConversionResult,
-    any_backend_available,
-    available_output_choices,
     convert_file,
+    converter_available,
     get_semaphore,
-    missing_dependency_hint,
     safe_output_name,
 )
 from modules.converter.formats import (
@@ -38,6 +39,7 @@ from modules.converter.formats import (
     HIGHLIGHTED_FORMATS,
     INPUT_FORMATS,
     detect_input_format,
+    output_choices,
 )
 from modules.database.config_db import get_config_bool, get_config_int
 from modules.database.user_db import get_user_role_db
@@ -68,24 +70,19 @@ def _supported_text() -> str:
     return ", ".join(sorted(INPUT_FORMATS))
 
 
-def _kfx_enabled() -> bool:
-    """KFX needs Calibre's KFX plugins, so it is opt-in (``convert_kfx_enabled``)."""
-    return get_config_bool("convert_kfx_enabled", False)
-
-
-def _choices(input_format: str) -> list:
-    return available_output_choices(input_format, kfx=_kfx_enabled())
-
-
-def _format_keyboard(token: str, input_format: str, force_rtl: bool = False) -> InlineKeyboardMarkup:
+def _format_keyboard(token: str, input_format: str, *, force_rtl: bool = False, compress_images: bool = False) -> InlineKeyboardMarkup:
     buttons = [
-        InlineKeyboardButton(f"🔸 {fmt.upper()}" if fmt in HIGHLIGHTED_FORMATS else fmt.upper(),
-                             callback_data=f"cv|fmt|{fmt}|{token}")
-        for fmt in _choices(input_format)
+        InlineKeyboardButton(
+            f"🔸 {fmt.upper()}" if fmt in HIGHLIGHTED_FORMATS else fmt.upper(),
+            callback_data=f"cv|fmt|{fmt}|{token}",
+        )
+        for fmt in output_choices(input_format)
     ]
     rows = [buttons[i:i + BUTTONS_PER_ROW] for i in range(0, len(buttons), BUTTONS_PER_ROW)]
-    rows.append([InlineKeyboardButton(f"↔️ Force RTL: {'ON ✅' if force_rtl else 'OFF'}",
-                                      callback_data=f"cv|rtl|{token}")])
+    rows.append([
+        InlineKeyboardButton(f"Force RTL: {'ON ✅' if force_rtl else 'OFF'}", callback_data=f"cv|rtl|{token}"),
+        InlineKeyboardButton(f"Compress: {'ON ✅' if compress_images else 'OFF'}", callback_data=f"cv|cmp|{token}"),
+    ])
     rows.append([InlineKeyboardButton("❌ Cancel", callback_data=f"cv|cancel|{token}")])
     return InlineKeyboardMarkup(rows)
 
@@ -93,9 +90,11 @@ def _format_keyboard(token: str, input_format: str, force_rtl: bool = False) -> 
 def _unavailable_reason() -> str:
     if not get_config_bool("convert_enabled", True):
         return "🔧 The converter is currently disabled by the bot admins."
-    if not any_backend_available():
-        return ("🔧 The converter is not available on this host (Calibre / Pandoc are not installed). "
-                "Ask the bot owner to deploy with the provided Dockerfile.")
+    if not converter_available():
+        return (
+            "🔧 The converter is not available on this host (Calibre/Pandoc not installed). "
+            "Ask the bot owner to deploy with the provided Dockerfile."
+        )
     return ""
 
 
@@ -118,11 +117,12 @@ async def convert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["convert_wait"] = time.monotonic() + WAIT_TTL_SECONDS
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cv|wait_cancel")]])
     await msg.reply_text(
-        "🔄 <b>Ebook Converter</b>\n\n"
-        "Send me the ebook file you want to convert.\n"
+        "🔄 <b>Ebook Converter (62 Inputs → 31 Outputs)</b>\n\n"
+        "Send me the ebook or document file you want to convert.\n"
         f"📏 Max size: <code>{_max_input_bytes() // (1024 * 1024)} MB</code>\n"
-        f"📂 Reads: <code>{html.escape(_supported_text())}</code>",
-        parse_mode="HTML", reply_markup=kb,
+        f"📂 Reads (62 formats): <code>{html.escape(_supported_text())}</code>",
+        parse_mode="HTML",
+        reply_markup=kb,
     )
 
 
@@ -147,17 +147,17 @@ async def _offer_formats(msg, document, context: ContextTypes.DEFAULT_TYPE):
     if in_fmt not in INPUT_FORMATS:
         await msg.reply_text(
             f"❌ <b>Unsupported file type</b> (<code>.{html.escape(in_fmt or '?')}</code>).\n"
-            f"Supported: <code>{html.escape(_supported_text())}</code>", parse_mode="HTML")
-        return
-    hint = "" if _choices(in_fmt) else missing_dependency_hint(in_fmt)
-    if hint:
-        await msg.reply_text(f"❌ <b>Cannot convert this file here.</b>\n{html.escape(hint)}", parse_mode="HTML")
+            f"Supported (62 formats): <code>{html.escape(_supported_text())}</code>",
+            parse_mode="HTML",
+        )
         return
     size = document.file_size or 0
     if size > _max_input_bytes():
         await msg.reply_text(
             f"❌ File is too large (<code>{size / 1048576:.1f} MB</code>). "
-            f"Limit: <code>{_max_input_bytes() // 1048576} MB</code>.", parse_mode="HTML")
+            f"Limit: <code>{_max_input_bytes() // 1048576} MB</code>.",
+            parse_mode="HTML",
+        )
         return
 
     jobs = _jobs(context)
@@ -166,14 +166,20 @@ async def _offer_formats(msg, document, context: ContextTypes.DEFAULT_TYPE):
         jobs.pop(oldest, None)
     token = secrets.token_hex(4)
     jobs[token] = {
-        "file_id": document.file_id, "file_name": file_name, "file_size": size,
-        "format": in_fmt, "expires": time.monotonic() + JOB_TTL_SECONDS, "rtl": False,
+        "file_id": document.file_id,
+        "file_name": file_name,
+        "file_size": size,
+        "format": in_fmt,
+        "force_rtl": False,
+        "compress_images": False,
+        "expires": time.monotonic() + JOB_TTL_SECONDS,
     }
     await msg.reply_text(
         f"📘 <b>{html.escape(file_name)}</b>\n"
         f"📦 <code>{size / 1048576:.2f} MB</code> · <code>.{html.escape(in_fmt)}</code>\n\n"
         "Choose the format to convert to:",
-        parse_mode="HTML", reply_markup=_format_keyboard(token, in_fmt),
+        parse_mode="HTML",
+        reply_markup=_format_keyboard(token, in_fmt),
     )
 
 
@@ -197,7 +203,8 @@ async def convert_callback_handler(update: Update, context: ContextTypes.DEFAULT
         await q.answer()
         context.user_data["convert_wait"] = time.monotonic() + WAIT_TTL_SECONDS
         await q.message.edit_text(
-            "🔄 <b>Ebook Converter</b>\n\nSend me the ebook file you want to convert.\n"
+            "🔄 <b>Ebook Converter (62 Inputs → 31 Outputs)</b>\n\n"
+            "Send me the ebook or document file you want to convert.\n"
             f"📂 Reads: <code>{html.escape(_supported_text())}</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ Back to Start", callback_data="start_menu")]]),
@@ -206,18 +213,29 @@ async def convert_callback_handler(update: Update, context: ContextTypes.DEFAULT
         context.user_data.pop("convert_wait", None)
         await q.answer("Cancelled")
         await q.message.edit_text("❌ Conversion cancelled.")
-    elif action == "rtl" and len(parts) == 3:
-        job = _jobs(context).get(parts[2])
-        if not job:
-            await q.answer("⌛ This request expired or belongs to someone else. Send /convert again.", show_alert=True)
-            return
-        job["rtl"] = not job.get("rtl", False)
-        await q.answer(f"Force RTL {'on' if job['rtl'] else 'off'}")
-        await q.message.edit_reply_markup(reply_markup=_format_keyboard(parts[2], job["format"], job["rtl"]))
     elif action == "cancel" and len(parts) == 3:
         _jobs(context).pop(parts[2], None)
         await q.answer("Cancelled")
         await q.message.edit_text("❌ Conversion cancelled.")
+    elif action in ("rtl", "cmp") and len(parts) == 3:
+        token = parts[2]
+        job = _jobs(context).get(token)
+        if not job:
+            await q.answer("⌛ This request expired. Send /convert again.", show_alert=True)
+            return
+        if action == "rtl":
+            job["force_rtl"] = not job.get("force_rtl", False)
+        else:
+            job["compress_images"] = not job.get("compress_images", False)
+        await q.answer()
+        await q.message.edit_reply_markup(
+            reply_markup=_format_keyboard(
+                token,
+                job["format"],
+                force_rtl=job.get("force_rtl", False),
+                compress_images=job.get("compress_images", False),
+            )
+        )
     elif action == "fmt" and len(parts) == 4:
         await _run_conversion(q, context, out_fmt=parts[2], token=parts[3])
     else:
@@ -229,7 +247,7 @@ async def _run_conversion(q, context: ContextTypes.DEFAULT_TYPE, out_fmt: str, t
     if not job:
         await q.answer("⌛ This request expired or belongs to someone else. Send /convert again.", show_alert=True)
         return
-    if out_fmt not in _choices(job["format"]):
+    if out_fmt not in output_choices(job["format"]):
         await q.answer("Unsupported target format.", show_alert=True)
         return
     reason = _unavailable_reason()
@@ -248,21 +266,33 @@ async def _run_conversion(q, context: ContextTypes.DEFAULT_TYPE, out_fmt: str, t
     try:
         semaphore = get_semaphore(get_config_int("convert_max_concurrent", 2))
         if semaphore.locked():
-            await q.message.edit_text(f"🕒 <b>Queued</b> — waiting for a free converter slot…\n📘 <code>{name}</code>", parse_mode="HTML")
+            await q.message.edit_text(
+                f"🕒 <b>Queued</b> — waiting for a free converter slot…\n📘 <code>{name}</code>",
+                parse_mode="HTML",
+            )
         async with semaphore:
-            await q.message.edit_text(f"⏳ <b>Converting to {out_fmt.upper()}…</b>\n📘 <code>{name}</code>", parse_mode="HTML")
+            await q.message.edit_text(
+                f"⏳ <b>Converting to {out_fmt.upper()}…</b>\n📘 <code>{name}</code>",
+                parse_mode="HTML",
+            )
             with tempfile.TemporaryDirectory(prefix="mm_convert_") as tmp:
                 src = Path(tmp) / f"input.{job['format']}"
                 tg_file = await context.bot.get_file(job["file_id"])
                 await tg_file.download_to_drive(custom_path=src)
                 result = await convert_file(
-                    src, out_fmt, timeout=get_config_int("convert_timeout_seconds", 300),
-                    force_rtl=bool(job.get("rtl")), enable_kfx=_kfx_enabled(),
+                    src,
+                    out_fmt,
+                    timeout=get_config_int("convert_timeout_seconds", 300),
+                    force_rtl=job.get("force_rtl", False),
+                    compress_images=job.get("compress_images", False),
                 )
                 await _deliver(q, context, job, out_fmt, result, started)
     except Exception as exc:  # network / Telegram errors must not leave the button hanging
         logger.exception("Conversion failed for user %s", q.from_user.id)
-        await q.message.edit_text(f"❌ <b>Conversion failed</b>\n<code>{html.escape(str(exc)[:300])}</code>", parse_mode="HTML")
+        await q.message.edit_text(
+            f"❌ <b>Conversion failed</b>\n<code>{html.escape(str(exc)[:300])}</code>",
+            parse_mode="HTML",
+        )
     finally:
         context.user_data.pop("convert_busy", None)
 
@@ -272,25 +302,35 @@ async def _deliver(q, context, job: dict, out_fmt: str, result: ConversionResult
     if not result.ok:
         await q.message.edit_text(
             f"❌ <b>Conversion failed</b>\n📘 <code>{name}</code>\n\n<pre>{html.escape(result.error[:500])}</pre>",
-            parse_mode="HTML")
+            parse_mode="HTML",
+        )
         return
 
     size = result.path.stat().st_size
     if size > BOT_UPLOAD_LIMIT_MB * 1024 * 1024 - 1024 * 1024:
         await q.message.edit_text(
             f"❌ The converted file is <code>{size / 1048576:.1f} MB</code>, over Telegram's "
-            f"{BOT_UPLOAD_LIMIT_MB} MB bot upload limit. Try a lighter format such as EPUB.", parse_mode="HTML")
+            f"{BOT_UPLOAD_LIMIT_MB} MB bot upload limit. Try a lighter format such as EPUB.",
+            parse_mode="HTML",
+        )
         return
 
     elapsed = time.monotonic() - started
     thread_id = q.message.message_thread_id if q.message.is_topic_message else None
     with result.path.open("rb") as handle:
         await context.bot.send_document(
-            chat_id=q.message.chat_id, document=handle,
+            chat_id=q.message.chat_id,
+            document=handle,
             filename=safe_output_name(job["file_name"], out_fmt),
-            caption=(f"✅ <b>Converted</b> <code>.{job['format']}</code> → <code>.{out_fmt}</code>\n"
-                     f"📦 <code>{size / 1048576:.2f} MB</code> · ⏱ <code>{elapsed:.1f}s</code>"),
-            parse_mode="HTML", message_thread_id=thread_id,
+            caption=(
+                f"✅ <b>Converted</b> <code>.{job['format']}</code> → <code>.{out_fmt}</code>\n"
+                f"📦 <code>{size / 1048576:.2f} MB</code> · ⏱ <code>{elapsed:.1f}s</code>"
+            ),
+            parse_mode="HTML",
+            message_thread_id=thread_id,
         )
     logger.info("[CONVERT] user=%s %s->%s %.1fs %d bytes", q.from_user.id, job["format"], out_fmt, elapsed, size)
-    await q.message.edit_text(f"✅ <b>Done!</b> Your <code>.{out_fmt}</code> file is below.\n📘 <code>{name}</code>", parse_mode="HTML")
+    await q.message.edit_text(
+        f"✅ <b>Done!</b> Your <code>.{out_fmt}</code> file is below.\n📘 <code>{name}</code>",
+        parse_mode="HTML",
+    )
