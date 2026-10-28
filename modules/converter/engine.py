@@ -8,6 +8,7 @@ standalone/Telethon callers (`ebook_converter`).
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -269,6 +270,15 @@ def bok_to_epub(input_bok: Path, out_epub: Path) -> None:
 
 async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIMEOUT) -> tuple[int | None, str]:
     """Run a CLI tool in its own process group with timeout and clean error extraction."""
+    logger.info("[SUBPROCESS START] %s", " ".join(command))
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+    env["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu --headless --disable-dev-shm-usage --single-process --no-zygote"
+    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    env["DBUS_SESSION_BUS_ADDRESS"] = "/dev/null"
+
+    t0 = time.monotonic()
     try:
         proc = await asyncio.create_subprocess_exec(
             *command,
@@ -276,22 +286,30 @@ async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIME
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
     except FileNotFoundError:
         return None, f"{command[0]} is not installed on this host."
     except OSError as exc:
         return None, f"Could not start {command[0]}: {exc}"
 
+    output_lines = []
     try:
-        out, _ = (
-            await proc.communicate()
-            if timeout is None
-            else await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        )
+        while True:
+            line_bytes = await (proc.stdout.readline() if timeout is None else asyncio.wait_for(proc.stdout.readline(), timeout=timeout))
+            if not line_bytes:
+                break
+            line_str = line_bytes.decode("utf-8", errors="replace").strip()
+            if line_str:
+                output_lines.append(line_str)
+                if any(x in line_str for x in ("%", "Converting", "Rendering", "Writing", "error", "Error")):
+                    logger.info("[CONVERT PROGRESS] %s", line_str)
+        await proc.wait()
     except asyncio.TimeoutError:
         _kill_group(proc.pid)
         with suppress(Exception):
             await proc.wait()
+        logger.error("[SUBPROCESS TIMEOUT] Timed out after %ss: %s", timeout, " ".join(command))
         return None, f"Conversion timed out after {timeout} seconds."
     except asyncio.CancelledError:
         _kill_group(proc.pid)
@@ -300,7 +318,9 @@ async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIME
         if proc.returncode is None:
             _kill_group(proc.pid)
 
-    log_text = (out or b"").decode("utf-8", errors="replace")
+    elapsed = time.monotonic() - t0
+    log_text = chr(10).join(output_lines)
+    logger.info("[SUBPROCESS END] rc=%s elapsed=%.1fs | tail=%s", proc.returncode, elapsed, log_text[-200:])
     if proc.returncode != 0:
         if matches := re.findall(
             r"(Conversion Failure Reason\s+\*{5,}\s+[E\d]+:.*)|(Conversion error: .*)",
