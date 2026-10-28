@@ -1,7 +1,6 @@
 import os
 import sqlite3
 import logging
-from datetime import datetime
 from modules.log.logger import get_ist_str
 
 logger = logging.getLogger(__name__)
@@ -232,8 +231,8 @@ def reset_file_db():
 
 _init_queue_tables()
 
-def build_file_start_param(row: dict, storage_id: str = "-1003511375054") -> str:
-    st_cid = str(storage_id or "-1003511375054").strip()
+def build_file_start_param(row: dict, storage_id: str = "") -> str:
+    st_cid = str(storage_id or "0").strip()
     fid = (row.get("file_id") or "").strip()
     fuid = (row.get("file_unique_id") or "").strip()
     if fid and fuid:
