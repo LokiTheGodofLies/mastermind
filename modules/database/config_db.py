@@ -18,6 +18,7 @@ ENV_ALIASES = {
     "helper_bot_tokens": ("HELPER_BOT_TOKENS", "DELIVERY_BOT_TOKENS", "FILE_BOT_TOKENS", "BOT_TOKENS"),
 }
 
+
 def _get_env_val(key: str, fallback_env: str = None):
     names = [key.upper()]
     if fallback_env:
@@ -28,6 +29,7 @@ def _get_env_val(key: str, fallback_env: str = None):
         if v is not None and str(v).strip() != "":
             return str(v).strip()
     return None
+
 
 DEFAULT_CONFIGS = {
     "bot_title": ("Mastermind Library Bot", "text", "Display title of the bot"),
@@ -60,18 +62,25 @@ DEFAULT_CONFIGS = {
     "referral_bonus_request": ("10", "int", "Referral bonus added to request quota"),
 }
 
+
 DEFAULT_TEMPLATES = {
     "start": {
         "module": "start",
         "title": "START MESSAGE",
         "description": "WHEN USER GIVE START COMMAND OR START THE BOT THEN BOT REPLY START MESSAGE. IN START MESSAGE BOT OWNER CAN SET START MESSAGE TEXT, PICTURE AND BUTTON.",
-        "text": "Hi <b>{user_name}</b>, welcome to <b>{bot_title}</b>! 👋\n\n📚 Search ebooks & audiobooks, request missing titles, and earn bonus quotas by inviting friends.\nTap the buttons belo[...]
+        "text": """Hi <b>{user_name}</b>, welcome to <b>{bot_title}</b>! 👋
+
+📚 Search ebooks & audiobooks, request missing titles, and earn bonus quotas by inviting friends.
+Tap the buttons below to get started.""",
     },
     "about": {
         "module": "start",
         "title": "ABOUT MESSAGE",
         "description": "DISPLAYS BOT INFORMATION, VERSION, AND ARCHITECTURE DETAILS WHEN USER TAPS ABOUT.",
-        "text": "🤖 <b>About {bot_title}</b>\n\n• <b>Bot:</b> @{bot_username}\n• <b>Date:</b> {date} | <b>Time:</b> {time}",
+        "text": """🤖 <b>About {bot_title}</b>
+
+• <b>Bot:</b> @{bot_username}
+• <b>Date:</b> {date} | <b>Time:</b> {time}""",
     },
     "help": {"module": "help", "title": "USER HELP MESSAGE", "description": "MAIN /help SCREEN FOR ALL USERS.", "text": ""},
     "adminhelp": {"module": "help", "title": "ADMIN HELP MESSAGE", "description": "RESTRICTED /adminhelp SCREEN FOR ADMINS/OWNERS.", "text": ""},
@@ -80,7 +89,11 @@ DEFAULT_TEMPLATES = {
         "module": "search",
         "title": "FILE DELIVERY REPLY",
         "description": "MESSAGE SENT WHEN HELPER BOT DELIVERS A FILE.",
-        "text": "✅ <b>File Delivered!</b>\n\n📁 <b>File:</b> <code>{file_name}</code>\n📢 <b>Channel:</b> {channel_link}\n🔗 <b>Message:</b> <a href=\"{message_link}\">Open File (#{message_id}[...]",
+        "text": """✅ <b>File Delivered!</b>
+
+📁 <b>File:</b> <code>{file_name}</code>
+📢 <b>Channel:</b> {channel_link}
+🔗 <b>Message:</b> <a href="{message_link}">Open File (#{message_id})</a>""",
     },
     "helper_not_started": {
         "module": "search",
@@ -92,28 +105,43 @@ DEFAULT_TEMPLATES = {
         "module": "request",
         "title": "REQUEST CONFIRMATION",
         "description": "SHOWN WHEN A BOOK REQUEST IS LOGGED.",
-        "text": "✅ <b>Request received!</b>\n\n<b>{request_summary}</b>\n\nYour request has been noted. Admins will review it soon!",
+        "text": """✅ <b>Request received!</b>
+
+<b>{request_summary}</b>
+
+Your request has been noted. Admins will review it soon!""",
     },
     "quota_status": {
         "module": "quota",
         "title": "QUOTA STATUS MESSAGE",
         "description": "DISPLAYS REMAINING DAILY QUOTAS.",
-        "text": "👤 <b>Your Role:</b> <code>{role}</code>\n\n🔍 <b>Searches Left:</b> <code>{searches_left} / {searches_limit}</code>\n📥 <b>Requests Left:</b> <code>{requests_left} / {requests_[...]",
+        "text": """👤 <b>Your Role:</b> <code>{role}</code>
+
+🔍 <b>Searches Left:</b> <code>{searches_left} / {searches_limit}</code>
+📥 <b>Requests Left:</b> <code>{requests_left} / {requests_limit}</code>""",
     },
     "referral_message": {
         "module": "quota",
         "title": "REFERRAL DASHBOARD",
         "description": "SHOWN ON /refer COMMAND.",
-        "text": "🔗 <b>Your Referral Dashboard</b>\n\n📌 <b>Link:</b> <code>{referral_link}</code>\n📊 <b>Invited:</b> <code>{total_invites}</code> | 🎁 <b>Bonus:</b> <code>+{bonus_earned}</co[...]",
+        "text": """🔗 <b>Your Referral Dashboard</b>
+
+📌 <b>Link:</b> <code>{referral_link}</code>
+📊 <b>Invited:</b> <code>{total_invites}</code> | 🎁 <b>Bonus:</b> <code>+{bonus_earned}</code>""",
     },
     "index_caption": {"module": "indexing", "title": "STORAGE INDEX CAPTION", "description": "CAPTION FOR INDEXED FILES.", "text": ""},
-    "role_updated": {"module": "roles", "title": "ROLE ASSIGNMENT MESSAGE", "description": "SHOWN WHEN ROLE IS UPDATED.", "text": "🎖 <b>Role Updated!</b>\n👤 <b>User:</b> {target_user}\n🛡 <b>R[...]",
-    "startup_log": {"module": "logs", "title": "STARTUP LOG MESSAGE", "description": "BOT STARTUP NOTIFICATION.", "text": "🔄 <b>Bot Restarted Successfully</b>\n🤖 <b>{bot_title}</b> is online at [...]",
+    "role_updated": {"module": "roles", "title": "ROLE ASSIGNMENT MESSAGE", "description": "SHOWN WHEN ROLE IS UPDATED.", "text": """🎖 <b>Role Updated!</b>
+👤 <b>User:</b> {target_user}
+🛡 <b>Role:</b> {new_role}"""},
+    "startup_log": {"module": "logs", "title": "STARTUP LOG MESSAGE", "description": "BOT STARTUP NOTIFICATION.", "text": """🔄 <b>Bot Restarted Successfully</b>
+🤖 <b>{bot_title}</b> is online at {time}."""},
     "fsub_message": {
         "module": "fsub",
         "title": "FORCE SUBSCRIBE MESSAGE",
         "description": "SHOWN WHEN USER MUST JOIN FSUB CHANNELS.",
-        "text": "📢 <b>Subscription Required!</b>\n\nHello <b>{user_name}</b>, please join our channel(s) below to use <b>{bot_title}</b>, then tap <b>✅ Try Again</b>.",
+        "text": """📢 <b>Subscription Required!</b>
+
+Hello <b>{user_name}</b>, please join our channel(s) below to use <b>{bot_title}</b>, then tap <b>✅ Try Again</b>.""",
     },
 }
 
@@ -184,12 +212,16 @@ def init_config_db():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in DEFAULT_CONFIGS.items():
         env_val = _get_env_val(k)
+        chosen = str(env_val if env_val is not None else val)
         cursor.execute("""
             INSERT INTO config (key, value, type, updated_by, updated_at, description)
             VALUES (?, ?, ?, 0, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
-        """, (k, str(env_val if env_val is not None else val), vtype, now_str, desc))
+                value = CASE
+                    WHEN ? != '' THEN excluded.value
+                    ELSE CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+                END
+        """, (k, chosen, vtype, now_str, desc, chosen))
     for tname, tdata in DEFAULT_TEMPLATES.items():
         cursor.execute(
             "INSERT OR IGNORE INTO templates (name, module, title, description, text, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -217,11 +249,13 @@ def get_config(key, default=None, fallback_env=None):
     cursor.execute("SELECT value, updated_by FROM config WHERE key = ?", (key,))
     row = cursor.fetchone()
     conn.close()
-    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
-        return row["value"]
+
     env_val = _get_env_val(key, fallback_env)
     if env_val is not None:
         return env_val
+
+    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
+        return row["value"]
     if row is not None and row["value"] not in (None, ""):
         return row["value"]
     if key in DEFAULT_CONFIGS:
@@ -491,12 +525,16 @@ def init_group_topics_table():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in EXTENDED_DEFAULT_CONFIGS.items():
         env_val = _get_extended_env_val(k)
+        chosen = str(env_val if env_val is not None else val)
         c.execute("""
             INSERT INTO config (key, value, type, updated_by, updated_at, description)
             VALUES (?, ?, ?, 0, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
-        """, (k, str(env_val if env_val is not None else val), vtype, now_str, desc))
+                value = CASE
+                    WHEN ? != '' THEN excluded.value
+                    ELSE CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+                END
+        """, (k, chosen, vtype, now_str, desc, chosen))
     conn.commit()
     conn.close()
 
