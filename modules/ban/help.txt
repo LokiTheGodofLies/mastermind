@@ -1,0 +1,28 @@
+MODULE: ban  (modules/ban/)
+===========================
+Purpose
+  Restrict users or whole chats from using the bot.
+
+Files
+  ban.py        Storage + decision logic: set_ban_db, remove_ban_db, get_ban_status, check_access.
+  handlers.py   Commands and the ban middleware (runs first, group -3).
+
+Commands (Admin/Owner only)
+  /ban <id|@username> [reason]          Type "all": blocked everywhere.
+  /ban_pm <id|@username> [reason]       Type "pm": blocked in private chat only.
+  /ban_support <id|@username> [reason]  Type "support": allowed only inside the support chat.
+  /unban <id|@username>                 Remove any ban.
+  You can reply to a user's message instead of typing the target. Admins must give a reason;
+  the Owner may omit it.
+
+Logic
+  - Targets may be users (positive ID) or chats (negative ID). Banning a chat posts a notice
+    with a "Contact Support" button and makes the bot leave it.
+  - @username is resolved from the users table first, then through get_chat().
+  - A banned user's role in the users table becomes "Banned" (quota 0); unban restores
+    "Normal User".
+  - check_access(user, chat, chat_type) is evaluated for every incoming message; a blocked
+    user receives the ban reason and the update is stopped.
+  - Callback (button) presses are guarded separately by the modules that need it (e.g. converter).
+
+Data: table bans(target_id, ban_type, reason) in mastermind_users.db.

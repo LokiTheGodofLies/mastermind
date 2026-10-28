@@ -1,0 +1,6 @@
+MODULE: stats  (modules/stats/)
+===============================
+  /stats    Indexed files, queued files, temporary deliveries served, total/pending requests,
+            registered users, completed referrals and your role. Also opened from the dashboard.
+  /backup   Admin/Owner. Forces a database backup to the backup chat and shows status, the
+            database status line and the backup chat ID (see database/help.txt).

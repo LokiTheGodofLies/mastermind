@@ -1,5 +1,5 @@
 import os, html, logging
-from modules.database.config_db import get_config, get_config_int, set_config
+from modules.database.config_db import get_config, get_config_int
 from modules.database.user_db import get_owner_ids
 from modules.log.logger import get_ist_str
 from modules.bot_manager import get_helper_bot_tokens, get_bot_info_by_token

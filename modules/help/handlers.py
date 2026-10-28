@@ -12,8 +12,12 @@ USER_HELP_MAIN = (
     "• <code>/help</code> — Open this interactive help menu\n"
     "• <code>/search &lt;keyword&gt;</code> — Search books & audiobooks by title, author, narrator, series, or metadata\n"
     "• <code>/request &lt;title&gt; &lt;author&gt;</code> — Request a missing book/audiobook\n"
+    "• <code>/convert</code> — Convert an ebook to another format (reply to a file, or send one next)\n"
     "• <code>/quota</code> — View your daily search & request quota\n"
-    "• <code>/refer</code> — Get your invite link (+10 search & +10 request bonus)\n\n"
+    "• <code>/refer</code> — Get your invite link (bonus quota for you and your friend)\n"
+    "• <code>/support</code> — Join the support chat (short quiz)\n"
+    "• <code>/id</code> — Show your user / chat ID\n"
+    "• <code>/ping</code> — Check the bot's response time\n\n"
     "👇 <b>Tap any category button below for detailed instructions:</b>"
 )
 
@@ -50,6 +54,15 @@ USER_HELP_SECTIONS = {
 }
 
 USER_HELP_SECTIONS.update({
+    "help_sec_convert": (
+        "🔄 <b>Ebook Converter</b>\n\n"
+        "1. Reply to an ebook file with <code>/convert</code> — or send <code>/convert</code> and then upload the file.\n"
+        "2. Tap the format you want (EPUB, MOBI, AZW3, PDF, DOCX, FB2, RTF, TXT, HTMLZ, TXTZ).\n"
+        "3. The bot converts it and sends the new file back.\n\n"
+        "• Max input size: <b>20 MB</b>. Reads EPUB, MOBI, AZW3, PDF, DOCX, FB2, TXT, RTF, CBZ and many more.\n"
+        "• Converting is free — it does not use your search/request quota.\n"
+        "• One conversion at a time per user."
+    ),
     "help_sec_referral": (
         "🔗 <b>How Referrals Work (+10 Bonus Quota)</b>\n\n"
         "• Run <code>/refer</code> to get your unique referral link (<code>?start=ref_&lt;id&gt;</code>).\n"
@@ -170,7 +183,7 @@ def build_user_help_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📤 Uploads", callback_data="help_sec_uploads"), InlineKeyboardButton("📊 Quota", callback_data="help_sec_quota")],
         [InlineKeyboardButton("🔗 Referral", callback_data="help_sec_referral"), InlineKeyboardButton("⏳ Temporary Files", callback_data="help_sec_tempfiles")],
         [InlineKeyboardButton("🛡 Roles", callback_data="help_sec_roles"), InlineKeyboardButton("👥 Groups Help", callback_data="help_sec_groups")],
-        [InlineKeyboardButton("✨ Formatting & Buttons", callback_data="help_sec_formatting")],
+        [InlineKeyboardButton("🔄 Converter", callback_data="help_sec_convert"), InlineKeyboardButton("✨ Formatting & Buttons", callback_data="help_sec_formatting")],
     ]
     if is_admin:
         kb.append([InlineKeyboardButton("👑 Admin Commands", callback_data="help_open_admin")])

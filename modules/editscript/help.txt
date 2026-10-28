@@ -1,0 +1,31 @@
+MODULE: editscript  (modules/editscript/)
+=========================================
+Purpose
+  Lets Admins/Owners reconfigure the bot from Telegram without redeploying.
+
+Commands (Admin/Owner only)
+  /customize (aliases /editscript /config /showconfig)   Open the button dashboard.
+  /setconfig <key> <value>     Change a setting live. Log-group keys are kept in sync.
+  /getconfig [key]             Show one setting or all of them. Secrets are masked.
+  /reloadconfig                Re-read config from the database.
+  /listtemplates | /showtemplate <name>
+  /edittext <name> <text>      Replace a template's text.
+  /setmedia <name> <file_id|url> | /removemedia <name>
+  /addbutton <name> <label> <url|callback> | /removebutton <name> <index>
+  /restart                     Menu: hot-reload, Render redeploy, hard process restart.
+  /redeploy                    Trigger the Render deploy hook, then show deploy status + logs.
+
+Dashboard (callbacks cust_*, es_*)
+  START MSG, HELP & ADMIN, SEARCH & DELIVERY, REQUESTS, QUOTA & REFERRAL, INDEXING, ROLES,
+  LOGS & CHANNELS  -> edit the templates of that module (text, picture, buttons).
+  FORCE SUB        -> add/remove channels, normal or join-request mode, on/off, message text.
+  AUTO DELETE      -> on/off and 60 / 120 / 300 seconds.
+  VARIABLES        -> pick any setting and type a new value.
+  RESTART BOT      -> hot reload / Render redeploy / hard restart (a backup is taken first).
+  RESET USER DB / FILE DB / CHANNELS DB -> destructive, always asks for confirmation.
+
+Template placeholders: {bot_title} {bot_username} {helper_bot_username} {chat_title} {date}
+{time} {user_name} plus module-specific ones. Formatting: **bold**  *italic*  ||spoiler||.
+
+Render integration (all optional, set via /setconfig or env)
+  render_api_key, render_service_id, render_deploy_hook_url, github_repo (owner/name).

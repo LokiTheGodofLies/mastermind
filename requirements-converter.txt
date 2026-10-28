@@ -1,0 +1,3 @@
+# Optional extras for the /convert module (the bot works without them).
+pymupdf>=1.24.0          # PDF text extraction -> cleaner PDF to ebook conversions
+firecrawl-anydoc==0.2.4  # legacy .doc/.xls/.ppt/.odp/.ods input

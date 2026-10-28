@@ -4,22 +4,14 @@
 # OceanofPDF, Anna's Archive, EbookHunter, Mobilism, AudioBookBay).
 # ============================================================================
 import os
-import sys
 import re
-import html
 import asyncio
 import logging
 import urllib.parse
 from html.parser import HTMLParser
 import aiohttp
 
-# Ensure project root is in sys.path so mediagoer imports cleanly
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-# End of sys.path setup
-
-from mediagoer import Mediagoer
+from lib.mediagoer import Mediagoer
 
 # Initialize module logger for /log command tracking
 logger = logging.getLogger(__name__)

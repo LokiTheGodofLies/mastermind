@@ -1,0 +1,22 @@
+MODULE: log  (modules/log/)
+===========================
+Files
+  logger.py       In-memory ring buffer (3000 records) with IST timestamps; get_logs_by_count/time.
+  startup_log.py  send_log_with_fallback() used by every module to post to the log group topics;
+                  send_error_alert(); the startup report (main bot, helper bots, chats,
+                  topics, database status). Tokens are shown ONLY next to a bot that failed to
+                  authenticate.
+  handlers.py     /log, /settopic, group-topic middleware, bot added/removed/promoted events.
+
+Commands
+  /log [n]            Admin/Owner. Sends the last n (default 20, max 1000) log lines as a .txt file.
+  /settopic <name>    Run inside a topic. Group admins: "search" or "request" restrict the bot to
+                      that topic in their group (silent elsewhere). Bot admins inside the log
+                      group: general | index | user | group | channel | request | error assign
+                      the log topics.
+
+Routing
+  Index logs -> index_log_topic_id, user/role logs -> user_log_topic_id, group events ->
+  group_log_topic_id, channel/auto-delete logs -> channel_log_topic_id, errors ->
+  error_log_topic_id, requests -> request chat. If a topic fails the message falls back to the
+  general topic; owners also get error alerts by DM.

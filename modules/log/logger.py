@@ -1,8 +1,6 @@
 import logging
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from telegram import Bot, Message
-from telegram.error import BadRequest
 
 # In-memory buffer holding up to 3000 log records
 LOG_BUFFER = deque(maxlen=3000)
@@ -18,27 +16,6 @@ def ist_converter(*args):
     return get_ist_now().timetuple()
 
 logging.Formatter.converter = ist_converter
-
-# Safely ignore "Message is not modified" errors across all bot menus and buttons
-_orig_msg_edit = Message.edit_text
-async def _safe_msg_edit(self, *args, **kwargs):
-    try:
-        return await _orig_msg_edit(self, *args, **kwargs)
-    except BadRequest as e:
-        if "Message is not modified" in str(e):
-            return self
-        raise
-Message.edit_text = _safe_msg_edit
-
-_orig_bot_edit = Bot.edit_message_text
-async def _safe_bot_edit(self, *args, **kwargs):
-    try:
-        return await _orig_bot_edit(self, *args, **kwargs)
-    except BadRequest as e:
-        if "Message is not modified" in str(e):
-            return None
-        raise
-Bot.edit_message_text = _safe_bot_edit
 
 class InMemoryLogHandler(logging.Handler):
     def emit(self, record):

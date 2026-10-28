@@ -1,0 +1,8 @@
+MODULE: utility  (modules/utility/)
+===================================
+Files
+  ping.py              /ping - round-trip latency and host network counters (Linux /proc/net/dev).
+  tg_compat.py         get_forward_chat(): works with python-telegram-bot < 21 (forward_from_chat)
+                       and >= 21 (forward_origin).
+  telegram_patches.py  Silences "Message is not modified" for every edit helper and provides the
+                       global error handler. Applied once at start-up (main.py).

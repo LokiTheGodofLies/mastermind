@@ -1,5 +1,3 @@
-from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata, _MG
-import os
 import re
 import html
 import asyncio
@@ -9,7 +7,6 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.file_db import get_connection as get_db_conn
-from modules.database.config_db import get_config
 from modules.database.user_db import get_user_role_db
 from modules.allowance.allowance import can_user_request, deduct_request_quota
 from modules.log.startup_log import send_log_with_fallback
@@ -452,6 +449,3 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
                 pass
         await q.answer(f"Status updated to: {new_status}")
 
-
-async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return

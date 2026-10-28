@@ -1,6 +1,5 @@
 import os
-import asyncio
-from typing import List, Dict, Optional
+from typing import List, Dict
 from telegram import Bot
 from modules.database.config_db import get_config
 

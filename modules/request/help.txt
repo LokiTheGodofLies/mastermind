@@ -1,0 +1,21 @@
+MODULE: request  (modules/request/)
+===================================
+Purpose
+  Users ask for books that are missing; moderators track them.
+
+Commands: /request <title> [author] (alias /req). Also the "Request Book" button on search results.
+
+Flow
+  1. Pick a format: eBook, Audiobook, Both (or enter details manually).
+  2. The bot looks up matches: eBook -> Goodreads (Audible fallback); Audiobook -> Audible
+     (Goodreads fallback); Both -> Goodreads then Audible. Up to 3 options with narrator,
+     series, year and publisher.
+  3. The user taps a match, "Send original" or "Enter manual details" (4 steps: title, author,
+     format, series).
+  4. A card is posted to the request chat with [Show Options]; only then is 1 request quota used.
+  5. Moderator/Admin/Owner set the status: Added to Database, Already Available, Not Available,
+     Not Released, Request Again. The requester is notified by DM and the card updates.
+
+Callbacks: req_fmt|, req_from_search|, req_pick_opt_, req_send_original, req_start_manual,
+req_change_fmt, req_cancel, req_opts_<id>, req_hide_<id>, req_st_<id>_<code>.
+Data: requests_queue in files.db. Setting: request_log_chat_id (alias request_channel_id).

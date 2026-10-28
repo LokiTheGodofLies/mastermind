@@ -1,0 +1,36 @@
+MODULES OVERVIEW  (modules/)
+============================
+Every sub-folder is one feature and ships its own help.txt. main.py wires them together.
+
+  allowance/   Daily search/request quotas, /quota, /gift, referrals (/refer).
+  ban/         User/chat bans (all | pm | support) and the ban middleware.
+  broadcast/   Admin broadcast to everyone or to one role, with confirmation.
+  converter/   Ebook converter (/convert): 61 in / 31 out formats via Calibre, Pandoc, PyMuPDF, Anydoc.
+  database/    SQLite layer (files, users, config) + Telegram-hosted backup/restore.
+  editscript/  /customize dashboard, /setconfig, templates, Render restart/redeploy.
+  fsub/        Force-subscribe gate (normal and join-request channels).
+  help/        /help and /adminhelp interactive guides.
+  id/          /id - show user and chat IDs.
+  indexing/    Upload approval queue, /index range indexing, metadata enrichment.
+  log/         In-memory logs (/log), log-topic routing, startup report, chat events.
+  message/     Plain-text router (wizards, then direct search).
+  request/     /request flow with Goodreads/Audible matches and moderator statuses.
+  roles/       /addvol /addprom /addmod /addadmin.
+  search/      /search, /searchebook, /searchaudiobook, pagination and file delivery.
+  start/       /start, deep links (files, referrals), start menu routing.
+  stats/       /stats and /backup.
+  support/     /support verification quiz and single-use invite link.
+  utility/     /ping and python-telegram-bot compatibility helpers/patches.
+
+Single files in this folder
+  bot_manager.py   Helper-bot pool: reads HELPER_BOT_TOKENS, resolves usernames with get_me()
+                   (cached) and rotates tokens round-robin for file delivery. Falls back to the
+                   main bot when no helper token is configured.
+
+Handler order (main.py)
+  group -3 ban check -> group -2 topic filter -> group -1 force-subscribe -> group 0 commands,
+  callbacks, uploads, text. A middleware raises ApplicationHandlerStop to block the update.
+
+Roles (lowest to highest)
+  Banned < Normal User < Promoter < Volunteer < Moderator < Admin < Owner
+  Owners come only from the ADMIN_IDS / OWNER_IDS environment variables.

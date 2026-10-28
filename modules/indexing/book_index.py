@@ -1,12 +1,10 @@
-from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata, clean_book_filename
+from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata
 import os
 import re
 import html
 import time
 import asyncio
 import logging
-import aiohttp
-from urllib.parse import quote_plus, urljoin
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
@@ -15,14 +13,13 @@ from modules.database.config_db import get_config, get_config_int
 from modules.database.user_db import get_user_role_db
 from modules.log.startup_log import send_log_with_fallback
 from modules.utility.tg_compat import get_forward_chat
+from modules.converter.handlers import handle_convert_upload
 
 logger = logging.getLogger(__name__)
 EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".djvu", ".cbz"}
 AUDIO_EXTENSIONS = {".mp3", ".m4b", ".aax"}
 SUPPORTED_EXTENSIONS = EBOOK_EXTENSIONS | AUDIO_EXTENSIONS
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128.0.0.0 Safari/537.36"}
-_META_CACHE = {}
 
 QUEUE_STATE = {
     "running": False, "paused": False, "cancelled": False, "status": "idle",
@@ -44,102 +41,6 @@ def clean_filename_for_search(file_name: str) -> str:
     # Clean isolated single characters like ' s '
     name = re.sub(r"\s+[a-zA-Z]\s+", " ", name)
     return re.sub(r"\s+", " ", name).strip()
-
-
-async def fetch_audible_metadata(query: str) -> dict:
-    clean_q = clean_filename_for_search(query)
-    ckey = f"aud_{clean_q.lower()}"
-    if ckey in _META_CACHE:
-        return _META_CACHE[ckey]
-
-    timeout = aiohttp.ClientTimeout(total=8)
-    try:
-        url = "https://api.audible.com/1.0/catalog/products"
-        params = {
-            "keywords": clean_q,
-            "num_results": 1,
-            "products_sort_by": "Relevance",
-            "response_groups": "contributors,product_attrs,product_desc,series",
-        }
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, params=params) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    prods = data.get("products") or []
-                    if prods:
-                        p = prods[0]
-                        authors = ", ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")) or "Unknown Author"
-                        narrators = ", ".join(n.get("name", "") for n in p.get("narrators", []) if n.get("name")) or "N/A"
-                        s_list = p.get("series") or []
-                        series_str = f"{s_list[0].get('title', '')}, #{s_list[0].get('sequence', '')}".strip(", #") if s_list else ""
-                        rel_date = (p.get("release_date") or p.get("issue_date") or "N/A")[:10]
-                        pub = p.get("publisher_name") or "Audible Studios"
-                        asin = p.get("asin") or ""
-                        link = f"https://www.audible.com/pd/{asin}" if asin else ""
-                        run_time = p.get("runtime_length_min") or 0
-                        hrs, mins = divmod(run_time, 60)
-                        len_str = f"{hrs} hrs and {mins} mins" if hrs else f"{mins} mins"
-
-                        meta = {
-                            "title": p.get("title") or clean_q,
-                            "author": authors,
-                            "narrator": narrators,
-                            "series": series_str,
-                            "length_str": len_str,
-                            "release_date": rel_date,
-                            "publisher": pub,
-                            "url": link,
-                            "is_audiobook": True,
-                        }
-                        _META_CACHE[ckey] = meta
-                        return meta
-    except Exception as e:
-        logger.warning(f"Audible metadata lookup error: {e}")
-
-    # Fallback to Goodreads if Audible has no result
-    return await fetch_goodreads_metadata(query)
-
-
-async def fetch_goodreads_metadata(query: str) -> dict:
-    clean_q = clean_filename_for_search(query)
-    ckey = f"gr_{clean_q.lower()}"
-    if ckey in _META_CACHE:
-        return _META_CACHE[ckey]
-
-    timeout = aiohttp.ClientTimeout(total=8)
-    try:
-        url = f"https://www.goodreads.com/book/auto_complete?format=json&q={quote_plus(clean_q)}"
-        async with aiohttp.ClientSession(headers=HEADERS, timeout=timeout) as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    items = await resp.json(content_type=None)
-                    if isinstance(items, list) and items:
-                        first = items[0]
-                        a_obj = first.get("author") or {}
-                        meta = {
-                            "title": first.get("title") or clean_q,
-                            "author": a_obj.get("name") if isinstance(a_obj, dict) else "Unknown Author",
-                            "narrator": "N/A",
-                            "series": "",
-                            "length_str": f"{first.get('numPages', 'N/A')} pages",
-                            "release_date": str(first.get("publicationYear") or "N/A"),
-                            "publisher": "Goodreads Catalog",
-                            "rating": str(first.get("avgRating") or "N/A"),
-                            "ratings_count": str(first.get("ratingsCount") or "0"),
-                            "url": urljoin("https://www.goodreads.com", first.get("bookUrl", "")).split("?")[0],
-                            "is_audiobook": False,
-                        }
-                        _META_CACHE[ckey] = meta
-                        return meta
-    except Exception as e:
-        logger.warning(f"Goodreads metadata lookup error: {e}")
-
-    return {
-        "title": clean_q or query, "author": "Unknown Author", "narrator": "N/A",
-        "series": "", "length_str": "N/A", "release_date": "N/A",
-        "publisher": "Unknown", "rating": "N/A", "ratings_count": "0",
-        "url": "", "is_audiobook": False,
-    }
 
 
 def format_index_caption(file_name: str, size_str: str, ext: str, mime: str, meta: dict) -> str:
@@ -284,7 +185,8 @@ async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_na
     size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{(file_size or 0) / 1024:.1f} KB"
 
     caption_html = format_index_caption(file_name, size_str, ext.lstrip("."), mime_type, meta)
-    comm_kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Join our community", url="https://t.me/heyucutie")]])
+    community = get_config("community_url")
+    comm_kb = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Join our community", url=community)]]) if community else None
     target_msg = await bot.send_document(chat_id=int(storage_id), document=file_id, caption=caption_html, parse_mode="HTML", reply_markup=comm_kb)
 
     save_indexed_file_db(
@@ -418,6 +320,9 @@ def enqueue_file_for_indexing(file_id, file_unique_id, file_name, file_size, mim
 async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post or update.effective_message
     if not msg:
+        return
+    # A file sent right after /convert belongs to the converter, not to the library.
+    if await handle_convert_upload(update, context):
         return
     doc = msg.document or msg.audio
     if not doc:
@@ -555,7 +460,7 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _send_double_check_card(msg, user_name, source_chat, skip_num):
-    target_id = get_config("storage_channel_id", "-1003511375054")
+    target_id = get_config("storage_channel_id") or "not set"
     txt = (
         "<b>ᴅᴏᴜʙʟᴇ ᴄʜᴇᴄᴋɪɴɢ 📋</b>\n\n"
         "ʙᴇꜰᴏʀᴇ ꜰᴏʀᴡᴀʀᴅɪɴɢ ᴛʜᴇ ᴍᴇssᴀɢᴇs ᴄʟɪᴄᴋ ᴛʜᴇ ʏᴇs ʙᴜᴛᴛᴏɴ ᴏɴʟʏ ᴀꜰᴛᴇʀ ᴄʜᴇᴄᴋɪɴɢ ᴛʜᴇ ꜰᴏʟʟᴏᴡɪɴɢ\n\n"
