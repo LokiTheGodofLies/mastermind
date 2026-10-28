@@ -212,12 +212,16 @@ def init_config_db():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in DEFAULT_CONFIGS.items():
         env_val = _get_env_val(k)
+        chosen = str(env_val if env_val is not None else val)
         cursor.execute("""
             INSERT INTO config (key, value, type, updated_by, updated_at, description)
             VALUES (?, ?, ?, 0, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
-        """, (k, str(env_val if env_val is not None else val), vtype, now_str, desc))
+                value = CASE
+                    WHEN ? != '' THEN excluded.value
+                    ELSE CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+                END
+        """, (k, chosen, vtype, now_str, desc, chosen))
     for tname, tdata in DEFAULT_TEMPLATES.items():
         cursor.execute(
             "INSERT OR IGNORE INTO templates (name, module, title, description, text, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -245,11 +249,13 @@ def get_config(key, default=None, fallback_env=None):
     cursor.execute("SELECT value, updated_by FROM config WHERE key = ?", (key,))
     row = cursor.fetchone()
     conn.close()
-    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
-        return row["value"]
+
     env_val = _get_env_val(key, fallback_env)
     if env_val is not None:
         return env_val
+
+    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
+        return row["value"]
     if row is not None and row["value"] not in (None, ""):
         return row["value"]
     if key in DEFAULT_CONFIGS:
@@ -519,12 +525,16 @@ def init_group_topics_table():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in EXTENDED_DEFAULT_CONFIGS.items():
         env_val = _get_extended_env_val(k)
+        chosen = str(env_val if env_val is not None else val)
         c.execute("""
             INSERT INTO config (key, value, type, updated_by, updated_at, description)
             VALUES (?, ?, ?, 0, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
-                value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
-        """, (k, str(env_val if env_val is not None else val), vtype, now_str, desc))
+                value = CASE
+                    WHEN ? != '' THEN excluded.value
+                    ELSE CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+                END
+        """, (k, chosen, vtype, now_str, desc, chosen))
     conn.commit()
     conn.close()
 
