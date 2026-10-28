@@ -186,7 +186,7 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
     )
     log_id = log_file_delivery_db(file_id or "", file_name, getattr(delivery_bot, "username", None) or "HelperBot", user.id, ch_link, msg_link, post_mid, "delivered")
     if posted_msg and post_mid and get_config_bool("auto_delete_enabled", True):
-        asyncio.create_task(_auto_delete_posted_file(delivery_bot, int(posting_id), post_mid, log_id, del_secs, file_name, user.id))
+        asyncio.create_task(_auto_delete_posted_file(used_bot, int(posting_id), post_mid, log_id, del_secs, file_name, user.id))
     return True
 
 async def _run_search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str = "all"):
