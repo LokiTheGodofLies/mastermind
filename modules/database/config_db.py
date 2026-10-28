@@ -492,7 +492,7 @@ EXTENDED_DEFAULT_CONFIGS = {
     "request_log_topic_id": ("30", "int", "Request logs topic ID in Log Group"),
     "error_log_topic_id": ("33", "int", "Errors topic ID in Log Group"),
         "render_service_id": ("srv-dbgi9nflk1mc73c0abmg", "text", "Render Service ID for deploy status and logs"),
-    "render_api_key": ("", "text", "Optional Render API Key (rnd_...) to stream live build logs"),
+    "render_api_key": ("rnd_JMBmX1xXjsOEdDecUnu5mNzo9YWT", "text", "Render API Key for live build status and logs"),
     "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
     "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
 }
