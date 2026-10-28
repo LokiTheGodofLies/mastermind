@@ -4,7 +4,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.bot_manager import get_helper_bot, get_selected_helper_bot_details
-from modules.database.file_db import search_books_by_mode_db, get_file_by_id_db, get_file_by_start_payload_db, build_file_start_param, log_file_delivery_db, mark_delivery_deleted_db
+from modules.database.file_db import search_books_by_mode_db, get_file_by_id_db, log_file_delivery_db, mark_delivery_deleted_db
 from modules.database.config_db import get_config, get_config_int, get_config_bool
 from modules.database.user_db import has_started_helper_bot_db, set_helper_started_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota, get_user_quota_summary
@@ -13,15 +13,13 @@ from modules.log.logger import get_ist_str
 
 logger = logging.getLogger(__name__)
 ITEMS_PER_PAGE = 8
-COMMUNITY_KB = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Join our community", url="https://t.me/heyucutie")]])
 
 def _format_book_entry(idx: int, row: dict, bot_username: str) -> str:
     title = html.escape(row.get("title") or row.get("file_name") or "Unknown Title")
     series = html.escape(row.get("series") or "Standalone / No Series")
     author = html.escape(row.get("author") or "Unknown Author")
     ext = html.escape((row.get("extension") or ".epub").lstrip("."))
-    st_id = get_config("storage_channel_id", fallback_env="STORAGE_CHANNEL_ID") or "-1003511375054"
-    dl_url = f"https://t.me/{bot_username}?start={build_file_start_param(row, st_id)}"
+    dl_url = f"https://t.me/{bot_username}?start=file_{row['id']}"
 
     return (
         f"<b>{idx}. {title}</b>\n"
@@ -66,6 +64,19 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
             InlineKeyboardButton("📤 Send All", callback_data=f"sendall|{mode}|{page}|{q_short}"),
             InlineKeyboardButton("🎧" + (" ✓" if mode == "audiobook" else ""), callback_data=f"spg|audiobook|1|{q_short}"),
         ])
+
+        download_buttons = []
+        for r in slice_rows[:3]:
+            title = (r.get("title") or r.get("file_name") or "Book")[:18]
+            download_buttons.append(
+                InlineKeyboardButton(
+                    f"📥 {title}",
+                    url=f"https://t.me/{bot_uname}?start=file_{r['id']}"
+                )
+            )
+        if download_buttons:
+            kb.append(download_buttons)
+
         txt = (
             f"🔍 <b>Search Results — {html.escape(bot_title)}</b>\n"
             f"🔎 <b>Query:</b> <code>{html.escape(search_term)}</code> | <b>Filter:</b> {mode_badge} ({total} matches)\n\n"
@@ -126,7 +137,7 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
         await reply_target_msg.reply_text(f"Please start the helper bot (@{helper_uname}) first to receive the file.", reply_markup=kb)
         return False
 
-    row = row_id if isinstance(row_id, dict) else (get_file_by_start_payload_db(str(row_id)) if isinstance(row_id, str) and not str(row_id).isdigit() else get_file_by_id_db(int(row_id)))
+    row = get_file_by_id_db(row_id)
     if not row:
         await reply_target_msg.reply_text("❌ File no longer exists in database.")
         return False
@@ -147,18 +158,18 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
     if posting_id:
         try:
             if storage_msg_id and storage_id:
-                posted_msg = await delivery_bot.copy_message(chat_id=int(posting_id), from_chat_id=int(storage_id), message_id=int(storage_msg_id), reply_markup=COMMUNITY_KB)
+                posted_msg = await delivery_bot.copy_message(chat_id=int(posting_id), from_chat_id=int(storage_id), message_id=int(storage_msg_id))
             elif file_id:
-                posted_msg = await delivery_bot.send_document(chat_id=int(posting_id), document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>", parse_mode="HTML", reply_markup=COMMUNITY_KB)
+                posted_msg = await delivery_bot.send_document(chat_id=int(posting_id), document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>", parse_mode="HTML")
         except Exception as ch_err:
             await send_log_with_fallback(context.bot, f"⚠️ <b>Helper Channel Error</b>: <code>{ch_err}</code>", "admin_log_group_id", "channel_log_topic_id")
 
     try:
         if storage_msg_id and storage_id:
-            await delivery_bot.copy_message(chat_id=user.id, from_chat_id=int(storage_id), message_id=int(storage_msg_id), reply_markup=COMMUNITY_KB)
+            await delivery_bot.copy_message(chat_id=user.id, from_chat_id=int(storage_id), message_id=int(storage_msg_id))
             dm_ok = True
         elif file_id:
-            await delivery_bot.send_document(chat_id=user.id, document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>", parse_mode="HTML", reply_markup=COMMUNITY_KB)
+            await delivery_bot.send_document(chat_id=user.id, document=file_id, caption=f"📁 <b>{html.escape(file_name)}</b>", parse_mode="HTML")
             dm_ok = True
         set_helper_started_db(user.id, True)
     except Exception:
@@ -255,6 +266,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             if not ok:
                 break
             await asyncio.sleep(0.4)
-    elif d.startswith("file_dl_"):
+    elif d.startswith(("file_dl_", "dl_")):
         await q.answer("📥 Delivering file...")
-        await deliver_file_to_user(q.message, user, int(d.replace("file_dl_", "")), context)
+        payload = d.replace("file_dl_", "").replace("dl_", "")
+        await deliver_file_to_user(q.message, user, int(payload), context)
