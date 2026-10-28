@@ -8,6 +8,7 @@ standalone/Telethon callers (`ebook_converter`).
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -267,8 +268,33 @@ def bok_to_epub(input_bok: Path, out_epub: Path) -> None:
         )
 
 
+async def _drain(stream, buf: bytearray):
+    try:
+        while chunk := await stream.read(4096):
+            buf.extend(chunk)
+            del buf[:-50000]
+    except Exception:
+        pass
+
+
 async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIMEOUT) -> tuple[int | None, str]:
     """Run a CLI tool in its own process group with timeout and clean error extraction."""
+    logger.info("[SUBPROCESS START] %s", " ".join(command))
+    env = dict(os.environ)
+    calibre_home = Path("/tmp")
+    calibre_cfg = Path("/tmp/calibre-config")
+    calibre_cfg.mkdir(parents=True, exist_ok=True)
+    env["HOME"] = str(calibre_home)
+    env["CALIBRE_CONFIG_DIRECTORY"] = str(calibre_cfg)
+    env["XDG_CONFIG_HOME"] = str(calibre_cfg)
+    env["XDG_CACHE_HOME"] = "/tmp/.cache"
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    env["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+    env["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu --headless --disable-dev-shm-usage --single-process --no-zygote"
+    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    env["DBUS_SESSION_BUS_ADDRESS"] = "/dev/null"
+
+    t0 = time.monotonic()
     try:
         proc = await asyncio.create_subprocess_exec(
             *command,
@@ -276,31 +302,41 @@ async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIME
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
     except FileNotFoundError:
         return None, f"{command[0]} is not installed on this host."
     except OSError as exc:
         return None, f"Could not start {command[0]}: {exc}"
 
+    buf = bytearray()
+    reader = asyncio.create_task(_drain(proc.stdout, buf))
     try:
-        out, _ = (
-            await proc.communicate()
-            if timeout is None
-            else await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        )
+        if timeout is None:
+            await proc.wait()
+        else:
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
+        await reader
     except asyncio.TimeoutError:
         _kill_group(proc.pid)
+        reader.cancel()
         with suppress(Exception):
             await proc.wait()
-        return None, f"Conversion timed out after {timeout} seconds."
+        tail_output = _tail(buf.decode("utf-8", errors="replace"))
+        logger.error("[SUBPROCESS TIMEOUT] Timed out after %ss: %s\nOutput:\n%s", timeout, " ".join(command), tail_output)
+        return None, f"Conversion timed out after {timeout} seconds.\nLast output:\n{tail_output}"
     except asyncio.CancelledError:
         _kill_group(proc.pid)
+        reader.cancel()
         raise
     finally:
         if proc.returncode is None:
             _kill_group(proc.pid)
 
-    log_text = (out or b"").decode("utf-8", errors="replace")
+    elapsed = time.monotonic() - t0
+    log_text = buf.decode("utf-8", errors="replace")
+    logger.info("[SUBPROCESS END] rc=%s elapsed=%.1fs | tail=%s", proc.returncode, elapsed, log_text[-200:].strip())
+
     if proc.returncode != 0:
         if matches := re.findall(
             r"(Conversion Failure Reason\s+\*{5,}\s+[E\d]+:.*)|(Conversion error: .*)",
@@ -509,6 +545,8 @@ async def convert_file(
         if not shutil.which(CONVERTER_BINARY):
             return ConversionResult(False, error="Calibre (ebook-convert) is not installed on this host.")
         cmd = [CONVERTER_BINARY, str(src), str(dst)]
+        if out_fmt == "pdf":
+            cmd.append("--pdf-no-cover")
         if extra_calibre_args:
             cmd.extend(extra_calibre_args)
         rc, err = await _run_subprocess(cmd, timeout=timeout)

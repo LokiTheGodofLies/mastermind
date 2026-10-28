@@ -2,17 +2,10 @@ FROM ghcr.io/yshalsager/calibre-with-kfx:latest
 
 USER root
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    QT_QPA_PLATFORM=offscreen \
-    QTWEBENGINE_DISABLE_SANDBOX=1 \
-    QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu --headless" \
-    PIP_BREAK_SYSTEM_PACKAGES=1
+ENV PYTHONUNBUFFERED=1     PYTHONDONTWRITEBYTECODE=1     QT_QPA_PLATFORM=offscreen     QTWEBENGINE_DISABLE_SANDBOX=1     QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu --headless --disable-dev-shm-usage --single-process --no-zygote"     LIBGL_ALWAYS_SOFTWARE=1     DBUS_SESSION_BUS_ADDRESS=/dev/null     HOME=/tmp     CALIBRE_CONFIG_DIRECTORY=/tmp/calibre-config     PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Install Pandoc for document conversions
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends pandoc \
-    && rm -rf /var/lib/apt/lists/*
+# Install Pandoc and system fonts for Calibre PDF rendering
+RUN apt-get update     && apt-get install -y --no-install-recommends         pandoc fontconfig fonts-dejavu-core fonts-liberation     && fc-cache -f     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
