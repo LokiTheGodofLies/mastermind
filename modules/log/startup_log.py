@@ -73,3 +73,14 @@ async def send_log_with_fallback(bot, text: str, target_chat_key: str = "admin_l
                 await _notify_owners(bot, f"❌ <b>Log Delivery Failed:</b> <code>{e2}</code>\n\n{stamped_text}")
 
     return sent_msg
+
+
+async def send_startup_notification(application):
+    try:
+        bot_info = await application.bot.get_me()
+        tpl = get_template("startup_log")
+        raw = tpl.get("text") or "🔄 <b>Bot Restarted Successfully</b>\n🤖 <b>{bot_title}</b> (@{bot_username}) is online at {date} {time}"
+        startup_text = format_template_string(raw, {"bot_title": bot_info.first_name or "Mastermind", "bot_username": bot_info.username or "Bot"})
+        await send_log_with_fallback(application.bot, startup_text, "general_log_group_id", "general_topic_id")
+    except Exception as e:
+        print(f"[STARTUP LOG WARNING]: {e}")
