@@ -1,3 +1,4 @@
+from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata, _MG
 import os
 import re
 import html
@@ -73,7 +74,8 @@ def _fetch_audible_catalog(query: str, fmt_label: str = "Audiobook") -> list:
         }
         resp = requests.get(url, params=params, timeout=8)
         if resp.status_code == 200:
-            for p in resp.json().get("products", [])[:3]:
+            products = resp.json().get("products", [])[:3]
+        for p in products:
                 title = p.get("title") or query
                 authors = ", ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")) or "Unknown Author"
                 narrators = ", ".join(n.get("name", "") for n in p.get("narrators", []) if n.get("name")) or "N/A"

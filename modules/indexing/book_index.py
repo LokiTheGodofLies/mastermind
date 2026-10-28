@@ -1,3 +1,4 @@
+from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata, clean_book_filename
 import os
 import re
 import html
@@ -268,10 +269,10 @@ async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_na
 
     is_audio = ext in AUDIO_EXTENSIONS
     if is_audio:
-        meta = await fetch_audible_metadata(file_name)
+        meta = await fetch_comprehensive_book_metadata(file_name, ext=ext)
         cat = "audiobook"
     else:
-        meta = await fetch_goodreads_metadata(file_name)
+        meta = await fetch_comprehensive_book_metadata(file_name, ext=ext)
         cat = "book"
 
     size_mb = (file_size or 0) / (1024 * 1024)
