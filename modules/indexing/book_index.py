@@ -8,7 +8,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
-from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db, get_connection as get_file_conn
+from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db, check_file_exists_db, get_connection as get_file_conn
 from modules.database.config_db import get_config, get_config_int
 from modules.database.user_db import get_user_role_db
 from modules.log.startup_log import send_log_with_fallback
@@ -18,7 +18,8 @@ from modules.converter.handlers import handle_convert_upload
 logger = logging.getLogger(__name__)
 EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".djvu", ".cbz"}
 AUDIO_EXTENSIONS = {".mp3", ".m4b", ".aax"}
-SUPPORTED_EXTENSIONS = EBOOK_EXTENSIONS | AUDIO_EXTENSIONS
+AUDIO_EXTENSIONS = {".mp3", ".m4b", ".aax", ".flac", ".ogg", ".m4a", ".wav", ".opus"}
+SUPPORTED_EXTENSIONS = EBOOK_EXTENSIONS | AUDIO_EXTENSIONS | {".zip"}
 
 
 QUEUE_STATE = {
@@ -161,6 +162,30 @@ async def _refresh_progress_card(bot):
         pass
 
 
+
+async def check_is_zip_audiobook(bot, file_id: str, file_name: str, caption: str = "", file_size: int = 0) -> bool:
+    fn_lower = (file_name or "").lower()
+    cap_lower = (caption or "").lower()
+    audio_keywords = ["audiobook", "audio", "narrat", "chapter", "unabridged", "m4b", "mp3", "part", "disc", "cd1", "cd2"]
+    if any(k in fn_lower or k in cap_lower for k in audio_keywords):
+        return True
+    if 0 < file_size <= 20 * 1024 * 1024:
+        try:
+            tg_file = await bot.get_file(file_id)
+            import io, zipfile
+            buf = io.BytesIO()
+            await tg_file.download_to_memory(buf)
+            buf.seek(0)
+            if zipfile.is_zipfile(buf):
+                with zipfile.ZipFile(buf, 'r') as z:
+                    audio_exts = (".mp3", ".m4b", ".m4a", ".flac", ".ogg", ".opus", ".wav", ".aac")
+                    if any(n.lower().endswith(audio_exts) for n in z.namelist()):
+                        return True
+        except Exception as ze:
+            logger.debug(f"[ZIP INSPECT] {ze}")
+    return False
+
+
 async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_name: str, file_size: int, mime_type: str, user_id: int, user_title: str, orig_caption: str = "") -> str:
     storage_id = get_config("storage_channel_id", fallback_env="STORAGE_GROUP_ID")
     if not storage_id:
@@ -170,16 +195,31 @@ async def _index_single_file_obj(bot, file_id: str, file_unique_id: str, file_na
     if ext not in SUPPORTED_EXTENSIONS:
         return "filtered"
 
-    if get_file_by_unique_id_db(file_unique_id):
+    # Deduplication check in Database using unique_id, file_id
+    if check_file_exists_db(file_unique_id=file_unique_id, file_id=file_id):
         return "duplicate"
 
     is_audio = ext in AUDIO_EXTENSIONS
-    if is_audio:
-        meta = await fetch_comprehensive_book_metadata(file_name, ext=ext)
+    if ext == ".zip":
+        if not await check_is_zip_audiobook(bot, file_id, file_name, orig_caption, file_size):
+            return "filtered"
+        is_audio = True
+        cat = "audiobook"
+    elif is_audio:
         cat = "audiobook"
     else:
-        meta = await fetch_comprehensive_book_metadata(file_name, ext=ext)
         cat = "book"
+
+    meta = await fetch_comprehensive_book_metadata(file_name, ext=ext)
+
+    # If file matches more than one book title or author, send to error logs and skip storage group
+    if meta.get("is_ambiguous"):
+        logger.warning(f"[AMBIGUOUS MATCH] File '{file_name}' matched multiple book titles or authors.")
+        cand_lines = [f"• <i>{html.escape(c.get('title', ''))}</i> by <code>{html.escape(c.get('author', ''))}</code>" for c in meta.get("ambiguous_matches", [])[:3]]
+        cand_str = chr(10).join(cand_lines)
+        err_txt = f"⚠️ <b>Ambiguous Match Detected</b>{chr(10)}{chr(10)}📂 <b>File:</b> <code>{html.escape(file_name)}</code>{chr(10)}🔍 <b>Candidates:</b>{chr(10)}{cand_str}{chr(10)}{chr(10)}🆔 <b>Unique ID:</b> <code>{file_unique_id}</code>{chr(10)}⛔ <i>Skipped storage group to prevent misclassification.</i>"
+        await send_log_with_fallback(bot, err_txt, "general_log_group_id", "error_log_topic_id")
+        return "filtered"
 
     size_mb = (file_size or 0) / (1024 * 1024)
     size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{(file_size or 0) / 1024:.1f} KB"
@@ -340,7 +380,7 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("❌ Unsupported file format.")
         return
 
-    if get_file_by_unique_id_db(file_unique_id):
+    if check_file_exists_db(file_unique_id=file_unique_id, file_id=file_id):
         if update.message and update.effective_chat.type == "private":
             await update.message.reply_text("📚 This file is already indexed in the database.")
         return

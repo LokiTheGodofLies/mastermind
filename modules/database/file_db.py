@@ -101,6 +101,47 @@ def get_file_by_unique_id_db(file_unique_id: str):
     conn.close()
     return dict(row) if row else None
 
+
+def get_file_by_file_id_db(file_id: str):
+    if not file_id:
+        return None
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM indexed_files WHERE file_id = ?", (str(file_id),)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_file_by_storage_message_id_db(storage_message_id: int):
+    if not storage_message_id:
+        return None
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM indexed_files WHERE storage_message_id = ?", (int(storage_message_id),)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def check_file_exists_db(file_unique_id: str = None, file_id: str = None, storage_message_id: int = None):
+    conn = get_connection()
+    conds = []
+    params = []
+    if file_unique_id:
+        conds.append("file_unique_id = ?")
+        params.append(str(file_unique_id))
+    if file_id:
+        conds.append("file_id = ?")
+        params.append(str(file_id))
+    if storage_message_id:
+        try:
+            conds.append("storage_message_id = ?")
+            params.append(int(storage_message_id))
+        except (ValueError, TypeError):
+            pass
+    if not conds:
+        conn.close()
+        return None
+    query = f"SELECT * FROM indexed_files WHERE {' OR '.join(conds)} LIMIT 1"
+    row = conn.execute(query, params).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
 def save_indexed_file_db(
     file_unique_id, file_id, storage_message_id, file_name, file_size, duration,
     user_id, user_title, caption, extension, file_type, category,

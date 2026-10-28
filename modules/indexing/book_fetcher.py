@@ -231,7 +231,28 @@ def _mediagoer_sync_worker(queries: list[str], is_audio: bool) -> dict | None:
             continue
         for prov in providers:
             try:
-                results = _MG.search(q, provider=prov, results=2)
+                results = _MG.search(q, provider=prov, results=5)
+                if results:
+                    distinct = []
+                    seen_t = set()
+                    for r in results:
+                        t_norm = re.sub(r'[^a-zA-Z0-9 ]', '', (r.get('title') or '')).strip().lower()
+                        if t_norm and t_norm not in seen_t:
+                            seen_t.add(t_norm)
+                            auths = [str(a) for a in (r.get('authors') or []) if str(a)]
+                            distinct.append({
+                                'title': r.get('title'),
+                                'author': ', '.join(auths),
+                                'year': str(r.get('year') or 'N/A')
+                            })
+                    is_ambiguous = False
+                    if len(distinct) > 1:
+                        t0 = distinct[0]['title'].lower().strip()
+                        t1 = distinct[1]['title'].lower().strip()
+                        a0 = distinct[0]['author'].lower().strip()
+                        a1 = distinct[1]['author'].lower().strip()
+                        if t0 != t1 and (a0 != a1 and not (t0 in t1 or t1 in t0)):
+                            is_ambiguous = True
                 if results:
                     top = results[0]
                     if top.mediaID and (not top.get("plot") or not top.get("authors")):
@@ -269,6 +290,8 @@ def _mediagoer_sync_worker(queries: list[str], is_audio: bool) -> dict | None:
                         "url": top.get("url") or "",
                         "provider": prov.title(),
                         "is_audiobook": is_audio or (top.get("kind") == "audiobook"),
+                        "is_ambiguous": is_ambiguous,
+                        "ambiguous_matches": distinct if is_ambiguous else [],
                     }
             except Exception as e:
                 logger.debug(f"[MEDIAGOER {prov.upper()} ERROR] Query='{q}': {e}")
@@ -372,6 +395,8 @@ async def fetch_comprehensive_book_metadata(file_name: str, ext: str = "") -> di
         "url": meta.get("url") or "",
         "provider": meta.get("provider") or "Filename Parser",
         "is_audiobook": is_audio,
+        "is_ambiguous": meta.get("is_ambiguous", False),
+        "ambiguous_matches": meta.get("ambiguous_matches", []),
     }
     logger.info(f"[FETCH COMPLETE] Title='{result['title']}' | Author='{result['author']}' | Series='{result['series']}' | Source='{result['provider']}'")
     _CACHE[ckey] = result
