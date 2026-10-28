@@ -4,16 +4,16 @@ from datetime import datetime
 from modules.database.config_db import get_config_int
 
 DB_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mastermind_users.db"))
-OWNER_IDS = {7261537212}
 
 
 def get_owner_ids() -> set:
-    ids = set(OWNER_IDS)
-    env_admins = os.getenv("ADMIN_IDS", "")
-    for part in env_admins.split(","):
-        part = part.strip()
-        if part.isdigit():
-            ids.add(int(part))
+    """Owners are defined only through the OWNER_IDS / ADMIN_IDS environment variables."""
+    ids = set()
+    for key in ("OWNER_IDS", "ADMIN_IDS"):
+        for part in os.getenv(key, "").split(","):
+            part = part.strip()
+            if part.isdigit():
+                ids.add(int(part))
     return ids
 
 

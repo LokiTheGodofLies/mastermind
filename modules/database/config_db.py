@@ -34,13 +34,13 @@ def _get_env_val(key: str, fallback_env: str = None):
 DEFAULT_CONFIGS = {
     "bot_title": ("Mastermind Library Bot", "text", "Display title of the bot"),
     "bot_username": ("MastermindBot", "text", "Bot username without @"),
-    "helper_bot_username": ("RickRiordanBot", "text", "Helper bot username without @"),
-    "storage_channel_id": ("-1003511375054", "channel", "Permanent file storage channel/group ID"),
-    "posting_channel_id": ("-1003936877675", "channel", "Temporary file delivery posting channel ID"),
-    "request_log_chat_id": ("-1004447576324", "channel", "Channel/group ID where book requests are posted"),
-    "admin_log_group_id": ("-1004293995714", "channel", "Admin & moderation audit log group ID"),
-    "general_log_group_id": ("-1004293995714", "channel", "General fallback log group ID"),
-    "support_chat_id": ("-1004299811408", "channel", "Support group ID"),
+    "helper_bot_username": ("", "text", "Helper bot username without @"),
+    "storage_channel_id": ("", "channel", "Permanent file storage channel/group ID"),
+    "posting_channel_id": ("", "channel", "Temporary file delivery posting channel ID"),
+    "request_log_chat_id": ("", "channel", "Channel/group ID where book requests are posted"),
+    "admin_log_group_id": ("", "channel", "Admin & moderation audit log group ID"),
+    "general_log_group_id": ("", "channel", "General fallback log group ID"),
+    "support_chat_id": ("", "channel", "Support group ID"),
     "general_topic_id": ("1", "int", "General topic thread ID"),
     "index_log_topic_id": ("20", "int", "Indexing & upload approval log topic ID"),
     "group_log_topic_id": ("23", "int", "Group events log topic ID"),
@@ -481,27 +481,41 @@ def reset_channels_and_groups_db():
 init_config_db()
 
 
-# --- Multi-Group Topics & Extended Log Topic Support ---
-EXTENDED_ENV_ALIASES = {
-    "general_log_group_id": ("GENERAL_LOG_GROUP_ID", "LOGGER_GROUP_ID"),
-    "admin_log_group_id": ("ADMIN_LOG_GROUP_ID", "LOGGER_GROUP_ID", "GENERAL_LOG_GROUP_ID"),
-    "request_log_chat_id": ("REQUEST_LOG_CHAT_ID", "REQUEST_CHANNEL_ID"),
-    "request_channel_id": ("REQUEST_CHANNEL_ID", "REQUEST_LOG_CHAT_ID"),
-    "storage_channel_id": ("STORAGE_CHANNEL_ID", "STORAGE_GROUP_ID"),
-    "posting_channel_id": ("POSTING_CHANNEL_ID", "SEARCH_CHAT_ID"),
-    "helper_bot_tokens": ("HELPER_BOT_TOKENS", "DELIVERY_BOT_TOKENS", "FILE_BOT_TOKENS", "BOT_TOKENS"),
-}
+# --- Extended settings (kept separate so they can be merged into DEFAULT_CONFIGS lazily) ---
+EXTENDED_ENV_ALIASES = ENV_ALIASES
 
 EXTENDED_DEFAULT_CONFIGS = {
-    "request_channel_id": ("-1004447576324", "channel", "Dedicated Request Updates Channel ID"),
-    "index_channel_id": ("-1004343321416", "channel", "Dedicated Index Updates Channel ID"),
-    "request_log_topic_id": ("30", "int", "Request logs topic ID in Log Group"),
-    "error_log_topic_id": ("33", "int", "Errors topic ID in Log Group"),
-    "render_service_id": ("srv-dbgi9nflk1mc73c0abmg", "text", "Render Service ID for deploy status and logs"),
-    "render_api_key": ("rnd_JMBmX1xXjsOEdDecUnu5mNzo9YWT", "text", "Render API Key for live build status and logs"),
-    "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
+    "request_channel_id": ("", "channel", "Dedicated Request Updates Channel ID"),
+    "index_channel_id": ("", "channel", "Dedicated Index Updates Channel ID"),
+    "request_log_topic_id": ("0", "int", "Request logs topic ID in Log Group"),
+    "error_log_topic_id": ("0", "int", "Errors topic ID in Log Group"),
+    "render_service_id": ("", "text", "Render Service ID for deploy status and logs"),
+    "render_api_key": ("", "text", "Render API Key for live build status and logs"),
+    "render_deploy_hook_url": ("", "text", "Render Deploy Hook URL for 1-click redeploy"),
+    "github_repo": ("", "text", "GitHub repo (owner/name) shown as the deploy target commit"),
+    "community_url": ("", "text", "Community link shown on the start menu and indexed captions"),
     "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
+    "convert_enabled": ("true", "bool", "Enable the /convert ebook converter"),
+    "convert_timeout_seconds": ("300", "int", "Max seconds one conversion may run"),
+    "convert_max_concurrent": ("2", "int", "Max conversions running at the same time"),
+    "convert_max_input_mb": ("20", "int", "Max input size in MB (Bot API download cap is 20)"),
+    "convert_kfx_enabled": ("false", "bool", "Offer KFX in/out (needs Calibre's KFX Input/Output plugins)"),
 }
+
+SECRET_KEY_HINTS = ("token", "api_key", "hook_url", "secret", "password")
+
+
+def is_secret_key(key: str) -> bool:
+    k = (key or "").lower()
+    return any(h in k for h in SECRET_KEY_HINTS)
+
+
+def mask_value(key: str, value) -> str:
+    """Return a display-safe value: secrets are reduced to their last 4 characters."""
+    v = "" if value is None else str(value)
+    if not is_secret_key(key) or not v:
+        return v
+    return "\u2022\u2022\u2022\u2022" + v[-4:]
 
 
 def _get_extended_env_val(key: str, fallback_env: str = None):
