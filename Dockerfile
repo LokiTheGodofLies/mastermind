@@ -17,4 +17,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
+# Reset entrypoint so container executes python main.py directly
+ENTRYPOINT []
 CMD ["python", "main.py"]
