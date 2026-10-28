@@ -2,6 +2,7 @@ from modules.indexing.book_fetcher import fetch_comprehensive_book_metadata, _MG
 import os
 import re
 import html
+import asyncio
 import logging
 import requests
 from datetime import datetime
@@ -72,30 +73,31 @@ def _fetch_audible_catalog(query: str, fmt_label: str = "Audiobook") -> list:
             "products_sort_by": "Relevance",
             "response_groups": "contributors,product_attrs,product_desc,series",
         }
+        products = []
         resp = requests.get(url, params=params, timeout=8)
         if resp.status_code == 200:
             products = resp.json().get("products", [])[:3]
         for p in products:
-                title = p.get("title") or query
-                authors = ", ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")) or "Unknown Author"
-                narrators = ", ".join(n.get("name", "") for n in p.get("narrators", []) if n.get("name")) or "N/A"
-                series_list = p.get("series") or []
-                series_str = f"{series_list[0].get('title', '')}, #{series_list[0].get('sequence', '')}".strip(", #") if series_list else ""
-                rel_year = (p.get("release_date") or p.get("issue_date") or "N/A")[:4]
-                pub = p.get("publisher_name") or "Audible Studios"
-                asin = p.get("asin") or ""
-                link = f"https://www.audible.com/pd/{asin}" if asin else "https://www.audible.com"
-                results.append({
-                    "title": title,
-                    "author": authors,
-                    "narrator": narrators,
-                    "series": series_str,
-                    "year": rel_year,
-                    "publisher": pub,
-                    "url": link,
-                    "source": "Audible",
-                    "format": fmt_label,
-                })
+            title = p.get("title") or query
+            authors = ", ".join(a.get("name", "") for a in p.get("authors", []) if a.get("name")) or "Unknown Author"
+            narrators = ", ".join(n.get("name", "") for n in p.get("narrators", []) if n.get("name")) or "N/A"
+            series_list = p.get("series") or []
+            series_str = f"{series_list[0].get('title', '')}, #{series_list[0].get('sequence', '')}".strip(", #") if series_list else ""
+            rel_year = (p.get("release_date") or p.get("issue_date") or "N/A")[:4]
+            pub = p.get("publisher_name") or "Audible Studios"
+            asin = p.get("asin") or ""
+            link = f"https://www.audible.com/pd/{asin}" if asin else "https://www.audible.com"
+            results.append({
+                "title": title,
+                "author": authors,
+                "narrator": narrators,
+                "series": series_str,
+                "year": rel_year,
+                "publisher": pub,
+                "url": link,
+                "source": "Audible",
+                "format": fmt_label,
+            })
     except Exception as e:
         logger.warning(f"Audible API lookup warning: {e}")
     return results
@@ -173,7 +175,7 @@ async def show_request_options(target_msg, user, query: str, context: ContextTyp
         return
 
     fmt_label = MODE_FORMAT_LABELS.get(mode, "Any")
-    options = fetch_audible_or_goodreads_options(query, mode=mode)
+    options = await asyncio.to_thread(fetch_audible_or_goodreads_options, query, mode)
     context.user_data["req_candidates"] = options
     context.user_data["req_raw_query"] = query
     context.user_data["req_mode"] = mode

@@ -6,8 +6,15 @@ from modules.database.config_db import get_config_bool
 from modules.log.startup_log import send_log_with_fallback
 
 
+# Friendly /broadcast targets -> exact role names stored in the users table
+ROLE_ALIASES = {
+    "normal": "Normal User", "user": "Normal User", "users": "Normal User",
+    "promoter": "Promoter", "volunteer": "Volunteer", "moderator": "Moderator", "admin": "Admin",
+}
+
+
 async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int, target: str, msg_text: str, status_msg):
-    users = get_all_users_db(None if target in ("everyone", "all_users", "all") else target)
+    users = get_all_users_db(None if target in ("everyone", "all_users", "all") else ROLE_ALIASES.get(target, target))
     total = len(users)
     sent = 0
     failed = 0

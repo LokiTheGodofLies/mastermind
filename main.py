@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import fcntl
+import tempfile
 
 import telegram
 from telegram.error import BadRequest
@@ -112,7 +113,7 @@ def main():
         raise SystemExit(1)
 
     # Prevent duplicate bot instances for the same app environment.
-    lock_path = "/tmp/mastermind_bot.lock"
+    lock_path = os.path.join(tempfile.gettempdir(), "mastermind_bot.lock")
     lock_file = open(lock_path, "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -127,7 +128,7 @@ def main():
     init_user_db()
     init_file_db()
 
-    app = ApplicationBuilder().token(token).build()
+    app = ApplicationBuilder().token(token).pool_timeout(30).build()
     app.add_error_handler(global_telegram_error_handler)
 
     # Middlewares: Group -3 Ban check, Group -2 Group Topic filter, Group -1 Force Subscribe
@@ -201,10 +202,6 @@ def main():
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=None,
-        
-        
-        
-        pool_timeout=30,
     )
 
 

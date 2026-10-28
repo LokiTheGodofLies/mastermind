@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.user_db import add_or_update_user_db, get_user_role_db, set_helper_started_db
 from modules.database.config_db import get_template, format_template_string
+from modules.database.file_db import get_file_by_start_payload_db
 from modules.allowance.referral import process_referral_with_notification
 from modules.allowance.allowance import get_user_quota_summary
 
@@ -25,7 +26,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if args and args[0].startswith(("dl_", "file_")):
         try:
-            file_row_id = int(args[0].split("_", 1)[1])
+            payload = args[0]
+            tail = payload.split("_", 1)[1]
+            if tail.isdigit():
+                file_row_id = int(tail)
+            else:
+                file_row = get_file_by_start_payload_db(payload)
+                if not file_row:
+                    await target_msg.reply_text("❌ File no longer exists in database.")
+                    return
+                file_row_id = int(file_row["id"])
             from modules.search.handlers import deliver_file_to_user
             await deliver_file_to_user(target_msg, user, file_row_id, context)
             return

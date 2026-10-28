@@ -62,7 +62,7 @@ USER_HELP_SECTIONS.update({
         "3. If your DM session is active, the Helper Bot also mirrors the file directly to your DM.\n"
         "4. The file in the Posting Channel is <b>auto-deleted after 2 minutes</b> to keep storage clean."
     ),
-        "help_sec_groups": (
+    "help_sec_groups": (
         "👥 <b>Using the Bot in Your Own Group (Groups Help)</b>\n\n"
         "Anyone can add <b>{bot_title}</b> to their own Telegram group to search and request books & audiobooks!\n\n"
         "🔹 <b>Topic Setup for Group Admins (<code>/settopic</code>):</b>\n"
@@ -93,7 +93,7 @@ USER_HELP_SECTIONS.update({
         "• <code>@{bot_username}</code> — Bot username (@{bot_username})\n"
         "• <code>{chat_title}</code> — Current group/chat name\n"
         "• <code>{date}</code> / <code>{time}</code> — Current date ({date}) & time ({time})\n"
-        "• Bold: <code>**text**</code> | Italic: <code>*text*</code> | Spoiler: <code>||text||</code>"
+        "• Bold: <code>&#42;&#42;text&#42;&#42;</code> | Italic: <code>&#42;text&#42;</code> | Spoiler: <code>&#124;&#124;text&#124;&#124;</code>"
     ),
 })
 

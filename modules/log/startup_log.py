@@ -1,5 +1,3 @@
-import os, html
-from modules.bot_manager import get_helper_bot_tokens, get_bot_info_by_token
 import os, html, logging
 from modules.database.config_db import get_config, get_config_int, set_config
 from modules.database.user_db import get_owner_ids
@@ -34,46 +32,6 @@ async def send_error_alert(bot, error_text: str):
                 break
             except Exception: pass
     await _notify_owners(bot, body)
-
-async def _chk(bot, lbl, cid):
-    if not cid: return f"• <b>{lbl}:</b> ❌ Not Set"
-    try:
-        ch = await bot.get_chat(int(cid))
-        t = html.escape(ch.title or ch.username or "Chat")
-        u = ch.invite_link or (f"https://t.me/{ch.username}" if ch.username else "")
-        if not u:
-            try: u = await bot.export_chat_invite_link(int(cid))
-            except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href=\"{html.escape(u)}\">Invite Link</a>"
-    except Exception as e:
-        return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
-
-
-async def _chk(bot, lbl, cid):
-    if not cid: return f"• <b>{lbl}:</b> ❌ Not Set"
-    try:
-        ch = await bot.get_chat(int(cid))
-        t = html.escape(ch.title or ch.username or "Chat")
-        u = ch.invite_link or (f"https://t.me/{ch.username}" if ch.username else "")
-        if not u:
-            try: u = await bot.export_chat_invite_link(int(cid))
-            except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href='{html.escape(u)}'>Invite Link</a>"
-    except Exception as e:
-        return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
-
-async def _chk(bot, lbl, cid):
-    if not cid: return f"• <b>{lbl}:</b> ❌ Not Set"
-    try:
-        ch = await bot.get_chat(int(cid))
-        t = html.escape(ch.title or ch.username or "Chat")
-        u = ch.invite_link or (f"https://t.me/{ch.username}" if ch.username else "")
-        if not u:
-            try: u = await bot.export_chat_invite_link(int(cid))
-            except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href='{html.escape(u)}'>Invite Link</a>"
-    except Exception as e:
-        return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
 
 async def _chk(bot, lbl, cid):
     if not cid: return f"• <b>{lbl}:</b> ❌ Not Set"

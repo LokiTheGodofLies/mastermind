@@ -13,6 +13,7 @@ from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file
 from modules.database.config_db import get_config, get_config_int
 from modules.database.user_db import get_user_role_db
 from modules.log.startup_log import send_log_with_fallback
+from modules.utility.tg_compat import get_forward_chat
 
 logger = logging.getLogger(__name__)
 EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".djvu", ".cbz"}
@@ -580,9 +581,10 @@ async def handle_index_wizard_message(update: Update, context: ContextTypes.DEFA
     step = wiz.get("step")
 
     if step == "await_source":
-        if msg.forward_from_chat:
-            wiz["source_chat"] = msg.forward_from_chat.id
-            wiz["end_id"] = msg.forward_from_message_id or 500
+        fwd_chat, fwd_mid = get_forward_chat(msg)
+        if fwd_chat:
+            wiz["source_chat"] = fwd_chat.id
+            wiz["end_id"] = fwd_mid or 500
         elif msg.text and "t.me/" in msg.text:
             cid, m1, m2 = _parse_tme_link(msg.text.strip())
             if not cid:
@@ -673,18 +675,20 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
             conn.close()
             await q.answer("⚠️ Entry not found.", show_alert=True)
             return
+        await q.answer()
         if d.startswith("idx_app_yes_"):
             conn.execute("UPDATE indexing_queue SET status = 'queued', priority = 10 WHERE id = ?", (qid,))
             conn.commit()
             conn.close()
-            await q.message.edit_text(f"{q.message.text}\n\n✅ <b>Status: Approved & Queued for Indexing</b>", parse_mode="HTML")
+            await q.message.edit_text(f"{html.escape(q.message.text or '')}\n\n✅ <b>Status: Approved & Queued for Indexing</b>", parse_mode="HTML")
             asyncio.create_task(process_global_indexing_queue(context.bot))
         else:
             conn.execute("UPDATE indexing_queue SET status = 'rejected' WHERE id = ?", (qid,))
             conn.commit()
             conn.close()
-            await q.message.edit_text(f"{q.message.text}\n\n❌ <b>Status: Rejected</b>", parse_mode="HTML")
+            await q.message.edit_text(f"{html.escape(q.message.text or '')}\n\n❌ <b>Status: Rejected</b>", parse_mode="HTML")
     elif d == "idx_wiz_skip_yes":
+        await q.answer()
         wiz = context.user_data.get("index_wizard", {})
         wiz["step"] = "await_skip_num"
         await q.message.edit_text(
@@ -693,6 +697,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
             parse_mode="HTML",
         )
     elif d == "idx_wiz_skip_no":
+        await q.answer()
         wiz = context.user_data.get("index_wizard", {})
         wiz["skip_count"] = 0
         wiz["start_id"] = 1
@@ -700,6 +705,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
         await q.message.delete()
         await _send_double_check_card(q.message, q.from_user.first_name, wiz.get("source_chat"), 0)
     elif d == "idx_wiz_cancel":
+        await q.answer()
         context.user_data.pop("index_wizard", None)
         await q.message.edit_text("❌ Indexing setup cancelled.")
     elif d == "idx_wiz_start_yes":
@@ -707,6 +713,7 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
         if not wiz:
             await q.answer("⚠️ Session expired.", show_alert=True)
             return
+        await q.answer("🚀 Indexing started!")
         QUEUE_STATE.update({
             "fetched": 0, "forwarded": 0, "duplicates": 0, "deleted": 0,
             "skipped": wiz.get("skip_count", 0), "filtered": 0,
