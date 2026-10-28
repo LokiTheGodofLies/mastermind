@@ -275,6 +275,15 @@ async def _run_conversion(q, context: ContextTypes.DEFAULT_TYPE, out_fmt: str, t
                 f"⏳ <b>Converting to {out_fmt.upper()}…</b>\n📘 <code>{name}</code>",
                 parse_mode="HTML",
             )
+            async def _update_progress(stage: str):
+                try:
+                    await q.message.edit_text(
+                        f"⏳ <b>Converting to {out_fmt.upper()}</b> (<code>{html.escape(stage)}</code>)\n📘 <code>{name}</code>",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+
             with tempfile.TemporaryDirectory(prefix="mm_convert_") as tmp:
                 src = Path(tmp) / f"input.{job['format']}"
                 tg_file = await context.bot.get_file(job["file_id"])
@@ -285,6 +294,7 @@ async def _run_conversion(q, context: ContextTypes.DEFAULT_TYPE, out_fmt: str, t
                     timeout=get_config_int("convert_timeout_seconds", 300),
                     force_rtl=job.get("force_rtl", False),
                     compress_images=job.get("compress_images", False),
+                    progress_callback=_update_progress,
                 )
                 await _deliver(q, context, job, out_fmt, result, started)
     except Exception as exc:  # network / Telegram errors must not leave the button hanging

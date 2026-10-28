@@ -20,7 +20,7 @@ import re
 import shutil
 import signal
 from tempfile import NamedTemporaryFile
-from typing import ClassVar, Optional
+from typing import ClassVar, Optional, Callable, Awaitable
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 from modules.converter.formats import (
@@ -277,8 +277,12 @@ async def _drain(stream, buf: bytearray):
         pass
 
 
-async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIMEOUT) -> tuple[int | None, str]:
-    """Run a CLI tool in its own process group with timeout and clean error extraction."""
+async def _run_subprocess(
+    command: list[str],
+    timeout: int | None = DEFAULT_TIMEOUT,
+    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> tuple[int | None, str]:
+    """Run a CLI tool with live progress streaming, timeout, and clean error extraction."""
     logger.info("[SUBPROCESS START] %s", " ".join(command))
     env = dict(os.environ)
     calibre_home = Path("/tmp")
@@ -309,32 +313,53 @@ async def _run_subprocess(command: list[str], timeout: int | None = DEFAULT_TIME
     except OSError as exc:
         return None, f"Could not start {command[0]}: {exc}"
 
-    buf = bytearray()
-    reader = asyncio.create_task(_drain(proc.stdout, buf))
+    output_lines = []
+    last_callback_time = 0.0
+
     try:
-        if timeout is None:
-            await proc.wait()
-        else:
-            await asyncio.wait_for(proc.wait(), timeout=timeout)
-        await reader
+        while True:
+            line_bytes = await (
+                proc.stdout.readline()
+                if timeout is None
+                else asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+            )
+            if not line_bytes:
+                break
+            line_str = line_bytes.decode("utf-8", errors="replace").strip()
+            if line_str:
+                output_lines.append(line_str)
+                if len(output_lines) > 500:
+                    output_lines.pop(0)
+
+                m_pct = re.search(r"(\d{1,3}%.*)", line_str)
+                if m_pct:
+                    progress_text = m_pct.group(1).strip()
+                    logger.info("[CONVERT PROGRESS] %s", progress_text)
+                    now = time.monotonic()
+                    if progress_callback and (now - last_callback_time >= 3.0):
+                        last_callback_time = now
+                        with suppress(Exception):
+                            await progress_callback(progress_text)
+                elif any(k in line_str for k in ("Converting", "Rendering", "Writing", "error", "Error")):
+                    logger.info("[CONVERT LOG] %s", line_str)
+
+        await proc.wait()
     except asyncio.TimeoutError:
         _kill_group(proc.pid)
-        reader.cancel()
         with suppress(Exception):
             await proc.wait()
-        tail_output = _tail(buf.decode("utf-8", errors="replace"))
-        logger.error("[SUBPROCESS TIMEOUT] Timed out after %ss: %s\nOutput:\n%s", timeout, " ".join(command), tail_output)
+        tail_output = _tail(chr(10).join(output_lines))
+        logger.error("[SUBPROCESS TIMEOUT] Timed out after %ss: %s\nLast output:\n%s", timeout, " ".join(command), tail_output)
         return None, f"Conversion timed out after {timeout} seconds.\nLast output:\n{tail_output}"
     except asyncio.CancelledError:
         _kill_group(proc.pid)
-        reader.cancel()
         raise
     finally:
         if proc.returncode is None:
             _kill_group(proc.pid)
 
     elapsed = time.monotonic() - t0
-    log_text = buf.decode("utf-8", errors="replace")
+    log_text = chr(10).join(output_lines)
     logger.info("[SUBPROCESS END] rc=%s elapsed=%.1fs | tail=%s", proc.returncode, elapsed, log_text[-200:].strip())
 
     if proc.returncode != 0:
@@ -358,6 +383,7 @@ async def convert_file(
     force_rtl: bool = False,
     compress_images: bool = False,
     extra_calibre_args: list[str] | None = None,
+    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> ConversionResult:
     """Convert ``src`` (any of 62 formats) to ``output_format`` (any of 31 formats)."""
     src = Path(src)
@@ -600,6 +626,7 @@ class Converter:
         force_rtl: bool = False,
         compress_images: bool = False,
         extra_calibre_args: list[str] | None = None,
+    progress_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> ConversionResult:
         return await convert_file(
