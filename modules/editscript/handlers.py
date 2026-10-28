@@ -333,10 +333,23 @@ async def _handle_cust_template_and_db_callbacks(q, d: str, uid: int, context: C
     elif d == "cust_do_hotreload":
         reload_config_cache()
         await q.answer("✅ Configurations & templates hot-reloaded!", show_alert=True)
+    elif d.startswith("cust_refresh_dep_"):
+        dep_id = d.replace("cust_refresh_dep_", "")
+        await q.answer("🔄 Refreshing deploy status & logs...")
+        details = await get_render_deploy_details(dep_id)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh Deploy Logs & Status", callback_data=f"cust_refresh_dep_{dep_id}")],
+            [InlineKeyboardButton("≼ BACK", callback_data="cust_sys_restart")],
+        ])
+        await q.message.edit_text(f"📡 <b>Render Deployment Status & Live Logs</b>\n\n{details}", parse_mode="HTML", reply_markup=kb)
     elif d == "cust_do_redeploy":
         await q.answer("🚀 Calling Render Deploy Hook...")
-        ok, msg = await trigger_render_redeploy()
-        await q.message.edit_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("≼ BACK", callback_data="cust_sys_restart")]]))
+        ok, msg, dep_id = await trigger_render_redeploy()
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh Deploy Logs & Status", callback_data=f"cust_refresh_dep_{dep_id}")],
+            [InlineKeyboardButton("≼ BACK", callback_data="cust_sys_restart")],
+        ])
+        await q.message.edit_text(msg, parse_mode="HTML", reply_markup=kb)
     elif d == "cust_do_hardrestart":
         await q.answer("♻️ Restarting bot process...", show_alert=True)
         await q.message.edit_text("♻️ <b>Restarting bot process now...</b>", parse_mode="HTML")
@@ -580,3 +593,115 @@ async def redeploy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.effective_message.reply_text("⏳ Triggering Render Deploy Hook...")
     ok, msg = await trigger_render_redeploy()
     await status_msg.edit_text(msg, parse_mode="HTML")
+
+
+# Helper to fetch latest commit being deployed + Render API deploy status/logs + local memory logs
+async def get_render_deploy_details(deploy_id: str = "") -> str:
+    import aiohttp
+    import json
+    from modules.log.logger import get_logs_by_count
+
+    srv_id = get_config("render_service_id", "srv-dbgi9nflk1mc73c0abmg")
+    api_key = get_config("render_api_key", fallback_env="RENDER_API_KEY")
+    lines = []
+
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        # 1. Fetch latest commit on LokiTheGodofLies/mastermind being deployed
+        try:
+            gh_url = "https://api.github.com/repos/LokiTheGodofLies/mastermind/commits/main"
+            async with session.get(gh_url, headers={"User-Agent": "MastermindBot"}) as gresp:
+                if gresp.status == 200:
+                    gdata = await gresp.json()
+                    sha = (gdata.get("sha") or "")[:7]
+                    cmsg = (gdata.get("commit", {}).get("message") or "").splitlines()[0]
+                    cauthor = gdata.get("commit", {}).get("author", {}).get("name") or "GitHub"
+                    lines.append(f"📦 <b>Target Commit:</b> <code>{sha}</code> — <i>{html.escape(cmsg[:60])}</i> (by {html.escape(cauthor)})")
+        except Exception:
+            pass
+
+        # 2. If RENDER_API_KEY is configured, query Render REST API v1 for exact deploy status & build logs
+        if api_key and srv_id:
+            headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+            try:
+                dep_url = f"https://api.render.com/v1/services/{srv_id}/deploys"
+                if deploy_id:
+                    dep_url = f"{dep_url}/{deploy_id}"
+                else:
+                    dep_url = f"{dep_url}?limit=1"
+                async with session.get(dep_url, headers=headers) as rresp:
+                    if rresp.status == 200:
+                        rdata = await rresp.json()
+                        dep_obj = rdata[0].get("deploy", rdata[0]) if isinstance(rdata, list) and rdata else rdata.get("deploy", rdata)
+                        st = dep_obj.get("status", "unknown")
+                        did = dep_obj.get("id", deploy_id or "N/A")
+                        started = dep_obj.get("createdAt", "")[:19].replace("T", " ")
+                        finished = (dep_obj.get("finishedAt") or "In Progress")[:19].replace("T", " ")
+                        lines.append(
+                            f"🆔 <b>Deploy ID:</b> <code>{html.escape(str(did))}</code>\n"
+                            f"📡 <b>Render Status:</b> <code>{html.escape(str(st).upper())}</code>\n"
+                            f"⏱ <b>Started:</b> <code>{started}</code> | <b>Finished:</b> <code>{finished}</code>"
+                        )
+                    else:
+                        err_txt = await rresp.text()
+                        lines.append(f"⚠️ <b>Render API Status ({rresp.status}):</b> <code>{html.escape(err_txt[:150])}</code>")
+            except Exception as e:
+                lines.append(f"⚠️ <b>Render API Check Error:</b> <code>{html.escape(str(e))}</code>")
+        else:
+            lines.append("💡 <i>Tip: Set <code>/setconfig render_api_key rnd_...</code> to stream live Render build status.</i>")
+
+    # 3. Append latest runtime/deploy logs & any errors captured in memory
+    recent_logs = get_logs_by_count(12)
+    lines.append(f"\n📋 <b>Latest Bot & Deploy Logs:</b>\n<pre>{html.escape(recent_logs[-900:])}</pre>")
+    return "\n".join(lines)
+
+
+async def trigger_render_redeploy() -> tuple:
+    """Triggers Render Deploy Hook and returns (success, formatted_message, deploy_id)."""
+    import aiohttp
+    import json
+    hook_url = get_config("render_deploy_hook_url", fallback_env="RENDER_DEPLOY_HOOK_URL")
+    if not hook_url or not hook_url.startswith("http"):
+        return False, "⚠️ No valid <code>render_deploy_hook_url</code> configured.", ""
+    try:
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(hook_url) as resp:
+                body = await resp.text()
+                deploy_id = ""
+                try:
+                    j = json.loads(body)
+                    deploy_id = (j.get("deploy") or {}).get("id") or j.get("id") or ""
+                except Exception:
+                    pass
+                details = await get_render_deploy_details(deploy_id)
+                if resp.status in (200, 201, 202):
+                    msg = (
+                        f"🚀 <b>Render Redeploy Triggered Successfully! (HTTP {resp.status})</b>\n"
+                        f"Render is now pulling the latest commit and redeploying your service.\n\n"
+                        f"{details}"
+                    )
+                    return True, msg, deploy_id
+                msg = (
+                    f"❌ <b>Render Deploy Hook Error (HTTP {resp.status})</b>\n"
+                    f"<b>Response:</b> <pre>{html.escape(body[:300])}</pre>\n\n"
+                    f"{details}"
+                )
+                return False, msg, deploy_id
+    except Exception as e:
+        details = await get_render_deploy_details("")
+        return False, f"❌ <b>Failed calling Render Deploy Hook:</b> <code>{html.escape(str(e))}</code>\n\n{details}", ""
+
+
+async def redeploy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command /redeploy showing deploy status, commit info, and live logs."""
+    if not _is_admin(update.effective_user.id):
+        await update.effective_message.reply_text("⛔ Access denied.")
+        return
+    status_msg = await update.effective_message.reply_text("⏳ Triggering Render Deploy Hook & fetching deploy logs...")
+    ok, msg, dep_id = await trigger_render_redeploy()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh Deploy Logs & Status", callback_data=f"cust_refresh_dep_{dep_id}")],
+        [InlineKeyboardButton("≼ Open Customize Menu", callback_data="cust_open_main")],
+    ])
+    await status_msg.edit_text(msg, parse_mode="HTML", reply_markup=kb)
