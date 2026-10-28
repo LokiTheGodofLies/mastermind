@@ -19,7 +19,7 @@ def _format_book_entry(idx: int, row: dict, bot_username: str) -> str:
     series = html.escape(row.get("series") or "Standalone / No Series")
     author = html.escape(row.get("author") or "Unknown Author")
     ext = html.escape((row.get("extension") or ".epub").lstrip("."))
-    dl_url = f"https://t.me/{bot_username}?start=dl_{row['id']}"
+    dl_url = f"https://t.me/{bot_username}?start=file_{row['id']}"
 
     return (
         f"<b>{idx}. {title}</b>\n"
@@ -64,6 +64,19 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
             InlineKeyboardButton("📤 Send All", callback_data=f"sendall|{mode}|{page}|{q_short}"),
             InlineKeyboardButton("🎧" + (" ✓" if mode == "audiobook" else ""), callback_data=f"spg|audiobook|1|{q_short}"),
         ])
+
+        download_buttons = []
+        for r in slice_rows[:3]:
+            title = (r.get("title") or r.get("file_name") or "Book")[:18]
+            download_buttons.append(
+                InlineKeyboardButton(
+                    f"📥 {title}",
+                    url=f"https://t.me/{bot_uname}?start=file_{r['id']}"
+                )
+            )
+        if download_buttons:
+            kb.append(download_buttons)
+
         txt = (
             f"🔍 <b>Search Results — {html.escape(bot_title)}</b>\n"
             f"🔎 <b>Query:</b> <code>{html.escape(search_term)}</code> | <b>Filter:</b> {mode_badge} ({total} matches)\n\n"
@@ -186,7 +199,7 @@ async def deliver_file_to_user(reply_target_msg, user, row_id: int, context: Con
     )
     log_id = log_file_delivery_db(file_id or "", file_name, getattr(delivery_bot, "username", None) or "HelperBot", user.id, ch_link, msg_link, post_mid, "delivered")
     if posted_msg and post_mid and get_config_bool("auto_delete_enabled", True):
-        asyncio.create_task(_auto_delete_posted_file(used_bot, int(posting_id), post_mid, log_id, del_secs, file_name, user.id))
+        asyncio.create_task(_auto_delete_posted_file(delivery_bot, int(posting_id), post_mid, log_id, del_secs, file_name, user.id))
     return True
 
 async def _run_search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str = "all"):
@@ -253,6 +266,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             if not ok:
                 break
             await asyncio.sleep(0.4)
-    elif d.startswith("file_dl_"):
+    elif d.startswith(("file_dl_", "dl_")):
         await q.answer("📥 Delivering file...")
-        await deliver_file_to_user(q.message, user, int(d.replace("file_dl_", "")), context)
+        payload = d.replace("file_dl_", "").replace("dl_", "")
+        await deliver_file_to_user(q.message, user, int(payload), context)
