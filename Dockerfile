@@ -7,6 +7,7 @@ ENV PYTHONUNBUFFERED=1     PYTHONDONTWRITEBYTECODE=1     QT_QPA_PLATFORM=offscre
 # Install Pandoc and system fonts for Calibre PDF rendering
 RUN apt-get update     && apt-get install -y --no-install-recommends         pandoc fontconfig fonts-dejavu-core fonts-liberation ca-certificates curl     && fc-cache -f     && rm -rf /var/lib/apt/lists/*
 
+EXPOSE 8080 10000
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
