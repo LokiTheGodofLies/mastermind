@@ -2,6 +2,49 @@ from server import start_server_in_background
 import os
 import asyncio
 import logging
+import telegram
+from telegram.error import BadRequest
+
+# --- Global patch: silently ignore "Message is not modified" everywhere ---
+_orig_msg_edit_text = telegram.Message.edit_text
+_orig_msg_edit_rm = telegram.Message.edit_reply_markup
+_orig_bot_edit_text = telegram.Bot.edit_message_text
+
+async def _safe_msg_edit_text(self, *args, **kwargs):
+    try:
+        return await _orig_msg_edit_text(self, *args, **kwargs)
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            return self
+        raise
+
+async def _safe_msg_edit_rm(self, *args, **kwargs):
+    try:
+        return await _orig_msg_edit_rm(self, *args, **kwargs)
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            return self
+        raise
+
+async def _safe_bot_edit_text(self, *args, **kwargs):
+    try:
+        return await _orig_bot_edit_text(self, *args, **kwargs)
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            return None
+        raise
+
+telegram.Message.edit_text = _safe_msg_edit_text
+telegram.Message.edit_reply_markup = _safe_msg_edit_rm
+telegram.Bot.edit_message_text = _safe_bot_edit_text
+
+
+async def global_telegram_error_handler(update, context):
+    err = context.error
+    if isinstance(err, BadRequest) and "message is not modified" in str(err).lower():
+        return
+    logging.getLogger(__name__).error(f"Unhandled exception: {err}", exc_info=err)
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -69,6 +112,7 @@ def main():
     init_file_db()
 
     app = ApplicationBuilder().token(token).build()
+    app.add_error_handler(global_telegram_error_handler)
 
     # Middlewares: Group -3 Ban check, Group -2 Group Topic filter, Group -1 Force Subscribe
     app.add_handler(MessageHandler(filters.ALL, enforce_ban_middleware), group=-3)
