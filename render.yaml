@@ -20,3 +20,5 @@ services:
         sync: false
       - key: REQUEST_CHANNEL_ID
         sync: false
+      - key: BACKUP_CHAT_ID
+        sync: false

@@ -1,8 +1,11 @@
+import asyncio
+import html
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.user_db import DB_FILE as USER_DB, get_user_role_db
 from modules.database.file_db import get_connection as get_file_conn
+from modules.database import persistence
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41,3 +44,25 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=kb)
     else:
         await msg.reply_text(txt, parse_mode="HTML", reply_markup=kb)
+
+
+async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/backup - (Admin/Owner) snapshot all databases to the backup chat right now and show status."""
+    msg = update.effective_message
+    user = update.effective_user
+    if not msg or not user:
+        return
+    if get_user_role_db(user.id) not in ("Admin", "Owner"):
+        await msg.reply_text("⛔ Access denied. Only Admins and Owners can run /backup.")
+        return
+
+    wait = await msg.reply_text("💾 Backing up databases...")
+    ok, detail = await asyncio.to_thread(persistence.backup_now, "manual /backup")
+    st = persistence.get_status()
+    txt = (
+        f"{'✅ <b>Backup saved</b>' if ok else '❌ <b>Backup failed</b>'}\n"
+        f"{html.escape(detail)}\n\n"
+        f"{persistence.status_line_html()}\n"
+        f"💬 <b>Backup chat:</b> <code>{html.escape(str(st.get('backup_chat') or 'not set'))}</code>"
+    )
+    await wait.edit_text(txt, parse_mode="HTML")

@@ -8,6 +8,7 @@ import logging
 import aiohttp
 from urllib.parse import quote_plus, urljoin
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
 from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db, get_connection as get_file_conn
 from modules.database.config_db import get_config, get_config_int
@@ -725,7 +726,34 @@ async def indexing_callback_handler(update: Update, context: ContextTypes.DEFAUL
         asyncio.create_task(_run_channel_range_scan(context.bot, wiz, q.from_user))
 
 
+async def _safe_delete(bot, chat_id, message_id):
+    try:
+        await bot.delete_message(chat_id=int(chat_id), message_id=int(message_id))
+        return True
+    except Exception:
+        return False
+
+
+async def _forward_with_retry(bot, chat_id, from_chat_id, message_id):
+    """forward_message with one flood-wait retry."""
+    try:
+        return await bot.forward_message(chat_id=chat_id, from_chat_id=from_chat_id, message_id=message_id)
+    except RetryAfter as e:
+        await asyncio.sleep(float(getattr(e, "retry_after", 5)) + 1)
+        return await bot.forward_message(chat_id=chat_id, from_chat_id=from_chat_id, message_id=message_id)
+
+
 async def _run_channel_range_scan(bot, wiz: dict, user):
+    """
+    Walk a message range of the source chat and INDEX every ebook/audiobook found.
+
+    Bot API bots cannot read message history, so each source message is forwarded into the
+    storage chat once (that is the only way to learn its file_id / name), the temporary
+    forward is deleted again, and the file is re-posted through the normal indexing path
+    (_index_single_file_obj) which adds the metadata caption AND writes the row into the
+    files database.  The old implementation used copy_message, which only put the file in
+    storage and never saved it to the database - so it never showed up in search.
+    """
     src = wiz.get("source_chat")
     start_id = int(wiz.get("start_id", 1))
     end_id = int(wiz.get("end_id", start_id))
@@ -733,6 +761,16 @@ async def _run_channel_range_scan(bot, wiz: dict, user):
     storage_id = get_config("storage_channel_id", fallback_env="STORAGE_GROUP_ID")
     batch_limit = get_config_int("max_index_batch", 10)
     sleep_secs = get_config_int("index_sleep_seconds", 10)
+    uid = getattr(user, "id", 0) or 0
+    utitle = (getattr(user, "full_name", None) or getattr(user, "username", None) or "Admin")
+
+    if not storage_id:
+        QUEUE_STATE["status"] = "failed: storage chat not set"
+        await _refresh_progress_card(bot)
+        return
+
+    # Re-indexing the storage chat itself: the freshly captioned copy replaces the old message.
+    same_chat = str(src).lstrip("@") == str(storage_id)
 
     processed_in_batch = 0
     for mid in range(start_id, end_id + 1):
@@ -750,13 +788,38 @@ async def _run_channel_range_scan(bot, wiz: dict, user):
 
         QUEUE_STATE["fetched"] += 1
         QUEUE_STATE["remaining"] = max(0, end_id - mid)
+        fwd = None
         try:
-            if storage_id:
-                copied = await bot.copy_message(chat_id=int(storage_id), from_chat_id=src, message_id=mid)
-                if copied:
+            fwd = await _forward_with_retry(bot, int(storage_id), src, mid)
+            doc = getattr(fwd, "document", None) or getattr(fwd, "audio", None)
+            if not doc:
+                QUEUE_STATE["filtered"] += 1  # text / photo / service message
+            else:
+                res = await _index_single_file_obj(
+                    bot,
+                    doc.file_id,
+                    doc.file_unique_id,
+                    getattr(doc, "file_name", None) or "audiobook.m4b",
+                    getattr(doc, "file_size", 0) or 0,
+                    getattr(doc, "mime_type", "document") or "document",
+                    uid,
+                    utitle,
+                    getattr(fwd, "caption", "") or "",
+                )
+                if res == "forwarded":
                     QUEUE_STATE["forwarded"] += 1
-        except Exception:
-            QUEUE_STATE["deleted"] += 1
+                    if same_chat:
+                        await _safe_delete(bot, storage_id, mid)  # replaced by the indexed copy
+                elif res == "duplicate":
+                    QUEUE_STATE["duplicates"] += 1
+                else:
+                    QUEUE_STATE["filtered"] += 1
+        except Exception as exc:
+            logger.warning("Range index: message %s skipped: %s", mid, exc)
+            QUEUE_STATE["deleted"] += 1  # missing / deleted / protected / not accessible
+        finally:
+            if fwd is not None:
+                await _safe_delete(bot, storage_id, fwd.message_id)  # remove the temporary forward
 
         processed_in_batch += 1
         if processed_in_batch >= batch_limit:

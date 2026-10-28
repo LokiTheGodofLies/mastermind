@@ -2,7 +2,7 @@ import html
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ApplicationHandlerStop
-from modules.database.user_db import get_user_role_db
+from modules.database.user_db import get_user_role_db, DB_FILE
 from modules.ban.ban import set_ban_db, remove_ban_db, get_ban_status, get_support_chat_id, check_user_access
 
 async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAULT_TYPE, target_arg: str):
@@ -14,7 +14,7 @@ async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAUL
 
     if target_arg.startswith('@'):
         username = target_arg[1:]
-        conn = sqlite3.connect("mastermind_users.db")
+        conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
         row = cursor.fetchone()

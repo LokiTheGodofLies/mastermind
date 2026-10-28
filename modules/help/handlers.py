@@ -34,10 +34,11 @@ USER_HELP_SECTIONS = {
         "4. Once posted to the Request Queue, Moderators/Admins can update its status (Added to Database, Not Available, Not Released, Request Again, Already Available)."
     ),
     "help_sec_uploads": (
-        "📤 <b>How File Uploads & Indexing Work</b>\n\n"
-        "• <b>Normal Users & Promoters:</b> Uploaded files are sent to the Approval Queue for Admin/Owner review before indexing.\n"
-        "• <b>Volunteers, Admins & Owners:</b> Uploaded ebooks/audiobooks are automatically enriched with Goodreads metadata, captioned, sent to Storage, and indexed.\n"
-        "• <b>Rate-Limited Queue:</b> Indexing runs at max <b>10 files per batch</b> with a <b>10-second cooldown</b> between batches. Direct user uploads get top priority."
+        "📤 <b>Add Books to the Library</b>\n\n"
+        "You can add files to the bot's database by sending them straight to this bot "
+        "(eBooks: EPUB, PDF, MOBI, AZW3 • Audiobooks: MP3, M4B).\n\n"
+        "Once a bot Admin or the Owner approves your upload, it is added to the database "
+        "and becomes searchable for everyone. Thank you for helping the library grow! 💖"
     ),
     "help_sec_quota": (
         "📊 <b>How the Quota System Works</b>\n\n"
@@ -74,10 +75,10 @@ USER_HELP_SECTIONS.update({
     "help_sec_roles": (
         "🛡 <b>Roles, Quotas & Permissions</b>\n\n"
         "• <b>Banned:</b> 0 quota (restricted access)\n"
-        "• <b>Normal User:</b> 10 quota (uploads need approval)\n"
+        "• <b>Normal User:</b> 10 quota\n"
         "• <b>Promoter:</b> 20 quota (boosted normal user)\n"
-        "• <b>Volunteer:</b> 30 quota (direct file indexing without approval)\n"
-        "• <b>Moderator:</b> 40 quota (manages book request queue & statuses)\n"
+        "• <b>Volunteer:</b> 30 quota (trusted uploader)\n"
+        "• <b>Moderator:</b> 40 quota (manages book requests)\n"
         "• <b>Admin / Owner:</b> Unlimited quota + system & role control"
     ),
     "help_sec_formatting": (
@@ -85,9 +86,8 @@ USER_HELP_SECTIONS.update({
         "🔘 <b>What Inline Buttons Do:</b>\n"
         "• <b>Result Button:</b> Sends selected file to Posting Channel & DM\n"
         "• <b>Request Book:</b> Searches Audible/Goodreads or submits manual request\n"
-        "• <b>Approve / Reject:</b> Allows or blocks file indexing\n"
         "• <b>Show Options:</b> Updates book request status\n"
-        "• <b>Pause / Resume / Cancel:</b> Controls the 10-file batch indexing queue\n\n"
+        "\n"
         "🏷 <b>Message Placeholders & Formatting:</b>\n"
         "• <code>{bot_title}</code> — Bot display name ({bot_title})\n"
         "• <code>@{bot_username}</code> — Bot username (@{bot_username})\n"
@@ -111,7 +111,8 @@ ADMIN_HELP_MAIN = (
     "• <code>/index</code> — Start interactive indexing wizard or range index\n"
     "• <code>/customize</code> — Open button-driven Bot Settings & Template Dashboard\n"
     "• <code>/setconfig &lt;k&gt; &lt;v&gt;</code> | <code>/getconfig &lt;k&gt;</code> | <code>/reloadconfig</code>\n"
-    "• <code>/broadcast &lt;target&gt; &lt;msg&gt;</code> | <code>/stats</code> | <code>/log</code>"
+    "• <code>/broadcast &lt;target&gt; &lt;msg&gt;</code> | <code>/stats</code> | <code>/log</code> | <code>/backup</code>\n\n"
+    "👇 Tap <b>Indexing Help</b>, <b>Upload Logic</b> or <b>Backup & Restore</b> below for the full guides."
 )
 
 ADMIN_HELP_SECTIONS = {
@@ -119,16 +120,45 @@ ADMIN_HELP_SECTIONS = {
     "adm_sec_prom": "🚀 <b>Add Promoter (<code>/addprom &lt;user&gt;</code>)</b>\nBoosts a normal user to <b>20 daily search & request quota</b>.",
     "adm_sec_mod": "🛡 <b>Add Moderator (<code>/addmod &lt;user&gt;</code>)</b>\nGrants <b>40 daily quota</b> and access to <b>Show Options</b> on Request Log entries (Added to DB, Not Available, Not Released, Request Again, Already Available).",
     "adm_sec_admin": "👑 <b>Add Admin (<code>/addadmin &lt;user&gt;</code>)</b>\nGrants <b>Unlimited quota</b>, upload approval rights, role assignment, broadcast, and log access.",
-    "adm_sec_queue": "⏸ <b>Queue Control & Throttling</b>\nGlobal cap of <b>10 files per batch</b> + <b>10s sleep</b>. Direct user uploads pause bulk channel scans and run first. Use Pause, Resume, and Cancel buttons on the progress card.",
+    "adm_sec_queue": "⏸ <b>Queue Control & Throttling</b>\nGlobal cap of <b>10 files per batch</b> + <b>10s sleep</b> (<code>max_index_batch</code> / <code>index_sleep_seconds</code>). Direct user uploads pause bulk channel scans and run first. Use Pause, Resume, and Cancel buttons on the progress card.",
     "adm_sec_logs": "📋 <b>Log Configuration & Fallback</b>\nEvents route to specific log topics (Index, Request, Group, Channel, User). If missing, they fall back to General Log + Owner PM alert.",
     "adm_sec_index": (
-        "📚 <b>Manual Indexing Commands (<code>/index</code>)</b>\n\n"
-        "• <code>/index</code> — Interactive step-by-step wizard (Set Source -> Skip -> Double Check)\n"
+        "📚 <b>Indexing Module (<code>/index</code>)</b>\n"
+        "<i>Volunteers, Admins & Owners</i>\n\n"
+        "Scans a source chat message-by-message, enriches each file with Goodreads / Audible metadata, "
+        "posts it to the Storage group and <b>saves it in the search database</b>.\n\n"
+        "• <code>/index</code> — Interactive wizard (Set Source → Skip → Double Check)\n"
         "• <code>/index t.me/channel/100 t.me/channel/300</code>\n"
         "• <code>/index t.me/channel/100-300</code>\n"
         "• <code>/index t.me/channel skip 200</code>\n"
         "• <code>/index t.me/channel skip 200-250</code>\n"
-        "• <code>/index t.me/channel limit=10</code>"
+        "• <code>/index t.me/channel limit=10</code>\n\n"
+        "🔹 The bot must be an <b>admin in the Storage chat</b> and a <b>member/admin of the source chat</b>.\n"
+        "🔹 Duplicates (same file) are detected and skipped automatically.\n"
+        "🔹 <b>Rebuild a lost database:</b> run <code>/index</code> on the Storage group itself "
+        "(e.g. <code>/index t.me/c/3511375054/1-500</code>). Files are re-indexed and the old unindexed copies are replaced.\n"
+        "🔹 Run <code>/backup</code> any time to force a database backup."
+    ),
+    "adm_sec_upload": (
+        "📤 <b>Upload & Approval Logic</b>\n\n"
+        "• <b>Normal Users & Promoters:</b> files sent to the bot go to the <b>Approval Queue</b> "
+        "(posted in the Index log topic with ✅ Approve & Index / ❌ Reject buttons). Only Admins/Owners can approve.\n"
+        "• <b>Volunteers, Admins & Owners:</b> files are indexed directly with top priority — enriched with metadata, "
+        "captioned, sent to Storage and saved to the database.\n"
+        "• <b>Rate-limited queue:</b> max <b>10 files per batch</b> with a <b>10-second cooldown</b>. "
+        "Direct uploads run before bulk <code>/index</code> scans.\n"
+        "• Unsupported formats are rejected; duplicates are reported as already indexed.\n"
+        "• Users are only told: <i>send files to the bot, they are added after an Admin/Owner approves them.</i>"
+    ),
+    "adm_sec_backup": (
+        "💾 <b>Database Backup & Restore</b>\n\n"
+        "Render wipes local files on every deploy, so the bot saves <b>all databases</b> (indexed files, users/roles/quotas/bans, "
+        "customize settings, topics, force-sub channels) to a pinned <code>mastermind_backup.zip</code> in the backup chat.\n\n"
+        "• Automatic: every ~5 min when something changed, and on shutdown/redeploy.\n"
+        "• Automatic restore: on the next start, before anything else loads.\n"
+        "• <code>/backup</code> — force a backup now and see status.\n"
+        "• Backup chat = <code>BACKUP_CHAT_ID</code> env, else <code>INDEX_CHANNEL_ID</code>, else <code>LOGGER_GROUP_ID</code>. "
+        "The bot needs <b>post + pin</b> rights there. Never delete/unpin the backup message."
     ),
     "adm_sec_usermgmt": "👥 <b>User Management</b>\nUse <code>/ban &lt;user&gt; [reason]</code>, <code>/ban_pm</code>, <code>/ban_support</code>, <code>/unban &lt;user&gt;</code>, and <code>/gift &lt;user_id&gt; &lt;s_bonus&gt; &lt;r_bonus&gt;</code>.",
 }
@@ -143,7 +173,7 @@ def build_user_help_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✨ Formatting & Buttons", callback_data="help_sec_formatting")],
     ]
     if is_admin:
-        kb.append([InlineKeyboardButton("👑 Admin Commands (/adminhelp)", callback_data="help_open_admin")])
+        kb.append([InlineKeyboardButton("👑 Admin Commands", callback_data="help_open_admin")])
     kb.append([InlineKeyboardButton("≼ Back to Start", callback_data="start_menu")])
     return InlineKeyboardMarkup(kb)
 
@@ -153,8 +183,9 @@ def build_admin_help_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎖 Add Volunteer", callback_data="adm_sec_vol"), InlineKeyboardButton("🚀 Add Promoter", callback_data="adm_sec_prom")],
         [InlineKeyboardButton("🛡 Add Moderator", callback_data="adm_sec_mod"), InlineKeyboardButton("👑 Add Admin", callback_data="adm_sec_admin")],
         [InlineKeyboardButton("⏸ Queue Control", callback_data="adm_sec_queue"), InlineKeyboardButton("📋 Logs", callback_data="adm_sec_logs")],
-        [InlineKeyboardButton("📚 Indexing", callback_data="adm_sec_index"), InlineKeyboardButton("👥 User Management", callback_data="adm_sec_usermgmt")],
-        [InlineKeyboardButton("🪄 Customize Bot (/customize)", callback_data="cust_open_main")],
+        [InlineKeyboardButton("📚 Indexing Help", callback_data="adm_sec_index"), InlineKeyboardButton("📤 Upload Logic", callback_data="adm_sec_upload")],
+        [InlineKeyboardButton("👥 User Management", callback_data="adm_sec_usermgmt"), InlineKeyboardButton("💾 Backup & Restore", callback_data="adm_sec_backup")],
+        [InlineKeyboardButton("🪄 Customize Bot", callback_data="cust_open_main")],
         [InlineKeyboardButton("≼ Back to User Help", callback_data="help_menu")],
     ]
     return InlineKeyboardMarkup(kb)

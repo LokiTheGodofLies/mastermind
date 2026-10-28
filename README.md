@@ -27,6 +27,8 @@ A modular Telegram bot for book and audiobook indexing, search with dual deliver
 | `REQUEST_CHANNEL_ID` | `-1004447576324` | Dedicated channel where book requests are forwarded |
 | `INDEX_CHANNEL_ID` | `-1001234567890` | (Optional) Dedicated channel for file indexing updates |
 | `SUPPORT_CHAT_ID` | `-1004496093454` | Support group for appeals and user inquiries |
+| `BACKUP_CHAT_ID` | `-1004343321416` | (Recommended) Private chat/channel where the bot keeps its pinned database backup. Falls back to `INDEX_CHANNEL_ID`, then `LOGGER_GROUP_ID`. Bot needs post + pin rights |
+| `BACKUP_INTERVAL_SECONDS` | `300` | (Optional) Minimum seconds between automatic backups (only runs if data changed) |
 
 ### 3. Log Group Forum Topics
 | Variable | Example Value | Description |
@@ -67,6 +69,26 @@ A modular Telegram bot for book and audiobook indexing, search with dual deliver
 | :--- | :--- | :--- |
 | `PORT` | `8080` | HTTP port for the Render health-check server |
 | `PYTHON_VERSION` | `3.11.9` | Python runtime version for Render |
+
+---
+
+## 💾 Database persistence on Render (free plan)
+
+Render's free plan wipes the local disk on every deploy. The bot therefore keeps **all** its SQLite databases
+(`files.db` indexed books, `mastermind_users.db` users/roles/quotas/bans, `config.db` customize settings, topics and force-sub channels)
+safe inside Telegram:
+
+* **Backup** – a zipped, consistent snapshot is uploaded to the backup chat as `mastermind_backup.zip` (one pinned message, edited in place)
+  every few minutes when something changed, on shutdown/redeploy, before `/restart` / `/redeploy`, and on demand with `/backup`.
+* **Restore** – on a fresh container the pinned backup is downloaded and verified **before any module loads**.
+* **Safety** – if a restore fails (e.g. Telegram unreachable) automatic backups pause so a good backup is never overwritten by an empty database.
+  The startup log shows the database status line.
+* Never delete or unpin the backup message. One extra message is kept per deploy as history.
+
+## 📚 Re-indexing
+
+`/index` now saves every file it finds into the search database (previously files were only copied to storage). To rebuild
+after a data loss run `/index t.me/c/<storage id>/<first>-<last>` on the Storage group itself.
 
 ---
 

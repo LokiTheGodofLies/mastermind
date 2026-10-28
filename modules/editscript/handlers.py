@@ -1,6 +1,7 @@
 import os
 import sys
 import html
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import (
@@ -13,6 +14,7 @@ from modules.database.config_db import (
 from modules.database.user_db import get_user_role_db, reset_user_db
 from modules.database.file_db import reset_file_db
 from modules.utility.tg_compat import get_forward_chat
+from modules.database import persistence
 
 
 def _is_admin(user_id: int) -> bool:
@@ -346,7 +348,8 @@ async def _handle_cust_template_and_db_callbacks(q, d: str, uid: int, context: C
         ])
         await q.message.edit_text(f"📡 <b>Render Deployment Status & Live Logs</b>\n\n{details}", parse_mode="HTML", reply_markup=kb)
     elif d == "cust_do_redeploy":
-        await q.answer("🚀 Calling Render Deploy Hook...")
+        await q.answer("🚀 Saving backup & calling Render Deploy Hook...")
+        await asyncio.to_thread(persistence.backup_now, "before redeploy")
         ok, msg, dep_id = await trigger_render_redeploy()
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Refresh Deploy Logs & Status", callback_data=f"cust_refresh_dep_{dep_id}")],
@@ -355,7 +358,8 @@ async def _handle_cust_template_and_db_callbacks(q, d: str, uid: int, context: C
         await q.message.edit_text(msg, parse_mode="HTML", reply_markup=kb)
     elif d == "cust_do_hardrestart":
         await q.answer("♻️ Restarting bot process...", show_alert=True)
-        await q.message.edit_text("♻️ <b>Restarting bot process now...</b>", parse_mode="HTML")
+        await q.message.edit_text("♻️ <b>Saving backup & restarting bot process now...</b>", parse_mode="HTML")
+        await asyncio.to_thread(persistence.backup_now, "before restart")
         os.execv(sys.executable, [sys.executable] + sys.argv)
     elif d.startswith("cust_ask_rst_"):
         kind = d.replace("cust_ask_rst_", "")

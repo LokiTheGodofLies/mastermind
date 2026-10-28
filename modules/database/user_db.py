@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime
 from modules.database.config_db import get_config_int
 
-DB_FILE = "mastermind_users.db"
+DB_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mastermind_users.db"))
 OWNER_IDS = {7261537212}
 
 
