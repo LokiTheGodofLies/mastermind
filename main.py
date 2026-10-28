@@ -64,7 +64,6 @@ from modules.allowance.allowance import quota_command, gift_command, refer_comma
 from modules.search.handlers import search_command, searchebook_command, searchaudiobook_command, search_callback_handler  # noqa: E402
 from modules.request.handlers import request_command, request_callback_handler  # noqa: E402
 from modules.indexing.book_index import handle_book_indexing, index_command, indexing_callback_handler  # noqa: E402
-from modules.converter.handlers import convert_command, convert_callback_handler  # noqa: E402
 from modules.editscript.handlers import (  # noqa: E402
     customize_command, editscript_callback, reloadconfig_command, restart_command, redeploy_command,
     setconfig_command, getconfig_command, template_cli_command,
@@ -104,7 +103,6 @@ def register_handlers(app) -> None:
     app.add_handler(CommandHandler("searchebook", searchebook_command))
     app.add_handler(CommandHandler("searchaudiobook", searchaudiobook_command))
     app.add_handler(CommandHandler(["request", "req"], request_command))
-    app.add_handler(CommandHandler("convert", convert_command))
     app.add_handler(CommandHandler("settopic", settopic_command))
     app.add_handler(CommandHandler("quota", quota_command))
     app.add_handler(CommandHandler(["refer", "ref"], refer_command))
@@ -151,7 +149,6 @@ def register_handlers(app) -> None:
     app.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|dl_|search_page_|spg\||sendall\||search_cancel|noop)"))
     app.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     app.add_handler(CallbackQueryHandler(indexing_callback_handler, pattern=r"^idx_"))
-    app.add_handler(CallbackQueryHandler(convert_callback_handler, pattern=r"^cv\|"))
     app.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^(cust_|es_)"))
     app.add_handler(CallbackQueryHandler(broadcast_callback_handler, pattern=r"^bcast_"))
     app.add_handler(CallbackQueryHandler(support_callback_handler, pattern=r"^support_|^quiz_ans_"))

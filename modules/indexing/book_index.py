@@ -13,7 +13,6 @@ from modules.database.config_db import get_config, get_config_int
 from modules.database.user_db import get_user_role_db
 from modules.log.startup_log import send_log_with_fallback
 from modules.utility.tg_compat import get_forward_chat
-from modules.converter.handlers import handle_convert_upload
 
 logger = logging.getLogger(__name__)
 EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".djvu", ".cbz"}
@@ -360,9 +359,6 @@ def enqueue_file_for_indexing(file_id, file_unique_id, file_name, file_size, mim
 async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.channel_post or update.effective_message
     if not msg:
-        return
-    # A file sent right after /convert belongs to the converter, not to the library.
-    if await handle_convert_upload(update, context):
         return
     doc = msg.document or msg.audio
     if not doc:
