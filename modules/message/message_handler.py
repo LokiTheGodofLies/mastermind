@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 async def handle_normal_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    if not msg or not msg.text:
+    if not msg:
         return
 
     chat = update.effective_chat
     user = update.effective_user
     uid = user.id if user else 0
-    text = msg.text.strip()
+    text = (msg.text or "").strip()
 
     logger.info(f"[TEXT] Chat={chat.id} ({chat.type}) | User={uid} | Text='{text[:40]}' | IST={get_ist_str()}")
 
@@ -27,6 +27,10 @@ async def handle_normal_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if await handle_index_wizard_message(update, context):
         return
     if await handle_manual_request_message(update, context):
+        return
+
+    # Photos / videos / forwards only matter to the wizards above; nothing else to do with them.
+    if not text:
         return
 
     is_search_group = False

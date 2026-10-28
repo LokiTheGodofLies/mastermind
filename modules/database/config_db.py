@@ -157,6 +157,18 @@ def get_connection():
     return conn
 
 
+def _upsert_default_config(cursor, key, val, vtype, desc, now_str, env_key_fn):
+    """Insert a default config row, refreshing it from env/defaults ONLY if no admin has edited it."""
+    env_val = env_key_fn(key)
+    chosen = str(env_val if env_val is not None else val)
+    cursor.execute("""
+        INSERT INTO config (key, value, type, updated_by, updated_at, description)
+        VALUES (?, ?, ?, 0, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value = CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
+    """, (key, chosen, vtype, now_str, desc))
+
+
 def init_config_db():
     conn = get_connection()
     cursor = conn.cursor()
@@ -210,18 +222,8 @@ def init_config_db():
     """)
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for k, (val, vtype, desc) in DEFAULT_CONFIGS.items():
-        env_val = _get_env_val(k)
-        chosen = str(env_val if env_val is not None else val)
-        cursor.execute("""
-            INSERT INTO config (key, value, type, updated_by, updated_at, description)
-            VALUES (?, ?, ?, 0, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = CASE
-                    WHEN ? != '' THEN excluded.value
-                    ELSE CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
-                END
-        """, (k, chosen, vtype, now_str, desc, chosen))
+    for k, (val, vtype, desc) in list(DEFAULT_CONFIGS.items()):
+        _upsert_default_config(cursor, k, val, vtype, desc, now_str, _get_env_val)
     for tname, tdata in DEFAULT_TEMPLATES.items():
         cursor.execute(
             "INSERT OR IGNORE INTO templates (name, module, title, description, text, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -250,12 +252,16 @@ def get_config(key, default=None, fallback_env=None):
     row = cursor.fetchone()
     conn.close()
 
+    # 1) value edited by an admin from Telegram (/setconfig, /customize, /settopic) wins
+    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
+        return row["value"]
+
+    # 2) environment variable / env.txt
     env_val = _get_env_val(key, fallback_env)
     if env_val is not None:
         return env_val
 
-    if row is not None and row["updated_by"] != 0 and row["value"] not in (None, ""):
-        return row["value"]
+    # 3) stored default
     if row is not None and row["value"] not in (None, ""):
         return row["value"]
     if key in DEFAULT_CONFIGS:
@@ -491,7 +497,7 @@ EXTENDED_DEFAULT_CONFIGS = {
     "index_channel_id": ("-1004343321416", "channel", "Dedicated Index Updates Channel ID"),
     "request_log_topic_id": ("30", "int", "Request logs topic ID in Log Group"),
     "error_log_topic_id": ("33", "int", "Errors topic ID in Log Group"),
-        "render_service_id": ("srv-dbgi9nflk1mc73c0abmg", "text", "Render Service ID for deploy status and logs"),
+    "render_service_id": ("srv-dbgi9nflk1mc73c0abmg", "text", "Render Service ID for deploy status and logs"),
     "render_api_key": ("rnd_JMBmX1xXjsOEdDecUnu5mNzo9YWT", "text", "Render API Key for live build status and logs"),
     "render_deploy_hook_url": ("https://api.render.com/deploy/srv-dbgi9nflk1mc73c0abmg?key=LU6MutY5FC4", "text", "Render Deploy Hook URL for 1-click redeploy"),
     "helper_bot_tokens": ("", "text", "Comma-separated list of Helper Bot tokens"),
@@ -526,17 +532,7 @@ def init_group_topics_table():
     """)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, (val, vtype, desc) in EXTENDED_DEFAULT_CONFIGS.items():
-        env_val = _get_extended_env_val(k)
-        chosen = str(env_val if env_val is not None else val)
-        c.execute("""
-            INSERT INTO config (key, value, type, updated_by, updated_at, description)
-            VALUES (?, ?, ?, 0, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = CASE
-                    WHEN ? != '' THEN excluded.value
-                    ELSE CASE WHEN config.updated_by = 0 THEN excluded.value ELSE config.value END
-                END
-        """, (k, chosen, vtype, now_str, desc, chosen))
+        _upsert_default_config(c, k, val, vtype, desc, now_str, _get_extended_env_val)
     conn.commit()
     conn.close()
 

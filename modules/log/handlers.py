@@ -1,4 +1,5 @@
 import os
+import tempfile
 from telegram import Update
 from telegram.ext import ContextTypes, ApplicationHandlerStop
 from modules.database.user_db import get_user_role_db
@@ -177,7 +178,7 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     count = min(1000, int(args[0])) if (args and args[0].isdigit()) else 20
     log_content = get_logs_by_count(count)
-    temp_path = f"/tmp/logs_{count}.txt"
+    temp_path = os.path.join(tempfile.gettempdir(), f"logs_{count}.txt")
     with open(temp_path, "w") as tf:
         tf.write(log_content)
     with open(temp_path, "rb") as tf:
