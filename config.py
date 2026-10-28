@@ -50,3 +50,21 @@ def env_int_list(key):  #linew read a comma separated list of numbers (admin IDs
         except ValueError:
             pass  #linew ignore anything that is not a number
     return out
+
+
+# Auto-add local standalone binary directories to PATH
+for _p in [
+    os.path.join(BASE_DIR, "bin"),
+    os.path.join(BASE_DIR, "calibre-bin"),
+    os.path.join(BASE_DIR, "calibre-bin", "calibre"),
+    os.path.expanduser("~/calibre-bin"),
+    os.path.expanduser("~/calibre-bin/calibre"),
+    os.path.expanduser("~/.local/bin"),
+    "/opt/render/project/src/bin",
+    "/opt/render/project/src/calibre-bin",
+    "/opt/render/project/src/calibre-bin/calibre",
+]:
+    if os.path.exists(_p) and _p not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{_p}:{os.environ.get('PATH', '')}"
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
