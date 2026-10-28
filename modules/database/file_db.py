@@ -231,3 +231,52 @@ def reset_file_db():
 
 
 _init_queue_tables()
+
+def build_file_start_param(row: dict, storage_id: str = "-1003511375054") -> str:
+    st_cid = str(storage_id or "-1003511375054").strip()
+    fid = (row.get("file_id") or "").strip()
+    fuid = (row.get("file_unique_id") or "").strip()
+    if fid and fuid:
+        token = f"{fid[:16]}_{fuid}"
+    elif fuid:
+        token = fuid
+    else:
+        token = str(row.get("id", 0))
+    return f"file_{st_cid}_{token}"[:64]
+
+def get_file_by_start_payload_db(payload: str):
+    if not payload:
+        return None
+    if payload.startswith("dl_"):
+        try:
+            return get_file_by_id_db(int(payload.replace("dl_", "")))
+        except ValueError:
+            return None
+    if payload.startswith("file_"):
+        parts = payload.split("_", 2)
+        if len(parts) < 3:
+            return None
+        token = parts[2]
+        conn = get_connection()
+        try:
+            if "_" in token:
+                prefix, fuid = token.split("_", 1)
+                row = conn.execute("SELECT * FROM indexed_files WHERE file_unique_id = ?", (fuid,)).fetchone()
+                if row:
+                    return dict(row)
+                row = conn.execute("SELECT * FROM indexed_files WHERE file_id LIKE ?", (f"{prefix}%",)).fetchone()
+                if row:
+                    return dict(row)
+            row = conn.execute(
+                "SELECT * FROM indexed_files WHERE file_unique_id = ? OR file_id LIKE ?",
+                (token, f"{token}%"),
+            ).fetchone()
+            if row:
+                return dict(row)
+            if token.isdigit():
+                row = conn.execute("SELECT * FROM indexed_files WHERE id = ?", (int(token),)).fetchone()
+                if row:
+                    return dict(row)
+        finally:
+            conn.close()
+    return None
