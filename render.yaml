@@ -1,17 +1,13 @@
-# Default (no Calibre -> /convert answers "unavailable"). For the converter switch the service
-# to `env: docker` (uses ./Dockerfile) and remove buildCommand/startCommand.
 services:
   - type: web
     name: mastermind-bot
-    env: python
+    env: docker
     region: oregon
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     autoDeploy: true
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: ADMIN_IDS
