@@ -366,7 +366,7 @@ COMMAND_DETAILS = {
             "• <code>/removeadmin &lt;user_id|@username&gt;</code>\n"
             "• Or reply to a user's message with <code>/addadmin</code> or <code>/removeadmin</code>.\n\n"
             "📋 <b>Example:</b>\n"
-            "<code>/addadmin 8853305382</code>\n\n"
+            "<code>/addadmin 123456789</code>\n\n"
             "🔒 <b>Access:</b> GOD Only"
         ),
     },

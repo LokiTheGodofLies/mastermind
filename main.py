@@ -33,6 +33,7 @@ load_env()
 from modules.database import persistence  # noqa: E402
 persistence.restore_if_fresh()
 
+from telegram import Update  # noqa: E402
 from telegram.error import Conflict  # noqa: E402
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder,
@@ -40,6 +41,7 @@ from telegram.ext import (  # noqa: E402
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ContextTypes,
     filters,
 )
 
