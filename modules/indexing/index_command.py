@@ -1,5 +1,3 @@
-from configs import max_index_batch, index_sleep_seconds, log_topic
-import os
 import re
 import html
 import uuid
@@ -10,19 +8,29 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, TelegramError, RetryAfter
 from telegram.ext import ContextTypes
 
-from modules.database.user_db import get_user_role_db, ADMIN_IDS
+from config import (
+    admin_ids,
+    anon_admin_id,
+    index_sleep_seconds,
+    log_topic,
+    logger_group_id,
+    max_index_batch,
+    storage_group_id,
+)
+from modules.database.user_db import get_user_role_db
 from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db
 from modules.indexing.book_index import (
-    SUPPORTED_EBOOK_EXTENSIONS,
+    _format_duration,
+    extract_media_info,
     fetch_goodreads_metadata,
     format_index_channel_caption,
+    send_media_to_storage,
 )
 
 logger = logging.getLogger(__name__)
 
 FULL_ACCESS = {"Owner", "Admin"}
 APPROVAL_ACCESS = {"Moderator", "Volunteer"}
-ANON_ADMIN_ID = 1087968824  # Telegram's "GroupAnonymousBot"
 
 PRIVATE_LINK_RE = re.compile(r"t\.me/c/(\d+)/(?:\d+/)?(\d+)")
 PUBLIC_LINK_RE = re.compile(r"t\.me/([A-Za-z][A-Za-z0-9_]{3,})/(?:\d+/)?(\d+)")
@@ -112,7 +120,7 @@ def _status_text(job, stats, state):
         f"│├─»◇ DUPLICATE FILES: {stats['dup']}\n││\n"
         f"│├─»◇ DELETED MESSAGES: {stats['deleted']}\n││\n"
         f"│├─»◇ SKIPPED (ERRORS): {stats['skipped']}\n││\n"
-        f"│├─»◇ FILTERED (NOT EBOOKS): {stats['filtered']}\n││\n"
+        f"│├─»◇ FILTERED (UNSUPPORTED): {stats['filtered']}\n││\n"
         f"│├─»◇ CURRENT STATUS: {html.escape(state)}\n││\n"
         f"│├─»◇ PERCENTAGE: {pct} %\n"
         "│╰─────────────────────────➤\n"
@@ -148,7 +156,7 @@ async def _safe_delete(msg):
 
 async def _run_index(context, rid, job):
     bot = context.bot
-    storage = os.getenv("STORAGE_GROUP_ID")
+    storage = storage_group_id()
     batch = max_index_batch()
     sleep_s = index_sleep_seconds()
 
@@ -172,48 +180,54 @@ async def _run_index(context, rid, job):
                 if fwd is None:
                     stats["skipped"] += 1
                 else:
-                    doc = fwd.document
-                    ext = os.path.splitext((doc.file_name or "").lower())[1] if doc else ""
-                    if not doc or ext not in SUPPORTED_EBOOK_EXTENSIONS:
+                    info = extract_media_info(fwd)
+                    if not info or not info["is_supported"]:
                         stats["filtered"] += 1
                         await _safe_delete(fwd)
-                    elif get_file_by_unique_id_db(doc.file_unique_id):
+                    elif get_file_by_unique_id_db(info["file_unique_id"]):
                         stats["dup"] += 1
                         await _safe_delete(fwd)
                     else:
-                        meta = await fetch_goodreads_metadata(doc.file_name)
-                        size = doc.file_size or 0
+                        meta = await fetch_goodreads_metadata(info["file_name"])
+                        for k, v in (info.get("caption_meta") or {}).items():
+                            if v and k in ("book_title", "book_author", "narrator", "length", "book_published", "publisher"):
+                                meta[k] = v
+                        if info["category"] == "audiobook" and (not meta.get("length") or meta.get("length") == "N/A") and info["duration"] > 0:
+                            meta["length"] = _format_duration(info["duration"])
+
+                        size = info["file_size"]
                         size_mb = size / (1024 * 1024)
                         size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{size / 1024:.2f} KB"
                         caption = format_index_channel_caption(
-                            file_name=doc.file_name,
+                            file_name=info["file_name"],
                             file_size_str=size_str,
-                            extension=ext.lstrip("."),
-                            file_type=doc.mime_type or "document",
+                            extension=info["extension"].lstrip("."),
+                            file_type=info["mime_type"],
                             book_meta=meta,
+                            category=info["category"],
                         )
-                        sent = await bot.send_document(
-                            chat_id=int(storage), document=doc.file_id,
-                            caption=caption, parse_mode="HTML",
-                        )
+                        sent = await send_media_to_storage(bot, int(storage), info, caption)
                         await _safe_delete(fwd)
                         save_indexed_file_db(
-                            file_unique_id=doc.file_unique_id,
-                            file_id=doc.file_id,
+                            file_unique_id=info["file_unique_id"],
+                            file_id=info["file_id"],
                             storage_message_id=sent.message_id,
-                            file_name=doc.file_name,
+                            file_name=info["file_name"],
                             file_size=size,
-                            duration=0,
+                            duration=info["duration"],
                             user_id=job["requester_id"],
                             user_title=job["requester_name"],
-                            caption=f"{fwd.caption or ''} {meta.get('book_title', '')} {meta.get('book_author', '')}".strip(),
-                            extension=ext,
-                            file_type=doc.mime_type or "document",
-                            category="book",
+                            caption=(
+                                f"{fwd.caption or ''} {meta.get('book_title', '')} "
+                                f"{meta.get('book_author', '')} {meta.get('narrator', '')}"
+                            ).strip(),
+                            extension=info["extension"],
+                            file_type=info["mime_type"],
+                            category=info["category"],
                         )
                         stats["ok"] += 1
             except BadRequest:
-                stats["deleted"] += 1  # message missing, empty, or not forwardable
+                stats["deleted"] += 1
             except Exception as e:
                 logger.warning(f"[INDEX] message {mid} failed: {e}")
                 stats["skipped"] += 1
@@ -235,7 +249,7 @@ async def _run_index(context, rid, job):
 
 
 async def _log_summary(context, job, stats, final_state):
-    logger_id = os.getenv("LOGGER_GROUP_ID")
+    logger_id = logger_group_id()
     if not logger_id:
         return
     text = (
@@ -267,7 +281,7 @@ async def _send_approval(context, rid, job):
         InlineKeyboardButton("❌ Reject", callback_data=f"idx_rej_{rid}"),
     ]])
 
-    logger_id = os.getenv("LOGGER_GROUP_ID")
+    logger_id = logger_group_id()
     if logger_id:
         kwargs = {"chat_id": int(logger_id), "text": text, "parse_mode": "HTML", "reply_markup": markup}
         topic = log_topic("INDEX")
@@ -280,10 +294,10 @@ async def _send_approval(context, rid, job):
         except TelegramError as e:
             logger.warning(f"[INDEX] approval to logger group failed: {e}")
 
-    for admin_id in ADMIN_IDS:
+    for aid in sorted(admin_ids()):
         try:
             m = await context.bot.send_message(
-                chat_id=admin_id, text=text, parse_mode="HTML", reply_markup=markup
+                chat_id=aid, text=text, parse_mode="HTML", reply_markup=markup
             )
             job["approval_chat"], job["approval_msg_id"] = m.chat_id, m.message_id
             return True
@@ -350,7 +364,7 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg or not chat:
         return
 
-    if user and user.id != ANON_ADMIN_ID:
+    if user and user.id != anon_admin_id():
         if get_user_role_db(user.id) not in (FULL_ACCESS | APPROVAL_ACCESS):
             await msg.reply_text("⛔ You don't have access to the Index command.")
             return
@@ -365,7 +379,6 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if rng:
         await _open_prompt(context, chat.id, user, rng[0], rng[1], rng[2], skip)
     elif chat.type != "private":
-        # /index or /index <skip> inside a group/channel: index everything before this command
         await _open_prompt(context, chat.id, user, chat.id, 1, msg.message_id - 1, skip)
     else:
         context.user_data["idx_flow"] = {"step": "link", "skip": skip}

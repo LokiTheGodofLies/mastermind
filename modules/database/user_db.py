@@ -1,20 +1,34 @@
 from datetime import datetime
 import sqlite3
-from configs import (
+from config import (
+    admin_ids,
+    owner_id,
+    users_db_path,
     default_search_quota,
     default_request_quota,
     promoter_quota,
     volunteer_quota,
     moderator_quota,
+    unlimited_quota_value,
 )
 
-DB_FILE = "mastermind_users.db"
-ADMIN_IDS = {7261537212}
+
+def _db_file():
+    return users_db_path()
+
+
+def _initial_role(user_id: int) -> str:
+    if int(user_id) == int(owner_id()):
+        return "Owner"
+    if int(user_id) in admin_ids():
+        return "Admin"
+    return "Normal User"
 
 
 def _role_default_limits(role: str):
     if role in ("Owner", "Admin"):
-        return 999999, 999999
+        u = unlimited_quota_value()
+        return u, u
     if role == "Moderator":
         q = moderator_quota()
         return q, q
@@ -29,7 +43,7 @@ def _role_default_limits(role: str):
 
 def init_user_db():
     """Initializes the SQLite database tables for users, quotas, referrals, and bans."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -80,19 +94,19 @@ def init_user_db():
 def ensure_user_quota_db(user_id, username="", full_name=""):
     """Ensures a user and their quota record exist in the database."""
     today_str = datetime.now().strftime("%Y-%m-%d")
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
 
     cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if not row:
-        role = "Owner" if user_id in ADMIN_IDS else "Normal User"
+        role = _initial_role(user_id)
         cursor.execute("""
             INSERT OR IGNORE INTO users (user_id, username, full_name, role, ban_status)
             VALUES (?, ?, ?, ?, 'none')
         """, (user_id, username or "", full_name or "", role))
     else:
-        role = row[0] or ("Owner" if user_id in ADMIN_IDS else "Normal User")
+        role = row[0] or _initial_role(user_id)
 
     cursor.execute("SELECT user_id FROM quotas WHERE user_id = ?", (user_id,))
     if not cursor.fetchone():
@@ -108,14 +122,14 @@ def ensure_user_quota_db(user_id, username="", full_name=""):
 
 def add_or_update_user_db(user_id, username, full_name, today_str):
     """Inserts a new user or updates their username/full name."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
 
     cursor.execute("SELECT user_id, role FROM users WHERE user_id = ?", (user_id,))
     existing = cursor.fetchone()
 
     if not existing:
-        role = "Owner" if user_id in ADMIN_IDS else "Normal User"
+        role = _initial_role(user_id)
         s_limit, r_limit = _role_default_limits(role)
 
         cursor.execute("""
@@ -131,7 +145,7 @@ def add_or_update_user_db(user_id, username, full_name, today_str):
         cursor.execute("""
             UPDATE users SET username = ?, full_name = ? WHERE user_id = ?
         """, (username, full_name, user_id))
-        role = existing[1] or ("Owner" if user_id in ADMIN_IDS else "Normal User")
+        role = existing[1] or _initial_role(user_id)
         s_limit, r_limit = _role_default_limits(role)
         cursor.execute("""
             INSERT OR IGNORE INTO quotas (user_id, searches_used, searches_limit, requests_used, requests_limit, last_reset_date)
@@ -143,23 +157,47 @@ def add_or_update_user_db(user_id, username, full_name, today_str):
 
 
 def get_user_role_db(user_id):
-    """Retrieves a user's role from the database."""
-    if user_id in ADMIN_IDS:
+    """Retrieves a user's role from config or the database."""
+    if int(user_id) == int(owner_id()):
         return "Owner"
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
     conn.close()
+    if result and result[0] and result[0] != "Normal User":
+        return result[0]
+    if int(user_id) in admin_ids():
+        return "Admin"
     if result and result[0]:
         return result[0]
     return "Normal User"
 
 
+def is_admin_or_owner(user_id: int) -> bool:
+    """Returns True if the user has Admin or Owner role."""
+    return get_user_role_db(user_id) in ("Admin", "Owner")
+
+
+def set_user_role_db(user_id: int, role: str):
+    """Sets a user's role in the database and updates their default quota limits."""
+    ensure_user_quota_db(user_id)
+    s_limit, r_limit = _role_default_limits(role)
+    conn = sqlite3.connect(_db_file())
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET role = ? WHERE user_id = ?", (role, int(user_id)))
+    cursor.execute(
+        "UPDATE quotas SET searches_limit = ?, requests_limit = ? WHERE user_id = ?",
+        (s_limit, r_limit, int(user_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_quota_record_db(user_id):
     """Retrieves raw quota tracking records for a user."""
     ensure_user_quota_db(user_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("""
         SELECT searches_used, searches_limit, requests_used, requests_limit, last_reset_date 
@@ -173,7 +211,7 @@ def get_quota_record_db(user_id):
 def update_quota_counts_db(user_id, searches_used, requests_used, reset_date):
     """Updates used counts and reset timestamp."""
     ensure_user_quota_db(user_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE quotas 
@@ -187,7 +225,7 @@ def update_quota_counts_db(user_id, searches_used, requests_used, reset_date):
 def increment_search_used_db(user_id):
     """Increments successful search usage by 1."""
     ensure_user_quota_db(user_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("UPDATE quotas SET searches_used = searches_used + 1 WHERE user_id = ?", (user_id,))
     conn.commit()
@@ -197,7 +235,7 @@ def increment_search_used_db(user_id):
 def increment_request_used_db(user_id):
     """Increments successful request usage by 1."""
     ensure_user_quota_db(user_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("UPDATE quotas SET requests_used = requests_used + 1 WHERE user_id = ?", (user_id,))
     conn.commit()
@@ -207,7 +245,7 @@ def increment_request_used_db(user_id):
 def add_quota_limits_db(target_user_id, search_bonus=0, request_bonus=0):
     """Increases a user's ceiling limits used for gift/referral bonuses."""
     ensure_user_quota_db(target_user_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE quotas 
@@ -222,7 +260,7 @@ def record_referral_db(referrer_id, referred_id):
     """Records a referral relationship. Returns True if successful, False if already referred."""
     ensure_user_quota_db(referrer_id)
     ensure_user_quota_db(referred_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
 
     cursor.execute("SELECT referred_id FROM referrals WHERE referred_id = ?", (referred_id,))
@@ -242,7 +280,7 @@ def record_referral_db(referrer_id, referred_id):
 
 def get_referred_users_db(referrer_id):
     """Retrieves a list of users referred by a specific user."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("""
         SELECT u.user_id, u.full_name, u.username, r.timestamp 

@@ -1,7 +1,8 @@
-from configs import bot_name
+from config import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
+from modules.database.user_db import is_admin_or_owner, get_user_role_db
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -10,9 +11,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message or not user:
         return
 
-    user_id = user.id
-    admin_ids = [7261537212]
-    is_admin = user_id in admin_ids
+    role = get_user_role_db(user.id)
+    is_admin = is_admin_or_owner(user.id)
 
     default_header = f"📊 <b>{bot_name()} Bot Statistics</b>"
     header_text = get_config("stats_header_script", default=default_header)
@@ -22,8 +22,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{header_text}\n\n"
             "👑 <b>Admin System Metrics:</b>\n"
             "• Bot Status: 🟢 Online (Configuration DB Active)\n"
-            "• Active Database: configuration.db\n"
-            "• Access Level: Administrator"
+            "• Active Database: config.db / files.db / mastermind_users.db\n"
+            f"• Access Level: {role}"
         )
     else:
         stats_text = (

@@ -1,4 +1,3 @@
-import os
 import html
 import sqlite3
 import time
@@ -10,18 +9,23 @@ from zoneinfo import ZoneInfo
 
 from telegram import Bot
 from telegram.error import TelegramError, Conflict
+from config import (
+    admin_ids,
+    helper_bot_tokens,
+    general_topic_id,
+    config_db_path,
+    files_db_path,
+    users_db_path,
+)
 from modules.database.config_db import get_config
 
 logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# Set by the Telegram backup/restore module (when present) at boot, e.g.
-#   startup_log.DB_STATUS = "restored from Telegram backup"
 DB_STATUS = "initialized (no backup restored)"
 DB_STATUS_OK = True
 
-# (label, config key / env var holding the chat id, default)
 CHAT_SLOTS = [
     ("Storage", "STORAGE_GROUP_ID", "Storage group"),
     ("Posting", "POSTING_CHANNEL_ID", "Posting channel"),
@@ -31,9 +35,8 @@ CHAT_SLOTS = [
     ("Support", "SUPPORT_CHAT_ID", "Support chat"),
 ]
 
-# (short label, env var)
 TOPIC_SLOTS = [
-    ("Gen", None),  # General topic is always 1
+    ("Gen", None),
     ("Usr", "USER_LOG_TOPIC_ID"),
     ("Idx", "INDEX_LOG_TOPIC_ID"),
     ("Grp", "GROUP_LOG_TOPIC_ID"),
@@ -47,7 +50,6 @@ def _esc(text):
     return html.escape(str(text or ""), quote=False)
 
 
-GENERAL_TOPIC = "1"
 _last_sent = {}
 
 
@@ -67,9 +69,9 @@ def _count(db_path, query):
 
 def _db_counts():
     return (
-        _count("database/files.db", "SELECT COUNT(*) FROM indexed_files"),
-        _count("mastermind_users.db", "SELECT COUNT(*) FROM users"),
-        _count("database/config.db", "SELECT COUNT(*) FROM config"),
+        _count(files_db_path(), "SELECT COUNT(*) FROM indexed_files"),
+        _count(users_db_path(), "SELECT COUNT(*) FROM users"),
+        _count(config_db_path(), "SELECT COUNT(*) FROM config"),
     )
 
 
@@ -79,8 +81,7 @@ def _bot_line(bot_info):
 
 
 async def _helper_bots():
-    raw = os.getenv("HELPER_BOT_TOKENS", "")
-    return [t.strip() for t in raw.split(",") if t.strip()]
+    return helper_bot_tokens()
 
 
 async def _helper_lines(problems):
@@ -137,6 +138,7 @@ async def _chat_line(bot, me_id, label, chat_id_raw, default_name, problems):
 async def build_startup_text(application, problems):
     bot = application.bot
     me = await bot.get_me()
+    gen_topic = str(general_topic_id())
 
     parts = ["🔄 <b>Bot Restarted Successfully</b>", ""]
     parts.append(f"🤖 <b>Main Bot:</b> {_bot_line(me)}")
@@ -152,7 +154,7 @@ async def build_startup_text(application, problems):
     parts += ["", "📡 <b>Groups &amp; Channels:</b>", *chat_lines]
 
     topics = " | ".join(
-        f"{label}:{(_cfg(env) if env else GENERAL_TOPIC) or '—'}" for label, env in TOPIC_SLOTS
+        f"{label}:{(_cfg(env) if env else gen_topic) or '—'}" for label, env in TOPIC_SLOTS
     )
     parts += ["", f"🧵 <b>Topics:</b> {topics}"]
 
@@ -174,28 +176,20 @@ async def build_startup_text(application, problems):
     return "\n".join(parts)
 
 
-def _admin_ids():
-    ids = []
-    for part in os.getenv("ADMIN_IDS", "").split(","):
-        part = part.strip()
-        if part.lstrip("-").isdigit():
-            ids.append(int(part))
-    return ids
-
-
 async def _send_chain(bots, text, topic):
     """Try to deliver `text`, falling back step by step:
     log group topic -> log group General topic -> log group (no topic) -> owner PM.
     Each bot in `bots` is tried in order (main first, then helpers)."""
     group = _cfg("LOGGER_GROUP_ID") or _cfg("STORAGE_GROUP_ID")
+    gen_topic = str(general_topic_id())
     targets = []
     if group:
         g = int(group)
-        for t in (topic, GENERAL_TOPIC, None):
+        for t in (topic, gen_topic, None):
             t = int(t) if t else None
             if (g, t) not in targets:
                 targets.append((g, t))
-    targets += [(uid, None) for uid in _admin_ids()]
+    targets += [(uid, None) for uid in sorted(admin_ids())]
 
     for bot in bots:
         for chat_id, thread in targets:
@@ -211,8 +205,7 @@ async def _send_chain(bots, text, topic):
 
 
 async def _bots_for(application):
-    bots = [application.bot] if application is not None else []
-    return bots
+    return [application.bot] if application is not None else []
 
 
 async def report_error(application, text, title="Error"):
@@ -220,7 +213,7 @@ async def report_error(application, text, title="Error"):
     If the main bot cannot deliver, helper bots try."""
     key = (title, text[:200])
     now = time.time()
-    if now - _last_sent.get(key, 0) < 60:   # drop identical repeats within a minute
+    if now - _last_sent.get(key, 0) < 60:
         return
     _last_sent[key] = now
 
@@ -278,7 +271,7 @@ async def send_startup_notification(application):
     problems = []
     try:
         text = await build_startup_text(application, problems)
-        if not await _send_chain([application.bot], text, GENERAL_TOPIC):
+        if not await _send_chain([application.bot], text, str(general_topic_id())):
             print("❌ [STARTUP] Could not deliver startup log anywhere.")
             return
         print("✅ [STARTUP] Restart notification sent successfully!")

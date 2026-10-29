@@ -1,9 +1,8 @@
-from configs import bot_name
+from config import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
-
-ADMIN_IDS = [7261537212]
+from modules.database.user_db import is_admin_or_owner
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12,8 +11,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message or not user:
         return
 
-    user_id = user.id
-    is_admin = user_id in ADMIN_IDS
+    is_admin = is_admin_or_owner(user.id)
 
     default_help = (
         f"📖 <b>{bot_name()} Bot - Help & User Guide</b>\n\n"
@@ -29,9 +27,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  - <code>/stats</code>: View bot uptime and public operation metrics.\n"
         "  - <code>/help</code>: Display this documentation guide.\n\n"
         "👑 <b>Administrators & Owner:</b>\n"
-        "  - <code>/editscript</code>: Open the dynamic configuration hub (stored in <code>configuration.db</code>) to manage text templates, media URLs, and system variables live without restarts.\n"
-        "  - <code>/index</code>: Batch index books from a source channel/group.\n"
+        "  - <code>/editscript</code>: Open the dynamic configuration hub (stored in <code>config.db</code>) to manage text templates, media URLs, and system variables live without restarts.\n"
+        "  - <code>/index</code>: Batch index ebooks & audiobooks from a source channel/group.\n"
         "  - <code>/ban</code>, <code>/ban_pm</code>, <code>/ban_support</code>, <code>/unban</code>: Manage user and chat restrictions.\n"
+        "  - <code>/addadmin</code>, <code>/removeadmin</code>: Promote or demote administrators (Owner only).\n"
         "  - <code>/gift</code>: Grant bonus search/request allowances to a user.\n"
         "  - <code>/log</code>: Export recent in-memory system logs.\n"
         "  - <b>Admin Metrics:</b> Advanced server status and configuration tracking via <code>/stats</code>."

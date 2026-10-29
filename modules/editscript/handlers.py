@@ -1,15 +1,14 @@
-from configs import bot_name
-import os
-import json
+from config import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from modules.database.config_db import get_config, set_config, get_all_configs
+from modules.database.config_db import get_config, get_all_configs
+from modules.database.user_db import is_admin_or_owner
 
-ADMIN_IDS = [7261537212]
 
 async def editscript_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    if not message or message.from_user.id not in ADMIN_IDS:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user or not is_admin_or_owner(user.id):
         if message:
             await message.reply_text("⛔ Unauthorized.")
         return
@@ -27,9 +26,12 @@ async def editscript_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="HTML"
     )
 
+
 async def editscript_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query or query.from_user.id not in ADMIN_IDS:
+    if not query or not is_admin_or_owner(query.from_user.id):
+        if query:
+            await query.answer("⛔ Unauthorized.", show_alert=True)
         return
     await query.answer()
     data = query.data

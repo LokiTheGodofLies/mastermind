@@ -1,4 +1,4 @@
-from configs import bot_name, referral_bonus_label
+from config import bot_name, owner_id, referral_bonus_label
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -28,6 +28,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if args and (args[0].startswith("req_pick_") or args[0] == "req_manual"):
         from modules.request.handlers import request_deeplink_handler
         await request_deeplink_handler(update, context)
+        return
+
+    if args and args[0].startswith("dl_"):
+        from modules.search.delivery import handle_deeplink_file_delivery
+        await handle_deeplink_file_delivery(update, context, args[0])
         return
 
     referral_notice = ""
@@ -80,8 +85,9 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         await help_command(update, context)
     elif data == "bot_owner":
         await query.answer()
+        oid = owner_id()
         await query.message.edit_text(
-            "👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>7261537212</code>\n• For support or inquiries, contact the administrator.",
+            f"👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>{oid}</code>\n• For support or inquiries, contact the administrator.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]),
         )

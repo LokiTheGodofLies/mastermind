@@ -1,12 +1,18 @@
-import sqlite3
 import os
+import sqlite3
+from config import files_db_path
 
-DB_PATH = "database/files.db"
+
+def _db_path():
+    return files_db_path()
 
 
 def get_connection():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
+    path = _db_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -67,6 +73,20 @@ def get_file_by_id_db(row_id: int):
         return None
 
 
+def update_storage_message_id_db(row_id: int, storage_message_id: int):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE indexed_files SET storage_message_id = ? WHERE id = ?",
+            (int(storage_message_id), int(row_id)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"❌ [DB ERROR] update_storage_message_id_db failed: {e}")
+
+
 def search_files_db(search_term: str, limit: int = 200):
     """Searches indexed_files in SQL using tokenized LIKE queries instead of scanning in Python."""
     cleaned = (search_term or "").strip()
@@ -84,7 +104,7 @@ def search_files_db(search_term: str, limit: int = 200):
         params.extend([pattern, pattern])
 
     sql = (
-        f"SELECT id, file_name, caption, extension "
+        f"SELECT id, file_name, caption, extension, category "
         f"FROM indexed_files "
         f"WHERE {' AND '.join(where_clauses)} "
         f"ORDER BY id DESC LIMIT ?"

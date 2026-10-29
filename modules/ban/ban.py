@@ -1,5 +1,5 @@
 import sqlite3
-from configs import support_chat_id
+from config import support_chat_id, users_db_path
 from modules.database.config_db import get_config
 
 
@@ -17,7 +17,7 @@ def get_support_chat_id():
 
 def set_ban_db(target_id: int, ban_type: str, reason: str):
     """Sets a ban record for a user or chat ID in the database."""
-    conn = sqlite3.connect("mastermind_users.db")
+    conn = sqlite3.connect(users_db_path())
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bans (
@@ -40,7 +40,7 @@ def set_ban_db(target_id: int, ban_type: str, reason: str):
 
 def remove_ban_db(target_id: int):
     """Removes a single ban record without dropping the bans table."""
-    conn = sqlite3.connect("mastermind_users.db")
+    conn = sqlite3.connect(users_db_path())
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bans (
@@ -61,7 +61,7 @@ def remove_ban_db(target_id: int):
 def get_ban_status(target_id: int):
     """Retrieves ban status for any user or chat ID."""
     try:
-        conn = sqlite3.connect("mastermind_users.db")
+        conn = sqlite3.connect(users_db_path())
         cursor = conn.cursor()
         cursor.execute("SELECT ban_type, reason FROM bans WHERE target_id = ?", (int(target_id),))
         row = cursor.fetchone()
@@ -75,11 +75,10 @@ def get_ban_status(target_id: int):
 
 def check_access(user_id: int, chat_id: int, chat_type: str):
     """
-    Evaluates access based on your specific rules:
+    Evaluates access based on ban rules:
     - /ban (type 'all'): Cannot access anywhere.
     - /ban_pm (type 'pm'): Cannot use in PM, but can use in groups & support chat.
     - /ban_support (type 'support'): Can ONLY use in support chat, blocked everywhere else.
-    - Banned groups/channels are handled directly upon bot addition or message events.
     """
     support_id = get_support_chat_id()
 

@@ -1,11 +1,11 @@
-from configs import items_per_page, search_group_id
 import html
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from config import items_per_page, search_group_id, supported_audiobook_extensions
 from modules.database.config_db import get_config
-from modules.database.file_db import search_files_db, get_file_by_id_db
+from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
+from modules.search.delivery import deliver_file_dual
 
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
@@ -25,13 +25,17 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
         return
 
     rows = search_files_db(search_term)
+    audio_exts = supported_audiobook_extensions()
     results = []
     for row in rows:
         row_id = row["id"]
         label = row["file_name"] or f"File #{row_id}"
+        ext = (row["extension"] or "").lower()
+        cat = (row["category"] if "category" in row.keys() else "") or ""
+        icon = "🎧" if (cat == "audiobook" or ext in audio_exts) else "📁"
         if len(label) > 40:
             label = label[:37] + "..."
-        results.append((row_id, label))
+        results.append((row_id, icon, label))
 
     total = len(results)
     if total > 0 and page == 1 and user and not update.callback_query:
@@ -43,8 +47,8 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
         per_page = items_per_page()
         tp = (total + per_page - 1) // per_page
         page = max(1, min(page, tp))
-        for row_id, lbl in results[(page - 1) * per_page : page * per_page]:
-            keyboard.append([InlineKeyboardButton(f"📁 {lbl}", callback_data=f"file_dl_{row_id}")])
+        for row_id, icon, lbl in results[(page - 1) * per_page : page * per_page]:
+            keyboard.append([InlineKeyboardButton(f"{icon} {lbl}", callback_data=f"file_dl_{row_id}")])
         nav = []
         if page > 1:
             nav.append(InlineKeyboardButton("« Prev", callback_data=f"search_page_{search_term}_{page-1}"))
@@ -142,45 +146,11 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await perform_search(update, context, parts[0], int(parts[1]))
     elif d.startswith("file_dl_"):
         row_id = d.replace("file_dl_", "")
-        await q.answer("Fetching file...")
+        await q.answer("Preparing dual delivery via helper bot...")
         try:
-            row = get_file_by_id_db(int(row_id))
-            if row:
-                file_id = row["file_id"]
-                storage_msg_id = row["storage_message_id"]
-                file_name = row["file_name"]
-                storage_group_id = os.getenv("STORAGE_GROUP_ID")
-
-                sent = False
-                if storage_msg_id and storage_group_id:
-                    try:
-                        await context.bot.copy_message(
-                            chat_id=q.message.chat_id,
-                            from_chat_id=int(storage_group_id),
-                            message_id=int(storage_msg_id),
-                        )
-                        sent = True
-                    except Exception as copy_err:
-                        print(f"Copy message failed: {copy_err}")
-
-                if not sent and file_id:
-                    try:
-                        cap_text = f"📁 {file_name}" if file_name else "📁 Here is your file!"
-                        await context.bot.send_document(
-                            chat_id=q.message.chat_id,
-                            document=file_id,
-                            caption=cap_text,
-                        )
-                        sent = True
-                    except Exception as doc_err:
-                        print(f"Send document failed: {doc_err}")
-
-                if not sent:
-                    await q.message.reply_text("❌ Failed to dispatch file. The storage message or file ID may no longer be valid.")
-            else:
-                await q.message.reply_text("❌ File record no longer found in database.")
+            await deliver_file_dual(update, context, int(row_id))
         except Exception as e:
-            await q.message.reply_text(f"❌ Error retrieving file: {e}")
+            await q.message.reply_text(f"❌ Error delivering file: {e}")
 
 
 async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

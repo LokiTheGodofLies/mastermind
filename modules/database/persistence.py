@@ -22,23 +22,35 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from configs import backup_chat_id, backup_interval_seconds
+from config import (
+    bot_token,
+    backup_chat_id,
+    backup_interval_seconds,
+    backup_filename,
+    db_dir,
+    config_db_path,
+    files_db_path,
+    users_db_path,
+    max_upload_bytes,
+    max_download_bytes,
+)
 
 logger = logging.getLogger(__name__)
 
 PROJECT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DB_DIR = os.path.join(PROJECT_DIR, "database")
 
-DB_FILES = {
-    "config.db": os.path.join(DB_DIR, "config.db"),
-    "files.db": os.path.join(DB_DIR, "files.db"),
-    "mastermind_users.db": os.path.join(PROJECT_DIR, "mastermind_users.db"),
-}
 
-BACKUP_FILENAME = "mastermind_backup.zip"
-MARKER_PATH = os.path.join(DB_DIR, ".seeded")
-MAX_UPLOAD_BYTES = 49 * 1024 * 1024
-MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+def _db_files() -> dict:
+    return {
+        "config.db": os.path.abspath(config_db_path()),
+        "files.db": os.path.abspath(files_db_path()),
+        "mastermind_users.db": os.path.abspath(users_db_path()),
+    }
+
+
+def _marker_path() -> str:
+    return os.path.abspath(os.path.join(db_dir(), ".seeded"))
+
 
 _lock = threading.Lock()
 _state = {
@@ -56,7 +68,7 @@ _state = {
 
 
 def _token() -> str:
-    return (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or "").strip()
+    return (bot_token() or "").strip()
 
 
 def _backup_chat() -> str:
@@ -121,7 +133,7 @@ def _integrity_ok(path: str) -> bool:
 
 def _fingerprint():
     parts = []
-    for p in DB_FILES.values():
+    for p in _db_files().values():
         for suffix in ("", "-wal"):
             try:
                 s = os.stat(p + suffix)
@@ -159,9 +171,10 @@ def sync_startup_log():
 def restore_if_fresh() -> dict:
     """Restores databases from the pinned message in the backup chat on a fresh container."""
     with _lock:
-        os.makedirs(DB_DIR, exist_ok=True)
+        os.makedirs(db_dir(), exist_ok=True)
+        marker = _marker_path()
 
-        if os.path.exists(MARKER_PATH):
+        if os.path.exists(marker):
             _state.update(restore="skipped", restore_detail="local databases already present")
             sync_startup_log()
             return dict(_state)
@@ -184,12 +197,12 @@ def restore_if_fresh() -> dict:
 
             pinned = (info.get("result") or {}).get("pinned_message") or {}
             doc = pinned.get("document") or {}
-            if not doc or doc.get("file_name") != BACKUP_FILENAME:
+            if not doc or doc.get("file_name") != backup_filename():
                 _state.update(
                     restore="no_backup",
                     restore_detail="no pinned backup found in backup chat - starting with fresh databases",
                 )
-                with open(MARKER_PATH, "w", encoding="utf-8") as mf:
+                with open(marker, "w", encoding="utf-8") as mf:
                     mf.write(str(time.time()))
                 sync_startup_log()
                 return dict(_state)
@@ -201,15 +214,16 @@ def restore_if_fresh() -> dict:
             r = requests.get(f"https://api.telegram.org/file/bot{token}/{fpath}", timeout=120)
             r.raise_for_status()
             blob = r.content
-            if len(blob) > MAX_DOWNLOAD_BYTES + 1024:
-                raise RuntimeError("backup is larger than the 20 MB bot download limit")
+            if len(blob) > max_download_bytes() + 1024:
+                raise RuntimeError("backup is larger than the bot download limit")
 
+            db_map = _db_files()
             tmp = tempfile.mkdtemp(prefix="mm_restore_")
             try:
                 with zipfile.ZipFile(io.BytesIO(blob)) as zf:
                     names = set(zf.namelist())
                     extracted = {}
-                    for name in DB_FILES:
+                    for name in db_map:
                         if name in names:
                             zf.extract(name, tmp)
                             extracted[name] = os.path.join(tmp, name)
@@ -220,7 +234,7 @@ def restore_if_fresh() -> dict:
                         raise RuntimeError(f"{name} in backup failed integrity check")
 
                 for name, src in extracted.items():
-                    dst = DB_FILES[name]
+                    dst = db_map[name]
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     for suffix in ("", "-wal", "-shm", "-journal"):
                         try:
@@ -228,11 +242,11 @@ def restore_if_fresh() -> dict:
                         except OSError:
                             pass
                     shutil.move(src, dst)
-                st = _stats_from_paths(DB_FILES)
+                st = _stats_from_paths(db_map)
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
 
-            with open(MARKER_PATH, "w", encoding="utf-8") as mf:
+            with open(marker, "w", encoding="utf-8") as mf:
                 mf.write(str(time.time()))
             _state.update(
                 restore="restored",
@@ -259,7 +273,7 @@ def _build_archive() -> tuple:
     tmp = tempfile.mkdtemp(prefix="mm_backup_")
     try:
         snap = {}
-        for name, path in DB_FILES.items():
+        for name, path in _db_files().items():
             if not os.path.exists(path):
                 continue
             out = os.path.join(tmp, name)
@@ -293,21 +307,22 @@ def backup_now(reason: str = "periodic") -> tuple:
 
         try:
             blob, st = _build_archive()
-            if len(blob) > MAX_UPLOAD_BYTES:
-                raise RuntimeError(f"backup is {len(blob)/1048576:.1f} MB (> 49 MB upload limit)")
+            if len(blob) > max_upload_bytes():
+                raise RuntimeError(f"backup is {len(blob)/1048576:.1f} MB (exceeds upload limit)")
             caption = (
                 "💾 Mastermind database backup\n"
                 f"🕒 {_ist_now()} ({reason})\n"
                 f"{_stats_line(st)}\n"
                 "⚠️ Do not delete or unpin - used for automatic restore after redeploy."
             )
+            fname = backup_filename()
 
             if _state["backup_msg_id"]:
                 media = json.dumps({"type": "document", "media": "attach://backup", "caption": caption})
                 res = _api(
                     "editMessageMedia",
                     data={"chat_id": chat, "message_id": _state["backup_msg_id"], "media": media},
-                    files={"backup": (BACKUP_FILENAME, blob, "application/zip")},
+                    files={"backup": (fname, blob, "application/zip")},
                     timeout=90,
                 )
                 if res.get("ok") or "not modified" in str(res.get("description", "")).lower():
@@ -323,7 +338,7 @@ def backup_now(reason: str = "periodic") -> tuple:
             res = _api(
                 "sendDocument",
                 data={"chat_id": chat, "caption": caption, "disable_notification": "true"},
-                files={"document": (BACKUP_FILENAME, blob, "application/zip")},
+                files={"document": (fname, blob, "application/zip")},
                 timeout=90,
             )
             if not res.get("ok"):
