@@ -34,6 +34,14 @@ def _int(name, default, minimum=None):
     return value
 
 
+def _int_any(names, default, minimum=None):
+    """First env name that is set wins (lets Render use either naming)."""
+    for name in names:
+        if _clean(name) is not None:
+            return _int(name, default, minimum)
+    return default if minimum is None else max(default, minimum)
+
+
 def _opt_int(name):
     raw = _clean(name)
     if raw is None:
@@ -74,19 +82,19 @@ def items_per_page():
 
 # ---- Quotas & referrals ---------------------------------------------------
 def default_search_quota():
-    return _int("DEFAULT_SEARCH_QUOTA", 10, 0)
+    return _int_any(("DEFAULT_SEARCH_QUOTA", "SEARCH_QUOTA_DEFAULT"), 10, 0)
 
 
 def default_request_quota():
-    return _int("DEFAULT_REQUEST_QUOTA", 10, 0)
+    return _int_any(("DEFAULT_REQUEST_QUOTA", "REQUEST_QUOTA_DEFAULT"), 10, 0)
 
 
 def referral_search_bonus():
-    return _int("REFERRAL_SEARCH_BONUS", 10, 0)
+    return _int_any(("REFERRAL_SEARCH_BONUS", "REFERRAL_BONUS_SEARCH"), 10, 0)
 
 
 def referral_request_bonus():
-    return _int("REFERRAL_REQUEST_BONUS", 10, 0)
+    return _int_any(("REFERRAL_REQUEST_BONUS", "REFERRAL_BONUS_REQUEST"), 10, 0)
 
 
 def referral_bonus_label():
