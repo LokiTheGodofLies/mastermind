@@ -112,6 +112,15 @@ def main():
             await send_startup_log(app)
         application.post_init = post_init
 
+    import os, threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+        def do_HEAD(self):
+            self.send_response(200); self.end_headers()
+        def log_message(self, *a): pass
+    threading.Thread(target=HTTPServer(("0.0.0.0", int(os.getenv("PORT", "8080"))), _H).serve_forever, daemon=True).start()
     application.run_polling()
 
 
