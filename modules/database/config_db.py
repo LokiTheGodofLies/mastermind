@@ -1,17 +1,21 @@
 import os
 import sqlite3
+from config import config_db_path
 
-DB_DIR = "database"
-DB_PATH = os.path.join(DB_DIR, "config.db")
+
+def _db_path():
+    return config_db_path()
 
 
 def _ensure_db_dir():
-    os.makedirs(DB_DIR, exist_ok=True)
+    parent = os.path.dirname(_db_path())
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
 
 def get_connection():
     _ensure_db_dir()
-    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
+    conn = sqlite3.connect(_db_path(), timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 

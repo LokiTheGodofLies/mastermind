@@ -1,8 +1,9 @@
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ApplicationHandlerStop
-from modules.database.user_db import get_user_role_db
-from modules.ban.ban import set_ban_db, remove_ban_db, get_support_chat_id, check_user_access
+from config import users_db_path
+from modules.database.user_db import get_user_role_db, set_user_role_db
+from modules.ban.ban import set_ban_db, remove_ban_db, check_user_access
 
 
 async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAULT_TYPE, target_arg: str):
@@ -14,7 +15,7 @@ async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAUL
 
     if target_arg.startswith("@"):
         username = target_arg[1:]
-        conn = sqlite3.connect("mastermind_users.db")
+        conn = sqlite3.connect(users_db_path())
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
         row = cursor.fetchone()
@@ -145,6 +146,60 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     remove_ban_db(resolved_id)
     await update.message.reply_text(f"✅ Target <b>{display_str}</b> (<code>{resolved_id}</code>) has been unbanned.", parse_mode="HTML")
+
+
+async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner-only command to grant Admin role (/addadmin <user_id|@username> or reply)."""
+    caller = update.effective_user
+    msg = update.effective_message
+    if not caller or not msg:
+        return
+    if get_user_role_db(caller.id) != "Owner":
+        await msg.reply_text("⛔ Only the Bot Owner can add administrators.")
+        return
+
+    reply_msg = msg.reply_to_message
+    if reply_msg and reply_msg.from_user and not context.args:
+        target_id = reply_msg.from_user.id
+        display = f"@{reply_msg.from_user.username}" if reply_msg.from_user.username else reply_msg.from_user.first_name
+    else:
+        if not context.args:
+            await msg.reply_text("⚠️ <b>Usage:</b> <code>/addadmin &lt;user_id|@username&gt;</code>", parse_mode="HTML")
+            return
+        target_id, display = await resolve_target_identifier(update, context, context.args[0])
+        if not target_id:
+            await msg.reply_text(f"⚠️ Could not resolve user: <code>{context.args[0]}</code>", parse_mode="HTML")
+            return
+
+    set_user_role_db(target_id, "Admin")
+    await msg.reply_text(f"✅ Promoted <b>{display}</b> (<code>{target_id}</code>) to <b>Admin</b>.", parse_mode="HTML")
+
+
+async def removeadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner-only command to revoke Admin role (/removeadmin <user_id|@username> or reply)."""
+    caller = update.effective_user
+    msg = update.effective_message
+    if not caller or not msg:
+        return
+    if get_user_role_db(caller.id) != "Owner":
+        await msg.reply_text("⛔ Only the Bot Owner can remove administrators.")
+        return
+
+    reply_msg = msg.reply_to_message
+    if reply_msg and reply_msg.from_user and not context.args:
+        target_id = reply_msg.from_user.id
+        display = f"@{reply_msg.from_user.username}" if reply_msg.from_user.username else reply_msg.from_user.first_name
+    else:
+        if not context.args:
+            await msg.reply_text("⚠️ <b>Usage:</b> <code>/removeadmin &lt;user_id|@username&gt;</code>", parse_mode="HTML")
+            return
+        target_id, display = await resolve_target_identifier(update, context, context.args[0])
+        if not target_id:
+            await msg.reply_text(f"⚠️ Could not resolve user: <code>{context.args[0]}</code>", parse_mode="HTML")
+            return
+
+    set_user_role_db(target_id, "Normal User")
+    await msg.reply_text(f"✅ Demoted <b>{display}</b> (<code>{target_id}</code>) to <b>Normal User</b>.", parse_mode="HTML")
 
 
 async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):

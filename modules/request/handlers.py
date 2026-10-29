@@ -1,11 +1,10 @@
-import configs
 import logging
-import os
 import html
 import requests
 from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ApplicationHandlerStop
+import config
 from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_request, deduct_request_quota
 
@@ -14,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 def fetch_goodreads_metadata(query):
     try:
-        search_url = f"https://www.goodreads.com/search?q={requests.utils.quote(query)}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        base_url = config.goodreads_base_url()
+        search_url = f"{base_url}/search?q={requests.utils.quote(query)}"
+        headers = {"User-Agent": config.scraper_user_agent()}
         resp = requests.get(search_url, headers=headers, timeout=10)
         if resp.status_code != 200:
             return []
@@ -31,7 +31,7 @@ def fetch_goodreads_metadata(query):
             if title_tag and link_tag:
                 title = title_tag.get_text(strip=True)
                 author = author_tag.get_text(strip=True) if author_tag else "Unknown Author"
-                url = "https://www.goodreads.com" + link_tag["href"]
+                url = base_url + link_tag["href"]
                 rating = rating_tag.get_text(strip=True) if rating_tag else ""
                 results.append({"title": title, "author": author, "url": url, "rating": rating})
         return results
@@ -138,7 +138,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
             return
 
         book_query = data.split("_", 3)[-1]
-        request_channel_id = configs.request_channel_id()
+        request_channel_id = config.request_channel_id()
         if request_channel_id is None:
             logger.error("REQUEST_CHANNEL_ID is not configured")
             await query.edit_message_text("❌ Requests are not configured right now. Please try again later.")
@@ -160,8 +160,8 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
             )
             deduct_request_quota(user.id)
 
-            logger_group = os.getenv("LOGGER_GROUP_ID")
-            req_topic = configs.log_topic("REQUEST")
+            logger_group = config.logger_group_id()
+            req_topic = config.log_topic("REQUEST")
             if logger_group and int(logger_group) != int(request_channel_id):
                 log_kwargs = {"chat_id": int(logger_group), "text": req_text, "parse_mode": "HTML"}
                 if req_topic:
