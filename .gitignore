@@ -1,16 +1,4 @@
-# secrets & local config
 env.txt
-.env
-
-# runtime data (all of it is backed up to Telegram, never to git)
+__pycache__/
 database/
 *.db
-*.db-wal
-*.db-shm
-
-# python
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-!modules/database/

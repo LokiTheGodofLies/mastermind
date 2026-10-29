@@ -1,48 +1,43 @@
 import logging
 from collections import deque
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
-# In-memory buffer holding up to 3000 log records
-LOG_BUFFER = deque(maxlen=3000)
-IST = timezone(timedelta(hours=5, minutes=30))
-
-def get_ist_now() -> datetime:
-    return datetime.now(IST)
-
-def get_ist_str(fmt: str = "%Y-%m-%d %H:%M:%S IST") -> str:
-    return get_ist_now().strftime(fmt)
-
-def ist_converter(*args):
-    return get_ist_now().timetuple()
-
-logging.Formatter.converter = ist_converter
+# In-memory ring buffer holding up to 2000 log entries in RAM
+LOG_BUFFER = deque(maxlen=2000)
 
 class InMemoryLogHandler(logging.Handler):
+    """Custom handler that catches log records and stores them in RAM."""
     def emit(self, record):
         try:
             msg = self.format(record)
-            timestamp = get_ist_str("%Y-%m-%d %H:%M:%S IST")
-            LOG_BUFFER.append((get_ist_now(), f"[{timestamp}] {msg}\n"))
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            LOG_BUFFER.append((datetime.now(), f"[{timestamp}] {msg}\n"))
         except Exception:
             self.handleError(record)
 
 def setup_in_memory_logger():
-    root = logging.getLogger()
-    if not any(isinstance(h, InMemoryLogHandler) for h in root.handlers):
-        h = InMemoryLogHandler()
-        fmt = logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s", datefmt="%Y-%m-%d %H:%M:%S IST")
-        h.setFormatter(fmt)
-        root.addHandler(h)
+    """Attaches the memory handler to Python's root logger."""
+    root_logger = logging.getLogger()
+    if not any(isinstance(h, InMemoryLogHandler) for h in root_logger.handlers):
+        handler = InMemoryLogHandler()
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)
 
-def get_logs_by_count(n: int = 50) -> str:
+def get_logs_by_count(n: int = 10):
+    """Retrieves the last N logs from memory."""
     if not LOG_BUFFER:
-        return f"[{get_ist_str()}] No logs captured in memory."
+        return "No logs captured in memory yet."
     lines = [item[1] for item in LOG_BUFFER]
-    return "".join(lines[-n:] if len(lines) >= n else lines)
+    selected = lines[-n:] if len(lines) >= n else lines
+    return "".join(selected)
 
-def get_logs_by_time(minutes: int = 30) -> str:
+def get_logs_by_time(minutes: int = 10):
+    """Retrieves logs from memory within the last N minutes."""
     if not LOG_BUFFER:
-        return f"[{get_ist_str()}] No logs captured in memory."
-    cutoff = get_ist_now() - timedelta(minutes=minutes)
-    lines = [item[1] for item in LOG_BUFFER if item[0] >= cutoff]
-    return "".join(lines) if lines else f"[{get_ist_str()}] No logs within last {minutes}m."
+        return f"No logs captured in memory within the last {minutes} minutes."
+    cutoff_time = datetime.now() - timedelta(minutes=minutes)
+    filtered_lines = [item[1] for item in LOG_BUFFER if item[0] >= cutoff_time]
+    if not filtered_lines:
+        return f"No logs found in memory within the last {minutes} minutes."
+    return "".join(filtered_lines)

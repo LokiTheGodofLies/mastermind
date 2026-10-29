@@ -1,7 +1,0 @@
-MODULE: support  (modules/support/)
-===================================
-  /support   Explains the support chat and offers a 10-question yes/no verification quiz.
-Logic: every answer must be correct; one wrong answer resets the quiz. Passing creates a
-single-use invite link (member_limit=1) to support_chat_id. This keeps the support chat free of
-spam, search requests and chatting. Callbacks: support_start_quiz, quiz_ans_yes, quiz_ans_no.
-Users banned with /ban_support can still use the bot inside the support chat (to appeal).

@@ -1,8 +1,0 @@
-LIBRARY: lib  (lib/)
-====================
-mediagoer.py  Vendored third-party style library (GPL) that queries IMDb, Letterboxd,
-              MyAnimeList, AniList, Kitsu, Goodreads, Audible and Storytel and returns uniform
-              MediaItem/Series objects with formatted cards. The bot only uses its Goodreads,
-              Audible and Storytel adapters through modules/indexing/book_fetcher.py
-              (Mediagoer(audible_marketplace="in", storytel_locale="in")). It is blocking code and
-              is therefore always run with asyncio.to_thread. Not modified by the clean-up.

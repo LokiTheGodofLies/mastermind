@@ -1,160 +1,40 @@
-import os, html, logging
-from modules.database.config_db import get_config, get_config_int
-from modules.database.user_db import get_owner_ids
-from modules.log.logger import get_ist_str
-from modules.bot_manager import get_helper_bot_tokens, get_bot_info_by_token
-from modules.database import persistence
+import os
+import logging
+import datetime
+from modules.database.config_db import get_config
 
 logger = logging.getLogger(__name__)
 
-# Attach single IST timestamp once (prevents duplicate time)
-def attach_ist_timestamp(text: str) -> str:
-    if "IST" in text or "Deleted At:" in text: return text
-    return f"{text}\n\n⏱ <b>Timestamp:</b> <code>{get_ist_str('%d-%m-%Y | %I:%M:%S %p IST')}</code>"
-
-async def _send_html(bot, cid, text, tid=0, rm=None):
-    kw = {"chat_id": int(cid), "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    if tid > 1: kw["message_thread_id"] = tid
-    if rm: kw["reply_markup"] = rm
-    return await bot.send_message(**kw)
-
-async def _notify_owners(bot, text: str):
-    for oid in get_owner_ids():
-        try: await _send_html(bot, oid, text)
-        except Exception: pass
-
-async def send_error_alert(bot, error_text: str):
-    lg = get_config("general_log_group_id", fallback_env="LOGGER_GROUP_ID") or get_config("admin_log_group_id")
-    body = attach_ist_timestamp(f"🚨 <b>Bot Error / Configuration Alert</b>\n\n{error_text}")
-    if lg:
-        for t in (get_config_int("error_log_topic_id", 33), 0):
-            try:
-                await _send_html(bot, lg, body, t)
-                break
-            except Exception: pass
-    await _notify_owners(bot, body)
-
-async def _chk(bot, lbl, cid):
-    if not cid: return f"• <b>{lbl}:</b> ❌ Not Set"
+async def send_startup_notification(application):
+    logger_group_id = get_config("logger_group_id", fallback_env="LOGGER_GROUP_ID") or get_config("storage_group_id", fallback_env="STORAGE_GROUP_ID")
+    if not logger_group_id:
+        print("⚠️ [STARTUP WARNING] Logger Group ID not set.")
+        return
     try:
-        ch = await bot.get_chat(int(cid))
-        t = html.escape(ch.title or ch.username or "Chat")
-        u = ch.invite_link or (f"https://t.me/{ch.username}" if ch.username else "")
-        if not u:
-            try: u = await bot.export_chat_invite_link(int(cid))
-            except Exception: u = f"https://t.me/c/{str(cid).replace('-100','')}/1"
-        return f"• <b>{lbl}:</b> ✅ {t} (<code>{cid}</code>) — <a href='{html.escape(u)}'>Invite Link</a>"
+        bot_info = await application.bot.get_me()
+        bot_title = bot_info.first_name or "Mastermind Bot"
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        default_template = "🔄 <b>ʙᴏᴛ ʀᴇꜱᴛᴀʀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ</b>\n\n🤖 <b>{bot_title}</b> ɪꜱ ɴᴏᴡ ᴏɴʟɪɴᴇ\n⏱️ ʀᴇꜱᴛᴀʀᴛᴇᴅ ᴀᴛ {deploy_time}\n🤞ꜱᴇᴇ /stats"
+        template = get_config("startup_log_script", default=default_template)
+        
+        if template:
+            template = template.replace("\\n", "\n")
+
+        startup_text = template.format(bot_title=bot_title, deploy_time=current_time)
+
+        media_type = get_config("startup_log_media_type", default="none")
+        media_url = get_config("startup_log_media_url", default="")
+        chat_id = int(logger_group_id)
+
+        if media_type == "photo" and media_url:
+            await application.bot.send_photo(chat_id=chat_id, photo=media_url, caption=startup_text, parse_mode="HTML")
+        elif media_type == "video" and media_url:
+            await application.bot.send_video(chat_id=chat_id, video=media_url, caption=startup_text, parse_mode="HTML")
+        elif media_type == "animation" and media_url:
+            await application.bot.send_animation(chat_id=chat_id, animation=media_url, caption=startup_text, parse_mode="HTML")
+        else:
+            await application.bot.send_message(chat_id=chat_id, text=startup_text, parse_mode="HTML")
+        print("✅ [STARTUP] Restart notification sent successfully!")
     except Exception as e:
-        return f"• <b>{lbl}:</b> ⚠️ <code>{cid}</code> ({html.escape(str(e)[:35])})"
-
-async def send_startup_notification(app):
-    """
-    Startup log.  Tokens are NEVER shown when everything is fine - a token only appears
-    next to the bot that failed to authenticate (invalid / revoked token), so it can be fixed.
-    """
-    try:
-        bot = app.bot
-        mt = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or ""
-        errors = []
-
-        # --- main bot ---
-        try:
-            me = await bot.get_me()
-            main_line = f"🤖 <b>Main Bot:</b> {html.escape(me.first_name or 'Bot')} (@{me.username}) | <code>{me.id}</code>"
-        except Exception as e:
-            main_line = f"🤖 <b>Main Bot:</b> ❌ Error: <code>{html.escape(str(e)[:80])}</code>\n🔑 <code>{html.escape(mt)}</code>"
-            errors.append("main bot")
-
-        # --- helper bots ---
-        hl = []
-        for i, ht in enumerate(get_helper_bot_tokens(), 1):
-            if ht == mt:
-                continue
-            hi = await get_bot_info_by_token(ht)
-            u = hi.get("username")
-            if u and not hi.get("error"):
-                hl.append(f"  {i}. ✅ <b>{html.escape(hi['title'])}</b> (@{u}) | <code>{hi['id']}</code>")
-            else:
-                reason = html.escape(str(hi.get("error") or "unknown error")[:80])
-                hl.append(f"  {i}. ❌ Invalid token: <code>{reason}</code>\n      🔑 <code>{html.escape(ht)}</code>")
-                errors.append(f"helper bot {i}")
-        if not hl:
-            hl.append("  • None (using Main Bot)")
-
-        # --- chats ---
-        chks = [("Storage", "storage_channel_id"), ("Posting", "posting_channel_id"), ("Logs Group", "general_log_group_id"),
-                ("Index Ch", "index_channel_id"), ("Request Ch", "request_channel_id"), ("Support", "support_chat_id")]
-        cl = [await _chk(bot, l, get_config(k)) for l, k in chks]
-
-        tp = [("Gen", "general_topic_id", 1), ("Usr", "user", 2), ("Idx", "index", 20), ("Grp", "group", 23), ("Ch", "channel", 26), ("Req", "request", 30), ("Err", "error", 33)]
-        ts = " | ".join(f"{k}:{get_config_int(v if '_' in v else f'{v}_log_topic_id', d)}" for k, v, d in tp)
-
-        head = "⚠️ <b>Bot Restarted With Errors</b>" if errors else "🔄 <b>Bot Restarted Successfully</b>"
-        txt = (
-            f"{head}\n\n{main_line}\n\n"
-            "🤝 <b>Helper Bots:</b>\n" + "\n".join(hl) +
-            "\n\n📡 <b>Groups & Channels:</b>\n" + "\n".join(cl) +
-            f"\n\n🧵 <b>Topics:</b> <code>{ts}</code>"
-            f"\n\n{persistence.status_line_html()}"
-        )
-        await send_log_with_fallback(bot, txt, "general_log_group_id", "general_topic_id")
-    except Exception as e:
-        print(f"[STARTUP LOG WARNING]: {e}")
-
-async def send_log_with_fallback(
-    bot,
-    text,
-    group_key="general_log_group_id",
-    topic_key=None,
-    reply_markup=None,
-):
-    """Send an HTML log to a configured group, falling back to the base topic."""
-    group_id = get_config(
-        group_key,
-        fallback_env="GENERAL_LOG_GROUP_ID",
-    )
-
-    if group_key != "general_log_group_id" and not group_id:
-        group_id = get_config(
-            "general_log_group_id",
-            fallback_env="GENERAL_LOG_GROUP_ID",
-        )
-
-    if not group_id:
-        logger.warning("Log target is not configured: %s", group_key)
-        return None
-
-    topic_id = get_config_int(topic_key, 0) if topic_key else 0
-    body = attach_ist_timestamp(text)
-
-    try:
-        return await _send_html(
-            bot,
-            group_id,
-            body,
-            tid=topic_id,
-            rm=reply_markup,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Could not send log to topic %s in %s: %s",
-            topic_id,
-            group_id,
-            exc,
-        )
-
-    try:
-        return await _send_html(
-            bot,
-            group_id,
-            body,
-            tid=1,
-            rm=reply_markup,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Could not send fallback log to %s: %s",
-            group_id,
-            exc,
-        )
-        return None
+        print(f"❌ [STARTUP ERROR]: {e}")
