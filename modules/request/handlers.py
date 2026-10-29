@@ -1,14 +1,16 @@
 import configs
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ApplicationHandlerStop
-from modules.database.file_db import get_connection as get_db_connection
 import os
+import html
 import requests
 from bs4 import BeautifulSoup
-import html
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ApplicationHandlerStop
+from modules.database.file_db import search_files_db
+from modules.allowance.allowance import can_user_request, deduct_request_quota
 
 logger = logging.getLogger(__name__)
+
 
 def fetch_goodreads_metadata(query):
     try:
@@ -17,7 +19,7 @@ def fetch_goodreads_metadata(query):
         resp = requests.get(search_url, headers=headers, timeout=10)
         if resp.status_code != 200:
             return []
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        soup = BeautifulSoup(resp.text, "html.parser")
         results = []
         rows = soup.select("tr[itemtype='http://schema.org/Book']")[:5]
         for row in rows:
@@ -25,7 +27,7 @@ def fetch_goodreads_metadata(query):
             author_tag = row.select_one("span[itemprop='author']")
             link_tag = row.select_one("a.bookTitle")
             rating_tag = row.select_one("span.minirating")
-            
+
             if title_tag and link_tag:
                 title = title_tag.get_text(strip=True)
                 author = author_tag.get_text(strip=True) if author_tag else "Unknown Author"
@@ -37,39 +39,50 @@ def fetch_goodreads_metadata(query):
         logger.error(f"Error fetching Goodreads metadata: {e}")
         return []
 
+
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
+    message = update.effective_message
+    user = update.effective_user
     if not message:
         return
-    
-    query = " ".join(context.args).strip()
-    if not query:
-        await message.reply_text("📖 Please provide a book title or keyword. Usage: <code>/request [book name]</code>", parse_mode="HTML")
+
+    if user and not can_user_request(user.id):
+        await message.reply_text(
+            "⚠️ <b>Daily request quota reached!</b>\n\n"
+            "Use <code>/quota</code> to view your limits or <code>/refer</code> to invite friends and earn bonus requests.",
+            parse_mode="HTML",
+        )
         return
-    
+
+    query = " ".join(context.args).strip() if context.args else ""
+    if not query:
+        await message.reply_text(
+            "📖 Please provide a book title or keyword. Usage: <code>/request [book name]</code>",
+            parse_mode="HTML",
+        )
+        return
+
     q_esc = html.escape(query)
     status_msg = await message.reply_text(f"🔎 Searching local database for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT file_id, file_name FROM indexed_files WHERE file_name LIKE ? LIMIT 5", (f"%{query}%",))
-    rows = cursor.fetchall()
-    conn.close()
-    
+
+    rows = search_files_db(query, limit=5)
     if rows:
         header = f"📁 <b>Local Database Matches for:</b> <i>\"{q_esc}\"</i>\n"
         lines = [header]
         for row in rows:
-            file_id, file_name = row
-            lines.append(f"• {html.escape(file_name)}")
+            lines.append(f"• {html.escape(row['file_name'] or 'Unknown')}")
         text = "\n".join(lines)
         await status_msg.edit_text(text, parse_mode="HTML")
     else:
         await process_goodreads_or_request(status_msg, query, context)
 
+
 async def process_goodreads_or_request(status_msg, query, context):
     q_esc = html.escape(query)
-    await status_msg.edit_text(f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
+    await status_msg.edit_text(
+        f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{q_esc}\"</i>...",
+        parse_mode="HTML",
+    )
     matches = fetch_goodreads_metadata(query)
     if matches:
         bot_username = context.bot.username or (await context.bot.get_me()).username
@@ -87,7 +100,7 @@ async def process_goodreads_or_request(status_msg, query, context):
             url = book["url"]
             rating = html.escape(book.get("rating", ""))
             cmd_link = f"https://t.me/{bot_username}?start=req_pick_{idx}"
-            lines.append(f'{idx + 1}. <a href="{cmd_link}">📚 <b>{title}</b> ({author})</a> — {rating} [<a href="{url}">Goodreads</a>]')
+            lines.append(f'{idx + 1}. <a href="{cmd_link}">📚 <b>{title}</b> ({author})</a> ⭐ {rating} [<a href="{url}">Goodreads</a>]')
 
         manual_link = f"https://t.me/{bot_username}?start=req_manual"
         lines.append("")
@@ -96,45 +109,78 @@ async def process_goodreads_or_request(status_msg, query, context):
         text = "\n".join(lines)
         await status_msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
     else:
-        text = f"📖 <b>Book Request:</b> <i>\"{q_esc}\"</i>\n\nNo Goodreads matches found. Would you like to submit this request directly to the Request Channel?"
+        text = (
+            f"📖 <b>Book Request:</b> <i>\"{q_esc}\"</i>\n\n"
+            "No Goodreads matches found. Would you like to submit this request directly to the Request Channel?"
+        )
         keyboard = [
-            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{query[:40]}"),
-             InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
+            [
+                InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{query[:40]}"),
+                InlineKeyboardButton("❌ Cancel", callback_data="req_join_no"),
+            ]
         ]
         await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
-    
+
     if data.startswith("req_sub_orig_") or data.startswith("req_sub_gb_"):
+        user = query.from_user
+        if user and not can_user_request(user.id):
+            await query.edit_message_text(
+                "⚠️ <b>Daily request quota reached!</b>\n\n"
+                "Use <code>/quota</code> to view your limits or <code>/refer</code> to earn bonus requests.",
+                parse_mode="HTML",
+            )
+            return
+
         book_query = data.split("_", 3)[-1]
         request_channel_id = configs.request_channel_id()
         if request_channel_id is None:
             logger.error("REQUEST_CHANNEL_ID is not configured")
             await query.edit_message_text("❌ Requests are not configured right now. Please try again later.")
             return
-        user = query.from_user
-        user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
+
+        user_mention = f"<a href='tg://user?id={user.id}'>{html.escape(user.full_name)}</a>"
         bq_esc = html.escape(book_query)
-        
-        req_text = f"📥 <b>New Book Request</b>\n\n👤 <b>Requested By:</b> {user_mention}\n📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
+
+        req_text = (
+            f"📥 <b>New Book Request</b>\n\n"
+            f"👤 <b>Requested By:</b> {user_mention}\n"
+            f"📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
+        )
         try:
             await context.bot.send_message(
                 chat_id=request_channel_id,
                 text=req_text,
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
+            deduct_request_quota(user.id)
+
+            logger_group = os.getenv("LOGGER_GROUP_ID")
+            req_topic = configs.log_topic("REQUEST")
+            if logger_group and int(logger_group) != int(request_channel_id):
+                log_kwargs = {"chat_id": int(logger_group), "text": req_text, "parse_mode": "HTML"}
+                if req_topic:
+                    log_kwargs["message_thread_id"] = int(req_topic)
+                try:
+                    await context.bot.send_message(**log_kwargs)
+                except Exception:
+                    pass
+
             await query.edit_message_text(
                 f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <i>\"{bq_esc}\"</i> has been forwarded to the Request Channel.",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
         except Exception as e:
             logger.error(f"Failed to send request to channel: {e}")
             await query.edit_message_text("❌ Failed to submit request to channel. Please try again later.")
     elif data == "req_join_no":
         await query.edit_message_text("❌ Request cancelled.")
+
 
 async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -148,7 +194,7 @@ async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT
             return
         matches = context.bot_data.get("goodreads_cache", {}).get(
             message.chat_id,
-            context.bot_data.get("goodreads_last_matches", [])
+            context.bot_data.get("goodreads_last_matches", []),
         )
         orig_query = context.bot_data.get("goodreads_last_query", "")
         if 0 <= idx < len(matches):
@@ -157,18 +203,24 @@ async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT
             author = html.escape(book_data["author"])
             rating = html.escape(book_data.get("rating", "No rating"))
             url = book_data["url"]
-            text = f"📖 <b>Goodreads Book Selected</b>\n\n📌 <b>Title:</b> <a href=\"{url}\">{title}</a>\n✍️ <b>Author:</b> {author}\n⭐ <b>Rating:</b> {rating}\n\nIs this the book you are looking for?"
+            text = (
+                f"📖 <b>Goodreads Book Selected</b>\n\n"
+                f"📌 <b>Title:</b> <a href=\"{url}\">{title}</a>\n"
+                f"✍️ <b>Author:</b> {author}\n"
+                f"⭐ <b>Rating:</b> {rating}\n\n"
+                f"Is this the book you are looking for?"
+            )
             encoded_title = book_data["title"][:40]
             fallback_q = (orig_query or book_data["title"])[:40]
             keyboard = [
                 [InlineKeyboardButton("✅ Yes (Submit Goodreads)", callback_data=f"req_sub_gb_{encoded_title}")],
-                [InlineKeyboardButton("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}")]
+                [InlineKeyboardButton("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}")],
             ]
             await message.reply_text(
                 text,
                 parse_mode="HTML",
                 disable_web_page_preview=False,
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                reply_markup=InlineKeyboardMarkup(keyboard),
             )
             raise ApplicationHandlerStop
     elif payload == "req_manual":
@@ -176,8 +228,10 @@ async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT
         oq_esc = html.escape(orig_query)
         text = f"📖 <b>Book Request:</b> <i>\"{oq_esc}\"</i>\n\nWould you like to submit this request directly to the Request Channel?"
         keyboard = [
-            [InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}"),
-             InlineKeyboardButton("❌ Cancel", callback_data="req_join_no")]
+            [
+                InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}"),
+                InlineKeyboardButton("❌ Cancel", callback_data="req_join_no"),
+            ]
         ]
         await message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         raise ApplicationHandlerStop

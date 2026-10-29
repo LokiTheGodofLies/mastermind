@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db
 
 logger = logging.getLogger(__name__)
-SUPPORTED_EBOOK_EXTENSIONS = {'.epub', '.pdf', '.mobi'}
+SUPPORTED_EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi"}
 
 HEADERS = {
     "User-Agent": (
@@ -24,6 +24,7 @@ HEADERS = {
 
 _BOOK_CACHE: dict[str, dict] = {}
 
+
 def clean_filename_for_search(file_name: str) -> str:
     if not file_name:
         return ""
@@ -34,6 +35,7 @@ def clean_filename_for_search(file_name: str) -> str:
     name = re.sub(r"[_\.\-]+", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
     return name
+
 
 def _default_book_meta(clean_title: str) -> dict:
     return {
@@ -50,6 +52,7 @@ def _default_book_meta(clean_title: str) -> dict:
         "book_url": "",
         "book_cover": "",
     }
+
 
 async def fetch_goodreads_metadata(file_name: str) -> dict:
     clean_query = clean_filename_for_search(file_name)
@@ -106,6 +109,7 @@ async def fetch_goodreads_metadata(file_name: str) -> dict:
         print(f"[GOODREADS SCRAPER WARNING] Could not fetch '{clean_query}': {e}")
         return _default_book_meta(clean_query)
 
+
 def format_index_channel_caption(
     file_name: str,
     file_size_str: str,
@@ -141,9 +145,10 @@ def format_index_channel_caption(
     caption = "\n".join(lines)
     return caption[:1020]
 
+
 async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    STORAGE_GROUP_ID = os.getenv('STORAGE_GROUP_ID')
-    LOGGER_GROUP_ID = os.getenv('LOGGER_GROUP_ID')
+    STORAGE_GROUP_ID = os.getenv("STORAGE_GROUP_ID")
+    LOGGER_GROUP_ID = os.getenv("LOGGER_GROUP_ID")
     INDEX_LOG_TOPIC_ID = log_topic("INDEX")
 
     if not STORAGE_GROUP_ID:
@@ -153,50 +158,54 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
     if not message or not message.document:
         return
 
+    # Ignore messages posted inside the storage group itself
+    if message.chat and str(message.chat.id) == str(STORAGE_GROUP_ID):
+        return
+
     document = message.document
     file_id = document.file_id
     file_unique_id = document.file_unique_id
-    file_name = document.file_name or 'unknown_file'
+    file_name = document.file_name or "unknown_file"
     file_size = document.file_size or 0
-    mime_type = document.mime_type or 'document'
+    mime_type = document.mime_type or "document"
     _, ext = os.path.splitext(file_name.lower())
 
     if ext not in SUPPORTED_EBOOK_EXTENSIONS:
-        if update.message:
-            await update.message.reply_text('❌ Unsupported format!')
+        if update.message and update.message.chat.type == "private":
+            await update.message.reply_text("❌ Unsupported format!")
         return
 
     if get_file_by_unique_id_db(file_unique_id):
-        if update.message:
-            await update.message.reply_text('📚 Already indexed')
+        if update.message and update.message.chat.type == "private":
+            await update.message.reply_text("📚 Already indexed")
         return
 
     try:
         book_meta = await fetch_goodreads_metadata(file_name)
-        
+
         size_mb = file_size / (1024 * 1024)
         file_size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{file_size / 1024:.2f} KB"
 
         caption_html = format_index_channel_caption(
             file_name=file_name,
             file_size_str=file_size_str,
-            extension=ext.lstrip('.'),
+            extension=ext.lstrip("."),
             file_type=mime_type,
-            book_meta=book_meta
+            book_meta=book_meta,
         )
 
-        # 1. Send the file strictly to STORAGE_GROUP_ID
         target_msg = await asyncio.wait_for(
             context.bot.send_document(
                 chat_id=int(STORAGE_GROUP_ID),
                 document=file_id,
                 caption=caption_html,
-                parse_mode='HTML'
+                parse_mode="HTML",
             ),
-            timeout=25.0
+            timeout=25.0,
         )
 
         user = message.from_user
+        searchable_caption = f"{message.caption or ''} {book_meta.get('book_title', '')} {book_meta.get('book_author', '')}".strip()
         save_indexed_file_db(
             file_unique_id=file_unique_id,
             file_id=file_id,
@@ -205,26 +214,25 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
             file_size=file_size,
             duration=0,
             user_id=user.id if user else 0,
-            user_title=user.full_name or user.username or 'Unknown',
-            caption=message.caption or '',
+            user_title=user.full_name or user.username or "Unknown" if user else "Channel",
+            caption=searchable_caption,
             extension=ext,
             file_type=mime_type,
-            category='book'
+            category="book",
         )
 
-        # 2. Send the log strictly to LOGGER_GROUP_ID (with topic if defined)
         if LOGGER_GROUP_ID:
             try:
                 log_text = (
                     f"📥 <b>File Indexed Successfully</b>\n\n"
-                    f"📂 <b>Filename:</b> <code>{file_name}</code>\n"
+                    f"📂 <b>Filename:</b> <code>{html.escape(file_name)}</code>\n"
                     f"🆔 <b>Unique ID:</b> <code>{file_unique_id}</code>\n"
-                    f"👤 <b>Indexed By:</b> {user.full_name if user else 'Unknown'} (<code>{user.id if user else 'N/A'}</code>)"
+                    f"👤 <b>Indexed By:</b> {html.escape(user.full_name) if user else 'Unknown'} (<code>{user.id if user else 'N/A'}</code>)"
                 )
                 log_kwargs = {
                     "chat_id": int(LOGGER_GROUP_ID),
                     "text": log_text,
-                    "parse_mode": 'HTML'
+                    "parse_mode": "HTML",
                 }
                 if INDEX_LOG_TOPIC_ID:
                     log_kwargs["message_thread_id"] = int(INDEX_LOG_TOPIC_ID)
@@ -233,10 +241,10 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
             except Exception as e:
                 print(f"Log send error: {e}")
 
-        if update.message:
-            await update.message.reply_text('✅ Ebook successfully indexed, enriched with Goodreads metadata, and stored!')
+        if update.message and update.message.chat.type == "private":
+            await update.message.reply_text("✅ Ebook successfully indexed, enriched with Goodreads metadata, and stored!")
 
     except Exception as e:
         print(f"❌ [INDEXING ERROR] Failed to process document: {e}")
-        if update.message:
+        if update.message and update.message.chat.type == "private":
             await update.message.reply_text(f"❌ Error: {e}")

@@ -1,9 +1,8 @@
-from configs import bot_name, referral_bonus_label
 from datetime import datetime
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from configs import bot_name, referral_bonus_label, referral_earned_label
 from modules.database.user_db import (
     get_user_role_db,
     get_quota_record_db,
@@ -17,7 +16,7 @@ from modules.allowance.referral import get_user_referral_stats
 
 def check_and_reset_quota(user_id):
     """Checks if a new calendar day has started and resets daily usage counts to 0."""
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = datetime.now().strftime("%Y-%m-%d")
     row = get_quota_record_db(user_id)
 
     if row:
@@ -29,8 +28,8 @@ def check_and_reset_quota(user_id):
 def can_user_search(user_id):
     """Validates if a user has remaining search quota for the day."""
     role = get_user_role_db(user_id)
-    if role in ['Admin', 'Owner']:
-        return True  # Unlimited access
+    if role in ["Admin", "Owner"]:
+        return True
 
     check_and_reset_quota(user_id)
     row = get_quota_record_db(user_id)
@@ -44,8 +43,8 @@ def can_user_search(user_id):
 def can_user_request(user_id):
     """Validates if a user has remaining request quota for the day."""
     role = get_user_role_db(user_id)
-    if role in ['Admin', 'Owner']:
-        return True  # Unlimited access
+    if role in ["Admin", "Owner"]:
+        return True
 
     check_and_reset_quota(user_id)
     row = get_quota_record_db(user_id)
@@ -59,16 +58,18 @@ def can_user_request(user_id):
 def deduct_search_quota(user_id):
     """Deducts 1 search allowance ONLY after a successful search."""
     role = get_user_role_db(user_id)
-    if role in ['Admin', 'Owner']:
-        return  # Unlimited users do not consume quota
+    if role in ["Admin", "Owner"]:
+        return
+    check_and_reset_quota(user_id)
     increment_search_used_db(user_id)
 
 
 def deduct_request_quota(user_id):
     """Deducts 1 request allowance ONLY after a successful request submission."""
     role = get_user_role_db(user_id)
-    if role in ['Admin', 'Owner']:
-        return  # Unlimited users do not consume quota
+    if role in ["Admin", "Owner"]:
+        return
+    check_and_reset_quota(user_id)
     increment_request_used_db(user_id)
 
 
@@ -78,7 +79,7 @@ def get_user_quota_summary(user_id):
     role = get_user_role_db(user_id)
     row = get_quota_record_db(user_id)
 
-    if role in ['Admin', 'Owner']:
+    if role in ["Admin", "Owner"]:
         return {
             "role": role,
             "unlimited": True,
@@ -104,9 +105,9 @@ def get_user_quota_summary(user_id):
 
 
 def gift_quota(admin_user_id, target_user_id, search_bonus=0, request_bonus=0):
-    """Allows Admins or Owners to increase a target user's quota limits via /gift <n>."""
+    """Allows Admins or Owners to increase a target user's quota limits via /gift."""
     admin_role = get_user_role_db(admin_user_id)
-    if admin_role not in ['Admin', 'Owner']:
+    if admin_role not in ["Admin", "Owner"]:
         return False, "❌ You do not have permission to use the gift command."
 
     add_quota_limits_db(target_user_id, search_bonus, request_bonus)
@@ -114,27 +115,33 @@ def gift_quota(admin_user_id, target_user_id, search_bonus=0, request_bonus=0):
 
 
 async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Telegram command handler for /quota"""
-    user_id = update.effective_user.id
-    summary = get_user_quota_summary(user_id)
-
-    if not summary:
-        await update.message.reply_text("⚠️ Could not retrieve your quota record.")
+    """Telegram command handler for /quota and quota button callbacks."""
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
         return
 
-    if summary["unlimited"]:
-        await update.message.reply_text(
+    summary = get_user_quota_summary(user.id)
+    if not summary:
+        text = "⚠️ Could not retrieve your quota record."
+    elif summary["unlimited"]:
+        text = (
             f"👤 **Your Role:** {summary['role']}\n"
             f"♾️ **Status:** Unlimited searches and requests."
         )
     else:
-        await update.message.reply_text(
+        text = (
             f"👤 **Your Role:** {summary['role']}\n\n"
             f"🔍 **Searches Remaining:** {summary['searches_left']} / {summary['searches_limit']}\n"
             f"📥 **Requests Remaining:** {summary['requests_left']} / {summary['requests_limit']}\n\n"
-            f"*(Quotas reset automatically every day)*",
-            parse_mode="Markdown"
+            f"*(Quotas reset automatically every day)*"
         )
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await msg.reply_text(text, parse_mode="Markdown")
+    else:
+        await msg.reply_text(text, parse_mode="Markdown")
 
 
 async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,13 +168,16 @@ async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    success, message = gift_quota(admin_id, target_id, search_bonus, request_bonus)
+    _, message = gift_quota(admin_id, target_id, search_bonus, request_bonus)
     await update.message.reply_text(message, parse_mode="Markdown")
 
 
 async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Telegram command handler for /refer to generate link, view invite history, and share."""
     user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
     bot_username = context.bot.username
 
     referral_link = f"https://t.me/{bot_username}?start=ref_{user.id}"
@@ -179,7 +189,7 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔗 **Your Referral Dashboard**\n\n"
         f"📌 **Your Link:**\n`{referral_link}`\n\n"
         f"📊 **Total Friends Invited:** `{total_invites}`\n"
-        f"🎁 **Bonus Earned:** `+{total_invites * 10}` Searches & Requests\n\n"
+        f"🎁 **Bonus Earned:** `{referral_earned_label(total_invites)}`\n\n"
     )
 
     if referred_list:
@@ -202,4 +212,6 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    if update.callback_query:
+        await update.callback_query.answer()
+    await msg.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
