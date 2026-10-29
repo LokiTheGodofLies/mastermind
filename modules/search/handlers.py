@@ -6,7 +6,7 @@ from modules.database.config_db import get_config
 
 DB_PATH = "database/files.db"
 ITEMS_PER_PAGE = 10
-SEARCH_GROUP_ID = -1004480538217
+SEARCH_GROUP_ID = int(os.getenv("SEARCH_GROUP_ID", "-1004480538217"))
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
     results = []
@@ -53,7 +53,7 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
             keyboard.append(nav)
         txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\nFound {total} matching file(s). Page {page} of {tp}:"
     else:
-        txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n• No matching files found in the database.\n\n<i>(Storage Group ID: {SEARCH_GROUP_ID})</i>"
+        txt = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n• No matching files found in the database."
 
     keyboard.append([InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")])
     if update.callback_query:
