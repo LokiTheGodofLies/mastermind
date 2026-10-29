@@ -117,7 +117,7 @@ def main():
             await send_startup_log(app)
         application.post_init = post_init
 
-    import os, threading
+    import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
     class _H(BaseHTTPRequestHandler):
         def do_GET(self):
