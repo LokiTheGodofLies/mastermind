@@ -84,3 +84,13 @@ def get_all_configs():
 
 
 init_config_db()
+
+
+def get_config_bool(key, default=True, fallback_env=None):
+    """Retrieves a boolean config setting with fallback."""
+    val = get_config(key, default=None, fallback_env=fallback_env)
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("true", "1", "yes", "on")

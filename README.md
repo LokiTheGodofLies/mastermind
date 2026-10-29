@@ -14,6 +14,7 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 * `/refer`,  & `/myreferrals`: Personal referral dashboard to invite friends and earn bonus search/request allowances.
 * `/support`: Verification quiz with single-use invite link generation to join the support community.
 * `/stats`: Public bot operation statistics and media banners.
+* `/id`: User, chat, channel, and forum topic identification with embedded profile links.
 * `/help`: Detailed user guide and command index.
 * `/admins`, `/moderators`, `/volunteers`, `/promoters`: Public community rosters with embedded profile links.
 

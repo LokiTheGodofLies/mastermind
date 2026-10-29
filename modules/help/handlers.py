@@ -11,6 +11,20 @@ COMMAND_DETAILS = {
     # =======================================================================
     # 👤 USER COMMANDS & GUIDES
     # =======================================================================
+    "id": {
+        "title": "🆔 /id Command",
+        "category": "user",
+        "text": (
+            "🆔 <b>Command:</b> <code>/id</code>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Retrieves full identification details for users, chats, groups, channels, and forum topics.\n\n"
+            "💡 <b>Usage:</b>\n"
+            "• Send <code>/id</code> in any chat to view your User ID, Chat Name, Chat ID, and Topic ID.\n"
+            "• Reply to any message with <code>/id</code> to inspect that user's name, ID, and profile link.\n"
+            "• <code>/id @username</code>: Username lookup."
+        ),
+    },
+
     "rosters": {
         "title": "👥 Community Roster Commands",
         "category": "user",
@@ -557,6 +571,7 @@ def build_user_help_menu():
             InlineKeyboardButton("📈 /stats", callback_data="help_cmd_stats"),
             InlineKeyboardButton("👥 User Roles", callback_data="help_cmd_roles"),
             InlineKeyboardButton("📜 /admins & Rosters", callback_data="help_cmd_rosters"),
+            InlineKeyboardButton("🆔 /id Lookup", callback_data="help_cmd_id"),
         ],
         [
             InlineKeyboardButton("📥 Dual File Delivery Guide", callback_data="help_cmd_delivery"),
