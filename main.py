@@ -23,6 +23,7 @@ from modules.request.handlers import request_command, request_callback_handler, 
 from modules.id.handlers import id_command
 from modules.stats.handlers import stats_command
 from modules.search.handlers import search_command, search_callback_handler
+from modules.indexing.index_command import index_command, index_callback, index_flow_handler
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,10 @@ def main():
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("request", request_command))
     application.add_handler(CommandHandler("req", request_command))
+    application.add_handler(CommandHandler("index", index_command))
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/index(?:@\w+)?(?:\s|$)"), index_command))
+    application.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_(yes|no|apr|rej|cancel)_[0-9a-f]{8}$"))
+    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, index_flow_handler), group=1)
 
     application.add_handler(
         CallbackQueryHandler(
