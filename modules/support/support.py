@@ -1,3 +1,4 @@
+from configs import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.ban.ban import get_support_chat_id
@@ -39,7 +40,7 @@ def get_total_questions() -> int:
 async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the support center intro and start the verification quiz."""
     text = (
-        "🛡️ **Mastermind Support Center**\n\n"
+        f"🛡️ **{bot_name()} Support Center**\n\n"
         "If you need help, you can join our support chat. However, to keep our "
         "support chat safe and protected from unnecessary/irrelevant questions, "
         "spam, chats, and attacks, you must pass a quick verification quiz first."

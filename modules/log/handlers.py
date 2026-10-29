@@ -1,3 +1,4 @@
+from configs import log_topic, max_log_lines
 import os
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -31,7 +32,8 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             try:
                 count = int(param)
-                if count > 1000: count = 1000
+                cap = max_log_lines()
+                if count > cap: count = cap
                 log_content = get_logs_by_count(count)
                 filename = f"logs_last_{count}.txt"
             except ValueError:
@@ -51,7 +53,7 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
     chat = result.chat
     new_status = result.new_chat_member.status
     old_status = result.old_chat_member.status
-    LOG_GROUP_ID = os.getenv("STORAGE_GROUP_ID")
+    LOG_GROUP_ID = os.getenv("LOGGER_GROUP_ID")
     if not LOG_GROUP_ID: return
     chat_type = chat.type
     chat_title = chat.title
@@ -60,7 +62,7 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
     actor_user = result.from_user
     actor_name = actor_user.full_name if actor_user else "Unknown / System"
     actor_id = actor_user.id if actor_user else "N/A"
-    topic_id = os.getenv("GROUP_LOG_TOPIC_ID") if chat_type in ["group", "supergroup"] else (os.getenv("CHANNEL_LOG_TOPIC_ID") if chat_type == "channel" else None)
+    topic_id = log_topic("GROUP") if chat_type in ["group", "supergroup"] else (log_topic("CHANNEL") if chat_type == "channel" else None)
     if not topic_id: return
     was_added = old_status in ["left", "restricted", "kicked"] and new_status in ["member", "administrator"]
     was_removed = old_status in ["member", "administrator"] and new_status in ["left", "kicked"]

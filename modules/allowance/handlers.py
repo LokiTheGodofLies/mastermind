@@ -1,3 +1,4 @@
+from configs import bot_name, referral_bonus_label
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.allowance.allowance import get_user_quota_summary, gift_quota
@@ -85,10 +86,10 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text += "💡 *You haven't invited anyone yet. Share your link to start earning bonuses!*"
         
-    text += f"\n\n*When a new user starts via your link, both of you get +10 searches & requests!*"
+    text += f"\n\n*When a new user starts via your link, both of you get {referral_bonus_label()}!*"
     
     # Create the inline share button
-    share_text = "Join Mastermind Bot and let's earn bonus searches & requests!"
+    share_text = f"Join {bot_name()} Bot and let's earn bonus searches & requests!"
     share_url = f"https://t.me/share/url?url={referral_link}&text={share_text}"
     
     keyboard = [

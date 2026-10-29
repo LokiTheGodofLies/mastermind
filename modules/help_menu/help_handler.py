@@ -1,3 +1,4 @@
+from configs import default_search_quota, default_request_quota
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.user_db import get_user_role_db
@@ -17,7 +18,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <b>Normal Text</b> - Reminds you that I can't chat and gives you a quick help button.\n\n"
         f"👤 <b>Your Current Role:</b> <code>{role}</code>\n\n"
         "📊 <b>Hierarchy & Quota Tiers:</b>\n"
-        "• <b>Normal User:</b> 10 searches & 10 requests\n"
+        f"• <b>Normal User:</b> {default_search_quota()} searches & {default_request_quota()} requests\n"
         "• <b>Promoter:</b> 20 searches & 20 requests\n"
         "• <b>Moderator:</b> 30 searches & 30 requests\n"
         "• <b>Admin / Owner:</b> Unlimited searches & requests (Plus management powers)"

@@ -1,3 +1,4 @@
+from configs import log_topic
 import os
 import logging
 import asyncio
@@ -143,7 +144,7 @@ def format_index_channel_caption(
 async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     STORAGE_GROUP_ID = os.getenv('STORAGE_GROUP_ID')
     LOGGER_GROUP_ID = os.getenv('LOGGER_GROUP_ID')
-    INDEX_LOG_TOPIC_ID = os.getenv('INDEX_LOG_TOPIC_ID')
+    INDEX_LOG_TOPIC_ID = log_topic("INDEX")
 
     if not STORAGE_GROUP_ID:
         return

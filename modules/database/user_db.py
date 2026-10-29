@@ -1,3 +1,4 @@
+from configs import default_search_quota, default_request_quota
 import sqlite3
 
 DB_FILE = "mastermind_users.db"
@@ -20,13 +21,13 @@ def init_user_db():
         )
     ''')
 
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS quotas (
             user_id INTEGER PRIMARY KEY,
             searches_used INTEGER DEFAULT 0,
-            searches_limit INTEGER DEFAULT 10,
+            searches_limit INTEGER DEFAULT {default_search_quota()},
             requests_used INTEGER DEFAULT 0,
-            requests_limit INTEGER DEFAULT 10,
+            requests_limit INTEGER DEFAULT {default_request_quota()},
             last_reset_date TEXT,
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
@@ -59,7 +60,7 @@ def add_or_update_user_db(user_id, username, full_name, today_str):
         if role == 'Owner':
             s_limit, r_limit = 999999, 999999
         else:
-            s_limit, r_limit = 10, 10
+            s_limit, r_limit = default_search_quota(), default_request_quota()
 
         cursor.execute('''
             INSERT INTO users (user_id, username, full_name, role, ban_status)
