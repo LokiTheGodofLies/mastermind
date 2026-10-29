@@ -23,7 +23,7 @@ from modules.id.handlers import id_command
 from modules.stats.handlers import stats_command
 from modules.search.handlers import search_command, search_callback_handler
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler
-from modules.log.startup_log import send_startup_notification
+from modules.log.startup_log import send_startup_notification, error_handler, report_fatal_sync
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,8 @@ def main():
 
     print("🤖 Mastermind bot is up and running...")
 
+    application.add_error_handler(error_handler)
+
     async def post_init(app):
         await send_startup_notification(app)
     application.post_init = post_init
@@ -107,7 +109,12 @@ def main():
             self.send_response(200); self.end_headers()
         def log_message(self, *a): pass
     threading.Thread(target=HTTPServer(("0.0.0.0", int(os.getenv("PORT", "8080"))), _H).serve_forever, daemon=True).start()
-    application.run_polling()
+    try:
+        application.run_polling()
+    except Exception as e:
+        import traceback
+        report_fatal_sync(traceback.format_exc())
+        raise
 
 
 if __name__ == "__main__":
