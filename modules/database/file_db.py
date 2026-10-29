@@ -154,3 +154,20 @@ def save_indexed_file_db(
         print("✅ [DB SUCCESS] Record saved to database.")
     except Exception as e:
         print(f"❌ [DB ERROR] save_indexed_file_db failed: {e}")
+
+
+def get_file_stats_counts_db() -> dict:
+    """Returns counts of total files, ebooks, and audiobooks for /stats."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM indexed_files")
+        total = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM indexed_files WHERE category = 'ebook'")
+        ebooks = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM indexed_files WHERE category = 'audiobook'")
+        audiobooks = c.fetchone()[0]
+        conn.close()
+        return {"total": total, "ebooks": ebooks, "audiobooks": audiobooks}
+    except Exception:
+        return {"total": 0, "ebooks": 0, "audiobooks": 0}

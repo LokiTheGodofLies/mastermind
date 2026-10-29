@@ -11,7 +11,10 @@ from telegram import Bot
 from telegram.error import TelegramError, Conflict
 from config import (
     admin_ids,
+    bot_name,
     helper_bot_tokens,
+    logger_group_id,
+    log_topic,
     general_topic_id,
     config_db_path,
     files_db_path,
@@ -281,3 +284,74 @@ async def send_startup_notification(application):
         return
     if problems:
         await report_error(application, "\n".join(problems), title="Startup check problems")
+
+
+async def _dispatch_lifecycle_notices(app):
+    """Sends auto-delete notices to registered groups/channels and audits blocked users."""
+    try:
+        from modules.database.user_db import get_all_chats_db, get_all_users_for_broadcast_db, record_user_blocked_bot_db
+        chats = get_all_chats_db()
+        helpers = await _helper_bots()
+
+        # 1. Main bot startup notice (auto-deletes in 5s)
+        for c in chats:
+            cid = c["chat_id"]
+            try:
+                sent = await app.bot.send_message(cid, f"🔄 <b>{bot_name()} is online and ready!</b>", parse_mode="HTML")
+                asyncio.create_task(_auto_delete_msg(app.bot, cid, sent.message_id, 5))
+            except Exception:
+                pass
+
+        # 2. Helper bot startup notices (auto-delete in 1s)
+        for tok in helpers:
+            try:
+                async with Bot(tok) as hb:
+                    me = await hb.get_me()
+                    for c in chats:
+                        cid = c["chat_id"]
+                        try:
+                            sent = await hb.send_message(cid, f"🤖 @{me.username} helper delivery is online!", parse_mode="HTML")
+                            asyncio.create_task(_auto_delete_msg(hb, cid, sent.message_id, 1))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # 3. Proactive user block detection (sample batch)
+        users = get_all_users_for_broadcast_db()[:50]
+        for u in users:
+            uid = u["user_id"]
+            try:
+                await app.bot.send_chat_action(uid, "typing")
+            except Exception as exc:
+                if "blocked" in str(exc).lower():
+                    await _report_user_block(app, uid, u.get("full_name", ""), u.get("username", ""), app.bot.first_name, app.bot.username or "")
+    except Exception as exc:
+        logger.debug("Lifecycle dispatch notice: %s", exc)
+
+
+async def _auto_delete_msg(bot_inst, chat_id, message_id, delay):
+    await asyncio.sleep(delay)
+    try:
+        await bot_inst.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+
+async def _report_user_block(app, uid, name, uname, bot_title, bot_uname):
+    from modules.database.user_db import record_user_blocked_bot_db
+    record_user_blocked_bot_db(uid, bot_uname)
+    log_gid = logger_group_id()
+    topic = log_topic("USER_LOG_TOPIC_ID") or 2
+    if not log_gid:
+        return
+    text = (
+        "🚫 <b>Bot Blocked by User</b>\n\n"
+        f"• <b>User:</b> <a href=\"tg://user?id={uid}\">{html.escape(name or 'User')}</a> (@{html.escape(uname or 'none')}) [<code>{uid}</code>]\n"
+        f"• <b>Blocked Bot:</b> {html.escape(bot_title)} (@{html.escape(bot_uname)})\n"
+        f"• <b>Timestamp:</b> {datetime.datetime.now(IST).strftime('%d-%m-%Y | %I:%M:%S %p IST')}"
+    )
+    try:
+        await app.bot.send_message(chat_id=int(log_gid), message_thread_id=int(topic), text=text, parse_mode="HTML")
+    except Exception:
+        pass

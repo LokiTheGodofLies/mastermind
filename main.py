@@ -83,6 +83,8 @@ from modules.search.handlers import search_command, search_callback_handler  # n
 from modules.search.delivery import handle_deeplink_file_delivery  # noqa: E402
 from modules.indexing.book_index import handle_book_indexing  # noqa: E402
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler  # noqa: E402
+from modules.broadcast.handlers import broadcast_command, cancelbroadcast_command, broadcast_callback_handler  # noqa: E402
+from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
 from modules.message.message_handler import handle_normal_text  # noqa: E402
 from modules.utility.ping import ping_command  # noqa: E402
 from modules.utility.check_helpers import checkhelpers_command  # noqa: E402
@@ -297,11 +299,18 @@ def main():
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler(["request", "req"], request_command))
     application.add_handler(CommandHandler("index", index_command))
+    application.add_handler(CommandHandler(["broadcast", "bc", "pinbroadcast", "pinbc"], broadcast_command))
+    application.add_handler(CommandHandler(["cancelbroadcast", "stopbroadcast"], cancelbroadcast_command))
+    application.add_handler(CommandHandler(["admins", "adminlist"], admins_command))
+    application.add_handler(CommandHandler(["moderators", "mods", "moderatorlist"], moderators_command))
+    application.add_handler(CommandHandler(["volunteers", "vols", "volunteerlist"], volunteers_command))
+    application.add_handler(CommandHandler(["promoters", "promos", "promoterlist"], promoters_command))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/index(?:@\w+)?(?:\s|$)"), index_command))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
 
     # Callback Query Routers
-    application.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_(yes|no|apr|rej|cancel)_[0-9a-f]{8}$"))
+    application.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_"))
+    application.add_handler(CallbackQueryHandler(broadcast_callback_handler, pattern=r"^bc_"))
     application.add_handler(
         CallbackQueryHandler(
             menu_callback_router,

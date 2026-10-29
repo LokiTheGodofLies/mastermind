@@ -11,6 +11,34 @@ COMMAND_DETAILS = {
     # =======================================================================
     # 👤 USER COMMANDS & GUIDES
     # =======================================================================
+    "rosters": {
+        "title": "👥 Community Roster Commands",
+        "category": "user",
+        "text": (
+            "👥 <b>Community Roster Commands</b>\n\n"
+            "View real-time lists of community members with direct profile links:\n\n"
+            "• <code>/admins</code>: Lists all Administrators and GOD.\n"
+            "• <code>/moderators</code>: Lists all active Moderators (alias: <code>/mods</code>).\n"
+            "• <code>/volunteers</code>: Lists all active Volunteers (alias: <code>/vols</code>).\n"
+            "• <code>/promoters</code>: Lists all active Promoters (alias: <code>/promos</code>)."
+        ),
+    },
+    "broadcast": {
+        "title": "📢 /broadcast & /pinbroadcast Commands",
+        "category": "admin",
+        "text": (
+            "📢 <b>Broadcast & Pinning Commands</b>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Dispatches announcements across all users, groups, and channels with multi-bot tracking and optional pinning.\n\n"
+            "💡 <b>Usage:</b>\n"
+            "• Reply to any message with <code>/broadcast</code> to open the multi-target dashboard.\n"
+            "• Reply with <code>/pinbroadcast</code> to broadcast and auto-pin the message in groups/channels.\n"
+            "• Direct targets: <code>/broadcast &lt;id1 id2 ...&gt;</code> in reply to message.\n"
+            "• Segment stop: <code>/cancelbroadcast &lt;bot_username&gt; &lt;users|groups|channels&gt;</code>\n\n"
+            "🔒 <b>Access:</b> Administrators & GOD"
+        ),
+    },
+
     "start": {
         "title": "🚀 /start Command",
         "category": "user",
@@ -528,6 +556,7 @@ def build_user_help_menu():
         [
             InlineKeyboardButton("📈 /stats", callback_data="help_cmd_stats"),
             InlineKeyboardButton("👥 User Roles", callback_data="help_cmd_roles"),
+            InlineKeyboardButton("📜 /admins & Rosters", callback_data="help_cmd_rosters"),
         ],
         [
             InlineKeyboardButton("📥 Dual File Delivery Guide", callback_data="help_cmd_delivery"),
@@ -606,6 +635,7 @@ def build_admin_help_menu():
         ],
         [
             InlineKeyboardButton("📣 /addpromo & /delpromo", callback_data="help_cmd_addpromoter"),
+            InlineKeyboardButton("📢 /broadcast", callback_data="help_cmd_broadcast"),
             InlineKeyboardButton("🏓 /ping", callback_data="help_cmd_ping"),
         ],
         [
@@ -635,6 +665,7 @@ def build_god_help_menu():
         ],
         [
             InlineKeyboardButton("⚙️ Global Governance & Tokens", callback_data="help_cmd_governance"),
+            InlineKeyboardButton("📢 Broadcast & Pinning", callback_data="help_cmd_broadcast"),
         ],
         [
             InlineKeyboardButton("« Back to Categories", callback_data="help_main"),

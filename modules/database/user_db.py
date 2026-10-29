@@ -87,6 +87,26 @@ def init_user_db():
         )
     """)
 
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chats (
+            chat_id INTEGER PRIMARY KEY,
+            chat_type TEXT,
+            title TEXT,
+            username TEXT,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_blocks (
+            user_id INTEGER,
+            bot_username TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, bot_username)
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -300,3 +320,104 @@ def get_referred_users_db(referrer_id):
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def register_chat_db(chat_id: int, chat_type: str, title: str = "", username: str = ""):
+    """Registers or updates a known group/channel in the database for broadcasts and permission auditing."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO chats (chat_id, chat_type, title, username, last_seen)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                chat_type = excluded.chat_type,
+                title = excluded.title,
+                username = excluded.username,
+                last_seen = CURRENT_TIMESTAMP
+        ''', (chat_id, chat_type, title or "", username or ""))
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"register_chat_db error: {exc}")
+
+
+def get_all_chats_db(chat_type: str | None = None) -> list[dict]:
+    """Retrieves all registered chats, optionally filtered by type (group, supergroup, channel)."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        if chat_type:
+            cursor.execute("SELECT chat_id, chat_type, title, username FROM chats WHERE chat_type = ?", (chat_type,))
+        else:
+            cursor.execute("SELECT chat_id, chat_type, title, username FROM chats")
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"chat_id": r[0], "chat_type": r[1], "title": r[2], "username": r[3]} for r in rows]
+    except Exception:
+        return []
+
+
+def get_all_users_for_broadcast_db() -> list[dict]:
+    """Retrieves all unbanned users for broadcasting."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, full_name, username FROM users WHERE ban_status = 'none'")
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"user_id": r[0], "full_name": r[1], "username": r[2]} for r in rows]
+    except Exception:
+        return []
+
+
+def get_users_by_role_db(role: str) -> list[dict]:
+    """Retrieves all users assigned a specific role (with profile formatting)."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        if role in ("Admin", "GOD"):
+            cursor.execute("SELECT user_id, full_name, username, role FROM users WHERE role IN ('Admin', 'GOD', 'Owner')")
+        else:
+            cursor.execute("SELECT user_id, full_name, username, role FROM users WHERE role = ?", (role,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"user_id": r[0], "full_name": r[1], "username": r[2], "role": r[3]} for r in rows]
+    except Exception:
+        return []
+
+
+def record_user_blocked_bot_db(user_id: int, bot_username: str):
+    """Records in database that user blocked a specific bot."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO bot_blocks (user_id, bot_username) VALUES (?, ?)", (user_id, (bot_username or "").lstrip("@")))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_db_stats_counts() -> dict:
+    """Returns counts of users, groups, channels, and blocks for /stats."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users")
+        total_users = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM chats WHERE chat_type IN ('group', 'supergroup')")
+        total_groups = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM chats WHERE chat_type = 'channel'")
+        total_channels = c.fetchone()[0]
+        c.execute("SELECT COUNT(DISTINCT user_id) FROM bot_blocks")
+        total_blocked_users = c.fetchone()[0]
+        conn.close()
+        return {
+            "users": total_users,
+            "groups": total_groups,
+            "channels": total_channels,
+            "blocked": total_blocked_users,
+        }
+    except Exception:
+        return {"users": 0, "groups": 0, "channels": 0, "blocked": 0}

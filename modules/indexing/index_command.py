@@ -1,3 +1,36 @@
+
+import sqlite3
+from config import users_db_path
+
+def _init_index_persistence():
+    try:
+        conn = sqlite3.connect(users_db_path())
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS active_index_jobs (
+                rid TEXT PRIMARY KEY,
+                chat_id INTEGER,
+                title TEXT,
+                start_id INTEGER,
+                end_id INTEGER,
+                current_mid INTEGER,
+                priority_mode TEXT,
+                requester_id INTEGER,
+                requester_name TEXT,
+                prompt_chat INTEGER,
+                prompt_msg_id INTEGER,
+                state TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+_init_index_persistence()
+
+from telegram import Bot
+import time
 import re
 import html
 import uuid
@@ -16,6 +49,7 @@ from config import (
     logger_group_id,
     max_index_batch,
     storage_group_id,
+    helper_bot_tokens,
 )
 from modules.database.user_db import get_user_role_db
 from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db
@@ -307,6 +341,47 @@ async def _send_approval(context, rid, job):
     return False
 
 
+
+async def _show_skip_menu(context, rid: str, job: dict):
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏩ No Skip", callback_data=f"idx_sk_none_{rid}")],
+        [
+            InlineKeyboardButton("⏭ Skip Top N", callback_data=f"idx_sk_top_{rid}"),
+            InlineKeyboardButton("⏮ Skip Bottom N", callback_data=f"idx_sk_bot_{rid}"),
+        ],
+        [InlineKeyboardButton("✂️ Custom Range", callback_data=f"idx_sk_custom_{rid}")],
+        [InlineKeyboardButton("⛔ Cancel", callback_data=f"idx_cancel_{rid}")],
+    ])
+    await _edit_prompt(
+        context, job,
+        f"🔢 <b>Message Skip & Range Selection</b>\n\n"
+        f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
+        f"🔢 Range: <code>{job['start_id']} → {job['end_id']}</code>\n\n"
+        f"Select an option below to filter messages before starting:",
+        markup
+    )
+
+
+async def _show_confirm_card(context, rid: str, job: dict):
+    start = job["start_id"]
+    end = job["end_id"]
+    skip = job.get("skip_count", 0)
+    total = max(0, end - start + 1 - skip)
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Confirm & Start Indexing", callback_data=f"idx_yes_{rid}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"idx_no_{rid}")],
+    ])
+    await _edit_prompt(
+        context, job,
+        f"📚 <b>Ready to Index!</b>\n\n"
+        f"📂 <b>Chat:</b> {html.escape(job['title'])}\n"
+        f"🔢 <b>Message Range:</b> <code>{start} → {end}</code> (Total: {total})\n"
+        f"⚡ <b>Priority Mode:</b> <code>Direct DM First</code>\n\n"
+        f"Tap below to begin background indexing:",
+        markup
+    )
+
+
 async def _open_prompt(context, reply_chat_id, user, source_ref, start_id, end_id, skip):
     skip = skip or 0
     first = start_id + skip
@@ -333,15 +408,23 @@ async def _open_prompt(context, reply_chat_id, user, source_ref, start_id, end_i
         InlineKeyboardButton("❌ No", callback_data=f"idx_no_{rid}"),
     ]])
     skip_note = f" (skipping first {skip})" if skip else ""
+    wizard_markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🌐 Public Channel / Group", callback_data=f"idx_pub_{rid}"),
+            InlineKeyboardButton("🔒 Private Channel / Group", callback_data=f"idx_priv_{rid}"),
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"idx_cancel_{rid}")],
+    ])
     sent = await context.bot.send_message(
         chat_id=reply_chat_id,
         text=(
-            "📚 <b>Do you want to index this chat?</b>\n\n"
-            f"📂 <b>{html.escape(title)}</b>\n"
-            f"🔢 Messages: {first} → {end_id}{skip_note}"
+            "📚 <b>Index Setup Wizard — Step 1: Access Type</b>\n\n"
+            f"📂 <b>Target Chat:</b> <code>{html.escape(title)}</code>\n"
+            f"🔢 <b>Message Range:</b> <code>{first} → {end_id}</code>\n\n"
+            "Is this target chat <b>Public</b> or <b>Private</b>?"
         ),
         parse_mode="HTML",
-        reply_markup=markup,
+        reply_markup=wizard_markup,
     )
     _jobs(context)[rid] = {
         "chat_id": src.id,
@@ -523,6 +606,64 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Rejected")
             await _edit_approval(context, job, f"❌ <b>Rejected</b> by {who}\n📂 {html.escape(job['title'])} — requested by {html.escape(job['requester_name'])}")
             await _edit_prompt(context, job, f"❌ Index request rejected by {who}.")
+
+    
+    elif action == "pub":
+        # Public channel selected
+        job["is_private"] = False
+        await q.answer("Public channel confirmed ✅")
+        await _show_skip_menu(context, rid, job)
+
+    elif action == "priv":
+        # Private channel selected - check helper bot admin rights
+        await q.answer("Checking helper bot permissions…")
+        tokens = helper_bot_tokens()
+        has_admin = False
+        for tok in tokens:
+            try:
+                async with Bot(tok) as hb:
+                    me = await hb.get_me()
+                    cm = await hb.get_chat_member(job["chat_id"], me.id)
+                    if cm.status in ("administrator", "creator"):
+                        has_admin = True
+                        break
+            except Exception:
+                pass
+
+        if has_admin:
+            job["is_private"] = True
+            await _show_skip_menu(context, rid, job)
+        else:
+            markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Re-check Permissions", callback_data=f"idx_priv_{rid}")],
+                [InlineKeyboardButton("❌ Cancel", callback_data=f"idx_cancel_{rid}")],
+            ])
+            await q.edit_message_text(
+                "❌ <b>Helper Bot is not an Administrator!</b>\n\n"
+                "Telegram strictly requires at least one Helper Bot to be an <b>Administrator</b> in private channels to forward files.\n\n"
+                "Please add a Helper Bot as Admin and tap 'Re-check Permissions'.",
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+
+    elif action.startswith("sk_"):
+        sk_type = action.replace("sk_", "")
+        if sk_type == "none":
+            job["skip_count"] = 0
+            await q.answer("No skip applied")
+            await _show_confirm_card(context, rid, job)
+        elif sk_type == "top":
+            job["awaiting_input"] = "top"
+            await q.answer("Send top skip count in reply")
+            await q.edit_message_text("🔢 <b>Skip Top Messages</b>\n\nPlease reply to this message with the number of top messages to skip (e.g. <code>50</code>):", parse_mode="HTML")
+        elif sk_type == "bot":
+            job["awaiting_input"] = "bot"
+            await q.answer("Send bottom skip count in reply")
+            await q.edit_message_text("🔢 <b>Skip Bottom Messages</b>\n\nPlease reply to this message with the number of bottom messages to skip (e.g. <code>100</code>):", parse_mode="HTML")
+        elif sk_type == "custom":
+            job["awaiting_input"] = "custom"
+            await q.answer("Send custom range in reply")
+            await q.edit_message_text("✂️ <b>Custom Range Selection</b>\n\nPlease reply to this message with your custom range (e.g. <code>200-250</code> or <code>200 250</code>):", parse_mode="HTML")
 
     elif action == "cancel":
         if not full:

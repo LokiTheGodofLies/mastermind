@@ -15,6 +15,7 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 * `/support`: Verification quiz with single-use invite link generation to join the support community.
 * `/stats`: Public bot operation statistics and media banners.
 * `/help`: Detailed user guide and command index.
+* `/admins`, `/moderators`, `/volunteers`, `/promoters`: Public community rosters with embedded profile links.
 
 ### 👑 Administrator & GOD Commands
 * `/checkhelpers` (alias: `/helpers`): Audits all helper bots in `HELPER_BOT_TOKENS`, verifying token reachability, storage group access, and administrator rights (Post & Delete permissions) in the posting channel. Both Admins and GOD have full access.
@@ -28,6 +29,7 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 * `/ban`, `/ban_pm`, `/ban_support`, `/unban`: Granular user and chat access restriction management.
 * `/log [count|10m]`: Generates and exports in-memory log files directly in Telegram.
 * `/ping`: Diagnostic command displaying round-trip latency and network metrics.
+* `/broadcast`, `/pinbroadcast` & `/cancelbroadcast`: Multi-bot broadcast engine with real-time segmented progress cards, auto-pinning, and granular category cancellation.
 
 ---
 

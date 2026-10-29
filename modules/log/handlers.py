@@ -1,3 +1,4 @@
+from modules.database.user_db import register_chat_db
 import os
 import tempfile
 from telegram import Update
@@ -97,25 +98,28 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         return
     role_description = "👑 Administrator" if new_status == "administrator" else "Regular Member"
     permissions_list = []
+    # Register chat in database for broadcasts
+    register_chat_db(chat_id, chat_type, chat_title, chat.username)
+
     perm_mapping = {
-        "can_manage_chat": "Manage Chat",
-        "can_delete_messages": "Delete Messages",
-        "can_manage_video_chats": "Manage Video Chats",
-        "can_restrict_members": "Restrict Members",
-        "can_promote_members": "Promote Members",
-        "can_change_info": "Change Info",
-        "can_invite_users": "Invite Users",
-        "can_post_messages": "Post Messages",
-        "can_edit_messages": "Edit Messages",
-        "can_pin_messages": "Pin Messages",
-        "can_manage_topics": "Manage Topics",
+        "can_post_messages": "📝 Post Messages",
+        "can_edit_messages": "✏️ Edit Messages",
+        "can_delete_messages": "🗑 Delete Messages",
+        "can_pin_messages": "📌 Pin Messages",
+        "can_invite_users": "🔗 Invite Users",
+        "can_change_info": "ℹ️ Change Info",
+        "can_manage_topics": "🧵 Manage Topics",
+        "can_manage_video_chats": "🎙 Manage Video Chats",
+        "can_promote_members": "👑 Add Admins",
     }
+    new_member = result.new_chat_member
+    perms_lines = []
     if new_status == "administrator":
-        new_member = result.new_chat_member
         for attr, label in perm_mapping.items():
-            if getattr(new_member, attr, False):
-                permissions_list.append(label)
-    perms_str = ", ".join(permissions_list) if permissions_list else "None / Default"
+            val = "✅" if getattr(new_member, attr, False) else "❌"
+            perms_lines.append(f"• {label}: {val}")
+
+    perms_str = "\n".join(perms_lines) if perms_lines else "None / Default"
     log_message = (
         f"{log_label}\n\n"
         f"🏷 **Title:** {chat_title}\n"
@@ -126,7 +130,7 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         f"👤 **Triggered By:** {actor_name} (`{actor_id}`)\n"
     )
     if new_status == "administrator":
-        log_message += f"⚙️ **Permissions:** {perms_str}\n"
+        log_message += f"\n📋 **Permissions:**\n{perms_str}\n"
     try:
         kwargs = {
             "chat_id": int(log_group_id),
