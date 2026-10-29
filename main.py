@@ -73,7 +73,8 @@ from modules.search.delivery import handle_deeplink_file_delivery  # noqa: E402
 from modules.indexing.book_index import handle_book_indexing  # noqa: E402
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler  # noqa: E402
 from modules.message.message_handler import handle_normal_text  # noqa: E402
-from modules.utility.ping import ping_command  # noqa: E402
+from modules.utility.ping import ping_command
+from modules.utility.check_helpers import checkhelpers_command  # noqa: E402
 from modules.log.startup_log import send_startup_notification, error_handler, report_fatal_sync  # noqa: E402
 
 persistence.sync_startup_log()
@@ -197,6 +198,7 @@ def main():
     application.add_handler(CommandHandler("log", log_command))
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(CommandHandler("ping", ping_command))
+    application.add_handler(CommandHandler(["checkhelpers", "helpers"], checkhelpers_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler(["request", "req"], request_command))
