@@ -1,3 +1,4 @@
+from configs import bot_name
 import os
 import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -21,7 +22,7 @@ async def editscript_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("👀 Preview & Test", callback_data="es_menu_preview")],
     ]
     await message.reply_text(
-        "🛠️ <b>Mastermind Admin Configuration Hub (/editscript)</b>\n\nSelect a category to manage:",
+        f"🛠️ <b>{bot_name()} Admin Configuration Hub (/editscript)</b>\n\nSelect a category to manage:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
@@ -42,7 +43,7 @@ async def editscript_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("👀 Preview & Test", callback_data="es_menu_preview")],
         ]
         await query.edit_message_text(
-            "🛠️ <b>Mastermind Admin Configuration Hub (/editscript)</b>\n\nSelect a category to manage:",
+            f"🛠️ <b>{bot_name()} Admin Configuration Hub (/editscript)</b>\n\nSelect a category to manage:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )

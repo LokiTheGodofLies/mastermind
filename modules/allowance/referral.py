@@ -1,3 +1,4 @@
+from configs import referral_search_bonus, referral_request_bonus
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.user_db import (
@@ -16,8 +17,8 @@ def process_referral(referrer_id: int, new_user_id: int):
     if not success:
         return False, "⚠️ You have already claimed a referral bonus."
 
-    add_quota_limits_db(referrer_id, search_bonus=10, request_bonus=10)
-    add_quota_limits_db(new_user_id, search_bonus=10, request_bonus=10)
+    add_quota_limits_db(referrer_id, search_bonus=referral_search_bonus(), request_bonus=referral_request_bonus())
+    add_quota_limits_db(new_user_id, search_bonus=referral_search_bonus(), request_bonus=referral_request_bonus())
     return True, "Success"
 
 
@@ -62,7 +63,7 @@ async def process_referral_with_notification(*args, **kwargs):
         referrer_text = (
             f"👤 **New Referral Joined!**\n\n"
             f"🔗 <b>{new_user_name}</b> joined using your referral link.\n"
-            f"🎁 You have been awarded <b>+10 Search</b> and <b>+10 Request</b> allowance bonuses!"
+            f"🎁 You have been awarded <b>+{referral_search_bonus()} Search</b> and <b>+{referral_request_bonus()} Request</b> allowance bonuses!"
         )
         referrer_keyboard = [[
             InlineKeyboardButton("📋 See my referrals", callback_data="my_referrals_callback"),
@@ -80,7 +81,7 @@ async def process_referral_with_notification(*args, **kwargs):
 
         new_user_text = (
             "🎁 <b>Referral Bonus Claimed!</b>\n\n"
-            "Since you joined from a referral link, you got <b>+10 bonus search and request</b> allowances!"
+            f"Since you joined from a referral link, you got <b>+{referral_search_bonus()} bonus search and +{referral_request_bonus()} bonus request</b> allowances!"
         )
         new_user_keyboard = [[InlineKeyboardButton("🚀 Refer and earn more bonus", callback_data="refer_more_callback")]]
         try:
@@ -105,7 +106,7 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🔗 **Your Referral Link**\n\n"
         "Share this link with your friends. Whenever someone starts the bot using your link, "
-        "both you and your friend will receive **+10 Search** and **+10 Request** bonuses!\n\n"
+        f"both you and your friend will receive **+{referral_search_bonus()} Search** and **+{referral_request_bonus()} Request** bonuses!\n\n"
         f"📋 `{referral_link}`"
     )
 

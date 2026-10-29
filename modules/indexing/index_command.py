@@ -1,3 +1,4 @@
+from configs import max_index_batch, index_sleep_seconds, log_topic
 import os
 import re
 import html
@@ -148,14 +149,8 @@ async def _safe_delete(msg):
 async def _run_index(context, rid, job):
     bot = context.bot
     storage = os.getenv("STORAGE_GROUP_ID")
-    try:
-        batch = max(int(os.getenv("MAX_INDEX_BATCH", "10")), 1)
-    except ValueError:
-        batch = 10
-    try:
-        sleep_s = max(int(os.getenv("INDEX_SLEEP_SECONDS", "10")), 0)
-    except ValueError:
-        sleep_s = 10
+    batch = max_index_batch()
+    sleep_s = index_sleep_seconds()
 
     stats = {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}
     final_state = "completed ✅"
@@ -251,7 +246,7 @@ async def _log_summary(context, job, stats, final_state):
         f"🚫 Filtered: {stats['filtered']} | 🗑 Deleted: {stats['deleted']} | ⚠️ Errors: {stats['skipped']}"
     )
     kwargs = {"chat_id": int(logger_id), "text": text, "parse_mode": "HTML"}
-    topic = os.getenv("INDEX_LOG_TOPIC_ID")
+    topic = log_topic("INDEX")
     if topic:
         kwargs["message_thread_id"] = int(topic)
     try:
@@ -275,7 +270,7 @@ async def _send_approval(context, rid, job):
     logger_id = os.getenv("LOGGER_GROUP_ID")
     if logger_id:
         kwargs = {"chat_id": int(logger_id), "text": text, "parse_mode": "HTML", "reply_markup": markup}
-        topic = os.getenv("INDEX_LOG_TOPIC_ID")
+        topic = log_topic("INDEX")
         if topic:
             kwargs["message_thread_id"] = int(topic)
         try:

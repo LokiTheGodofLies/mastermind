@@ -1,3 +1,4 @@
+from configs import bot_name, referral_bonus_label
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -30,12 +31,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             referrer_id = int(args[0].split("_")[1])
             success, _ = await process_referral_with_notification(context, referrer_id, user.id, user.full_name)
             if success:
-                referral_notice = "\n\n🎉 <b>Referral Bonus Applied!</b> You and your referrer received +10 searches & requests."
+                referral_notice = f"\n\n🎉 <b>Referral Bonus Applied!</b> You and your referrer received {referral_bonus_label()}."
         except ValueError:
             pass
 
     message = (
-        f"Hi <b>{user_name}</b>, welcome to Mastermind Bot! 👋\n\n"
+        f"Hi <b>{user_name}</b>, welcome to {bot_name()} Bot! 👋\n\n"
         "I am your modular assistant. Tap the buttons below to see my help menu or reach out to my owner."
         f"{referral_notice}"
     )

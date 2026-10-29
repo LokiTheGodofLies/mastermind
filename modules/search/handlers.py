@@ -1,3 +1,4 @@
+from configs import items_per_page, search_group_id
 import os
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -5,8 +6,6 @@ from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
 
 DB_PATH = "database/files.db"
-ITEMS_PER_PAGE = 10
-SEARCH_GROUP_ID = int(os.getenv("SEARCH_GROUP_ID", "-1004480538217"))
 
 async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
     results = []
@@ -39,9 +38,9 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
     total = len(results)
     keyboard = []
     if total > 0:
-        tp = (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        tp = (total + items_per_page() - 1) // items_per_page()
         page = max(1, min(page, tp))
-        for row_id, tname, lbl in results[(page-1)*ITEMS_PER_PAGE : page*ITEMS_PER_PAGE]:
+        for row_id, tname, lbl in results[(page-1)*items_per_page() : page*items_per_page()]:
             keyboard.append([InlineKeyboardButton(f"📁 [{tname}] {lbl}", callback_data=f"file_dl_{row_id}")])
         nav = []
         if page > 1:
@@ -90,8 +89,12 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await q.answer()
     elif d == "generate_group_invite":
         await q.answer("Generating invite link...")
+        gid = search_group_id()
+        if gid is None:
+            await q.message.edit_text("❌ <b>Search group is not configured.</b>\n\nPlease contact the administrator.", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))
+            return
         try:
-            link = await context.bot.create_chat_invite_link(chat_id=SEARCH_GROUP_ID, member_limit=1)
+            link = await context.bot.create_chat_invite_link(chat_id=gid, member_limit=1)
             await q.message.edit_text(f"🎉 <b>Here is your single-use invite link:</b>\n\n{link.invite_link}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))
         except Exception as e:
             await q.message.edit_text(f"❌ <b>Could not generate invite link.</b>\n\nReason: {e}", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]))

@@ -1,3 +1,4 @@
+from configs import bot_name
 import os
 import asyncio
 import logging
@@ -92,7 +93,7 @@ def main():
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern="^req_"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
 
-    print("🤖 Mastermind bot is up and running...")
+    print(f"🤖 {bot_name()} bot is up and running...")
 
     application.add_error_handler(error_handler)
 

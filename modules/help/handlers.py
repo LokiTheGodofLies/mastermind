@@ -1,3 +1,4 @@
+from configs import bot_name
 import os
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,7 +17,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_id in ADMIN_IDS
 
     default_help = (
-        "📖 <b>Mastermind Bot - Help & User Guide</b>\n\n"
+        f"📖 <b>{bot_name()} Bot - Help & User Guide</b>\n\n"
         "Welcome! Here is a complete overview of available features and access tiers:\n\n"
         "👤 <b>User Hierarchy & Features:</b>\n"
         "• <b>Standard Users:</b>\n"

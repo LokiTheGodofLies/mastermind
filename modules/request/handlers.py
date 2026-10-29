@@ -1,3 +1,4 @@
+import configs
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ApplicationHandlerStop
@@ -109,7 +110,11 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
     
     if data.startswith("req_sub_orig_") or data.startswith("req_sub_gb_"):
         book_query = data.split("_", 3)[-1]
-        request_channel_id = os.getenv("REQUEST_CHANNEL_ID", "-1004447576324")
+        request_channel_id = configs.request_channel_id()
+        if request_channel_id is None:
+            logger.error("REQUEST_CHANNEL_ID is not configured")
+            await query.edit_message_text("❌ Requests are not configured right now. Please try again later.")
+            return
         user = query.from_user
         user_mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
         bq_esc = html.escape(book_query)
@@ -117,7 +122,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
         req_text = f"📥 <b>New Book Request</b>\n\n👤 <b>Requested By:</b> {user_mention}\n📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
         try:
             await context.bot.send_message(
-                chat_id=int(request_channel_id),
+                chat_id=request_channel_id,
                 text=req_text,
                 parse_mode="HTML"
             )

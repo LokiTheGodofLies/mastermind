@@ -1,3 +1,4 @@
+from configs import bot_name
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -13,7 +14,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_id in admin_ids
 
     # Fetch stats header script from configuration DB
-    default_header = "📊 <b>Mastermind Bot Statistics</b>"
+    default_header = f"📊 <b>{bot_name()} Bot Statistics</b>"
     header_text = get_config("stats_header_script", default=default_header)
 
     if is_admin:
