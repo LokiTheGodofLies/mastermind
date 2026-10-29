@@ -140,9 +140,6 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await search_command(update, context)
     elif d == "noop":
         await q.answer("Current Page")
-    elif d.startswith("search_direct_"):
-        query = d.replace("search_direct_", "", 1)
-        await perform_search(update, context, query, 1)
     elif d.startswith("search_page_"):
         parts = d.replace("search_page_", "", 1).rsplit("_", 1)
         if len(parts) == 2:

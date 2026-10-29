@@ -12,7 +12,6 @@ from config import (
     storage_group_id,
 )
 from modules.database.file_db import get_file_by_id_db, update_storage_message_id_db
-from modules.log.startup_log import report_error
 
 logger = logging.getLogger(__name__)
 
@@ -208,18 +207,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 )
             )
         except Exception as exc:
-            logger.error("Helper bot posting channel delivery failed: %s", exc)
-            err_details = f"🚨 <b>Posting Channel Delivery Error</b>
-
-• Target Channel: <code>{post_chan_id}</code>
-• Error: <code>{html.escape(str(exc))}</code>
-• Helper Bot: @{helper_username}
-
-<i>Ensure @{helper_username} is an Administrator with Post & Delete rights in the posting channel!</i>"
-            try:
-                await report_error(context.application, err_details, title="Posting Channel Delivery Error")
-            except Exception:
-                pass
+            logger.warning("Helper bot posting channel delivery failed: %s", exc)
 
     # 2. Send file to User's Bot PM using the SAME selected helper bot
     pm_delivered = False
