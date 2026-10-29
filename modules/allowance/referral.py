@@ -1,4 +1,4 @@
-from configs import referral_search_bonus, referral_request_bonus
+from configs import referral_search_bonus, referral_request_bonus, referral_earned_label
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.user_db import (
@@ -61,7 +61,7 @@ async def process_referral_with_notification(*args, **kwargs):
 
     if context is not None and hasattr(context, "bot"):
         referrer_text = (
-            f"👤 **New Referral Joined!**\n\n"
+            f"👤 <b>New Referral Joined!</b>\n\n"
             f"🔗 <b>{new_user_name}</b> joined using your referral link.\n"
             f"🎁 You have been awarded <b>+{referral_search_bonus()} Search</b> and <b>+{referral_request_bonus()} Request</b> allowance bonuses!"
         )
@@ -99,7 +99,11 @@ async def process_referral_with_notification(*args, **kwargs):
 
 async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Generates and provides the user's personal referral link."""
-    user_id = update.effective_user.id
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
+    user_id = user.id
     bot_username = context.bot.username
     referral_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
 
@@ -112,18 +116,26 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [[InlineKeyboardButton("📋 Copy Link", url=referral_link)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    if update.callback_query:
+        await update.callback_query.answer()
+    await msg.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
 
 async def my_referrals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the user's referral statistics."""
-    user_id = update.effective_user.id
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
+    user_id = user.id
     stats = get_user_referral_stats(user_id)
 
     text = (
         "📋 **Your Referral Statistics**\n\n"
         f"• **Total Invites:** {stats['total_invites']} users\n"
-        f"• **Total Bonus Earned:** +{stats['total_invites'] * 10} Searches & Requests\n\n"
+        f"• **Total Bonus Earned:** {referral_earned_label(stats['total_invites'])}\n\n"
         "Keep sharing your link using `/refer` to earn more allowances!"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    if update.callback_query:
+        await update.callback_query.answer()
+    await msg.reply_text(text, parse_mode="Markdown")

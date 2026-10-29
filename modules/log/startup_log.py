@@ -9,7 +9,7 @@ import traceback
 from zoneinfo import ZoneInfo
 
 from telegram import Bot
-from telegram.error import TelegramError
+from telegram.error import TelegramError, Conflict
 from modules.database.config_db import get_config
 
 logger = logging.getLogger(__name__)
@@ -244,6 +244,9 @@ async def report_error(application, text, title="Error"):
 async def error_handler(update, context):
     """Global handler: report uncaught handler errors."""
     err = context.error
+    if isinstance(err, Conflict):
+        logger.warning("Telegram polling Conflict (likely overlapping deploy): %s", err)
+        return
     tb = "".join(traceback.format_exception(type(err), err, err.__traceback__))
     logger.error("Unhandled error: %s", err)
     await report_error(context.application, tb, title="Unhandled error")

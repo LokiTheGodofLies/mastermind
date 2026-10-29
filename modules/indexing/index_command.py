@@ -206,7 +206,7 @@ async def _run_index(context, rid, job):
                             duration=0,
                             user_id=job["requester_id"],
                             user_title=job["requester_name"],
-                            caption=fwd.caption or "",
+                            caption=f"{fwd.caption or ''} {meta.get('book_title', '')} {meta.get('book_author', '')}".strip(),
                             extension=ext,
                             file_type=doc.mime_type or "document",
                             category="book",
