@@ -1,187 +1,90 @@
 import os
-import tempfile
 from telegram import Update
-from telegram.ext import ContextTypes, ApplicationHandlerStop
+from telegram.ext import ContextTypes
 from modules.database.user_db import get_user_role_db
-from modules.database.config_db import get_config, set_config, set_group_topic_db, get_group_topics_db
-from modules.log.logger import get_logs_by_count, setup_in_memory_logger
-from modules.log.startup_log import send_log_with_fallback
+from modules.log.logger import get_logs_by_count, get_logs_by_time, setup_in_memory_logger
 
 setup_in_memory_logger()
-
-LOG_TOPIC_MAP = {
-    "general": ("general_topic_id", "General Logs Topic"),
-    "general logs": ("general_topic_id", "General Logs Topic"),
-    "index": ("index_log_topic_id", "Index Logs Topic"),
-    "index logs": ("index_log_topic_id", "Index Logs Topic"),
-    "user": ("user_log_topic_id", "User Logs Topic"),
-    "user logs": ("user_log_topic_id", "User Logs Topic"),
-    "group": ("group_log_topic_id", "Group Logs Topic"),
-    "group logs": ("group_log_topic_id", "Group Logs Topic"),
-    "channel": ("channel_log_topic_id", "Channel Logs Topic"),
-    "channel logs": ("channel_log_topic_id", "Channel Logs Topic"),
-    "channels": ("channel_log_topic_id", "Channel Logs Topic"),
-    "channels logs": ("channel_log_topic_id", "Channel Logs Topic"),
-    "request logs": ("request_log_topic_id", "Request Logs Topic"),
-    "error": ("error_log_topic_id", "Errors Topic"),
-    "errors": ("error_log_topic_id", "Errors Topic"),
-    "error logs": ("error_log_topic_id", "Errors Topic"),
-}
-
-ADMIN_PERM_MAP = {
-    "can_post_messages": "Post Messages",
-    "can_edit_messages": "Edit Messages",
-    "can_delete_messages": "Delete Messages",
-    "can_manage_topics": "Manage Topics",
-    "can_invite_users": "Invite Users via Link",
-    "can_restrict_members": "Restrict Members",
-    "can_promote_members": "Add New Admins",
-    "can_change_info": "Change Chat Info",
-    "can_manage_chat": "Manage Chat",
-    "can_manage_video_chats": "Manage Video Chats",
-}
-
-
-async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = update.my_chat_member
-    if not result:
-        return
-
-    chat = result.chat
-    new_m, old_m = result.new_chat_member, result.old_chat_member
-    new_st, old_st = new_m.status, old_m.status
-    chat_type = chat.type
-    is_channel = chat_type == "channel"
-    actor = result.from_user
-    actor_str = f"{actor.full_name} (<code>{actor.id}</code>)" if actor else "System"
-
-    was_added = old_st in ("left", "kicked", "restricted") and new_st in ("member", "administrator")
-    was_removed = old_st in ("member", "administrator") and new_st in ("left", "kicked")
-    was_promoted = old_st == "member" and new_st == "administrator"
-    was_demoted = old_st == "administrator" and new_st == "member"
-    perm_changed = old_st == "administrator" and new_st == "administrator"
-
-    if was_added:
-        log_label = f"📢 <b>Bot Added to {'Channel' if is_channel else 'Group'} as Administrator</b>" if new_st == "administrator" else f"👥 <b>Bot Added to {'Channel' if is_channel else 'Group'}</b>"
-    elif was_removed:
-        log_label = f"❌ <b>Bot Removed from {'Channel' if is_channel else 'Group'}</b>"
-    elif was_promoted:
-        log_label = "👑 <b>Bot Promoted to Administrator</b>"
-    elif was_demoted:
-        log_label = "🔽 <b>Bot Demoted from Administrator</b>"
-    elif perm_changed:
-        log_label = "⚙️ <b>Bot Admin Permissions Updated</b>"
-    else:
-        log_label = f"📢 <b>Bot Status Updated in {'Channel' if is_channel else 'Group'}</b>"
-
-    # Extract granular admin permissions
-    perms_lines = []
-    if new_st == "administrator":
-        for attr, label in ADMIN_PERM_MAP.items():
-            val = getattr(new_m, attr, None)
-            if val is not None:
-                icon = "✅" if val else "❌"
-                perms_lines.append(f"  {icon} {label}")
-
-    perms_block = "\n".join(perms_lines) if perms_lines else "  • Default / Restricted"
-
-    topic_key = "channel_log_topic_id" if is_channel else "group_log_topic_id"
-    msg = (
-        f"{log_label}\n\n"
-        f"🏷 <b>Title:</b> {chat.title or 'Private'}\n"
-        f"🆔 <b>Chat ID:</b> <code>{chat.id}</code>\n"
-        f"🌐 <b>Type:</b> <code>{chat_type.capitalize()}</code>\n"
-        f"🛡 <b>Bot Role:</b> <code>{new_st.capitalize()}</code>\n"
-        f"👤 <b>Action By:</b> {actor_str}\n\n"
-        f"📋 <b>Permissions:</b>\n{perms_block}"
-    )
-    await send_log_with_fallback(context.bot, msg, "general_log_group_id", topic_key)
-
-
-async def _is_chat_or_bot_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    user = update.effective_user
-    chat = update.effective_chat
-    if not user or not chat:
-        return False
-    if get_user_role_db(user.id) in ("Admin", "Owner"):
-        return True
-    if chat.type in ("group", "supergroup"):
-        try:
-            m = await context.bot.get_chat_member(chat.id, user.id)
-            return m.status in ("administrator", "creator")
-        except Exception:
-            pass
-    return False
-
-
-async def settopic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.effective_message
-    chat = update.effective_chat
-    user = update.effective_user
-    if not msg or not chat or not user or chat.type not in ("group", "supergroup"):
-        return
-
-    if not await _is_chat_or_bot_admin(update, context):
-        await msg.reply_text("⛔ Only Group Admins or Bot Admins can use <code>/settopic</code>.", parse_mode="HTML")
-        return
-
-    arg = " ".join(context.args).strip().lower() if context.args else ""
-    thread_id = msg.message_thread_id or 1
-    log_group_id = str(get_config("general_log_group_id", fallback_env="LOGGER_GROUP_ID") or "")
-    is_log_group = str(chat.id) == log_group_id
-
-    if (arg in LOG_TOPIC_MAP or (is_log_group and arg == "request")) and get_user_role_db(user.id) in ("Admin", "Owner"):
-        cfg_key, label = ("request_log_topic_id", "Request Logs Topic") if arg == "request" else LOG_TOPIC_MAP[arg]
-        set_config(cfg_key, str(thread_id), "int", updated_by=user.id)
-        set_config("general_log_group_id", str(chat.id), "channel", updated_by=user.id)
-        await msg.reply_text(f"✅ <b>Log Topic Registered!</b>\n\n📌 <b>Assigned:</b> <code>{label}</code>\n🆔 <b>Topic ID:</b> <code>{thread_id}</code>", parse_mode="HTML")
-        return
-
-    if arg in ("search", "request"):
-        set_group_topic_db(chat.id, chat.title or "Group", arg, thread_id, user.id)
-        await msg.reply_text(f"✅ <b>Group {arg.capitalize()} Topic Registered!</b>\n\n🏷 <b>Group:</b> {chat.title}\n🧵 <b>Topic ID:</b> <code>{thread_id}</code>", parse_mode="HTML")
-        return
-
-    await msg.reply_text("⚙️ <b>Usage:</b>\n• <code>/settopic search</code> | <code>/settopic request</code>\n• <code>/settopic index logs</code> | <code>/settopic channel logs</code>", parse_mode="HTML")
-
-
-async def enforce_group_topic_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    msg = update.effective_message
-    if not chat or not msg or chat.type not in ("group", "supergroup"):
-        return
-    text = (msg.text or msg.caption or "").strip()
-    cmd = text.split()[0].lstrip("/").split("@")[0].lower() if text.startswith("/") else ""
-    if cmd in ("settopic", "id"):
-        return
-    g_cfg = get_group_topics_db(chat.id)
-    if not g_cfg:
-        return
-    s_tid = int(g_cfg.get("search_topic_id") or 0)
-    r_tid = int(g_cfg.get("request_topic_id") or 0)
-    if s_tid == 0 and r_tid == 0:
-        return
-    cur_tid = msg.message_thread_id or 1
-    if cur_tid == s_tid and (cmd in ("search", "searchebook", "searchaudiobook", "help") or len(text) >= 2):
-        return
-    if cur_tid == r_tid and (cmd in ("request", "req", "help") or context.user_data.get("manual_req_wizard")):
-        return
-    raise ApplicationHandlerStop()
-
 
 async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     role = get_user_role_db(user_id)
-    if role not in ("Admin", "Owner"):
-        await update.effective_message.reply_text("⛔ Access denied.")
+    if role not in ["Admin", "Owner"]:
+        await update.message.reply_text("⛔ You do not have permission to access system logs.")
         return
     args = context.args
-    count = min(1000, int(args[0])) if (args and args[0].isdigit()) else 20
-    log_content = get_logs_by_count(count)
-    temp_path = os.path.join(tempfile.gettempdir(), f"logs_{count}.txt")
-    with open(temp_path, "w") as tf:
+    log_content = ""
+    filename = "mastermind_logs.txt"
+    if not args:
+        log_content = get_logs_by_count(10)
+        filename = "logs_last_10.txt"
+    else:
+        param = args[0].lower()
+        if param.endswith("m"):
+            try:
+                mins = int(param[:-1])
+                log_content = get_logs_by_time(mins)
+                filename = f"logs_last_{mins}_min.txt"
+            except ValueError:
+                await update.message.reply_text("⚠️ Invalid time format. Use e.g., `/log 10m`", parse_mode="Markdown")
+                return
+        else:
+            try:
+                count = int(param)
+                if count > 1000: count = 1000
+                log_content = get_logs_by_count(count)
+                filename = f"logs_last_{count}.txt"
+            except ValueError:
+                await update.message.reply_text("⚠️ Invalid argument. Use a number (e.g., `/log 50`) or duration (e.g., `/log 10m`).", parse_mode="Markdown")
+                return
+    temp_file_path = f"/tmp/{filename}"
+    with open(temp_file_path, "w") as tf:
         tf.write(log_content)
-    with open(temp_path, "rb") as tf:
-        await update.effective_message.reply_document(document=tf, filename=f"logs_{count}.txt", caption=f"📋 <b>System Logs</b> ({role})", parse_mode="HTML")
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
+    with open(temp_file_path, "rb") as tf:
+        await update.message.reply_document(document=tf, filename=filename, caption=f"📋 <b>Memory Logs Generated Successfully</b>\nRequested by: <code>{role}</code>", parse_mode="HTML")
+    if os.path.exists(temp_file_path):
+        os.remove(temp_file_path)
+
+async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = update.my_chat_member
+    if not result: return
+    chat = result.chat
+    new_status = result.new_chat_member.status
+    old_status = result.old_chat_member.status
+    LOG_GROUP_ID = os.getenv("STORAGE_GROUP_ID")
+    if not LOG_GROUP_ID: return
+    chat_type = chat.type
+    chat_title = chat.title
+    chat_username = f"@{chat.username}" if chat.username else "No Username"
+    chat_id = chat.id
+    actor_user = result.from_user
+    actor_name = actor_user.full_name if actor_user else "Unknown / System"
+    actor_id = actor_user.id if actor_user else "N/A"
+    topic_id = os.getenv("GROUP_LOG_TOPIC_ID") if chat_type in ["group", "supergroup"] else (os.getenv("CHANNEL_LOG_TOPIC_ID") if chat_type == "channel" else None)
+    if not topic_id: return
+    was_added = old_status in ["left", "restricted", "kicked"] and new_status in ["member", "administrator"]
+    was_removed = old_status in ["member", "administrator"] and new_status in ["left", "kicked"]
+    was_promoted = old_status == "member" and new_status == "administrator"
+    was_demoted = old_status == "administrator" and new_status == "member"
+    permission_changed = old_status == "administrator" and new_status == "administrator"
+    if not (was_added or was_removed or was_promoted or was_demoted or permission_changed): return
+    if was_added: log_label = "👥 **Bot Added to Group/Supergroup**" if chat_type != "channel" else "📢 **Bot Added to Channel**"
+    elif was_removed: log_label = "❌ **Bot Removed / Left Chat**"
+    elif was_promoted: log_label = "👑 **Bot Promoted to Administrator**"
+    elif was_demoted: log_label = "🔽 **Bot Demoted from Administrator**"
+    elif permission_changed: log_label = "⚙️ **Bot Admin Permissions Changed**"
+    else: return
+    role_description = "👑 Administrator" if new_status == "administrator" else "Regular Member"
+    permissions_list = []
+    perm_mapping = {"can_manage_chat": "Manage Chat", "can_delete_messages": "Delete Messages", "can_manage_video_chats": "Manage Video Chats", "can_restrict_members": "Restrict Members", "can_promote_members": "Promote Members", "can_change_info": "Change Info", "can_invite_users": "Invite Users", "can_post_messages": "Post Messages", "can_edit_messages": "Edit Messages", "can_pin_messages": "Pin Messages", "can_manage_topics": "Manage Topics"}
+    if new_status == "administrator":
+        new_member = result.new_chat_member
+        for attr, label in perm_mapping.items():
+            if getattr(new_member, attr, False): permissions_list.append(label)
+    perms_str = ", ".join(permissions_list) if permissions_list else "None / Default"
+    log_message = f"{log_label}\n\n🏷 **Title:** {chat_title}\n🆔 **Chat ID:** `{chat_id}`\n🔗 **Username:** {chat_username}\n🌐 **Type:** {chat_type.capitalize()}\n🛡 **Bot Role:** {role_description}\n👤 **Triggered By:** {actor_name} (`{actor_id}`)\n"
+    if new_status == "administrator": log_message += f"⚙️ **Permissions:** {perms_str}\n"
+    try:
+        kwargs = {"chat_id": int(LOG_GROUP_ID), "text": log_message, "parse_mode": "Markdown", "message_thread_id": int(topic_id)}
+        await context.bot.send_message(**kwargs)
+    except Exception as e: print(f"❌ Log error: {e}")

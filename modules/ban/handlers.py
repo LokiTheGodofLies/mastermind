@@ -1,9 +1,7 @@
-import html
-import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ApplicationHandlerStop
-from modules.database.user_db import get_user_role_db, DB_FILE
-from modules.ban.ban import set_ban_db, remove_ban_db, get_support_chat_id, check_user_access
+from telegram.ext import ContextTypes
+from modules.database.user_db import get_user_role_db
+from modules.ban.ban import set_ban_db, remove_ban_db, get_ban_status, get_support_chat_id
 
 async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAULT_TYPE, target_arg: str):
     """Resolves target ID whether it's a numeric ID, chat ID, or @username."""
@@ -14,7 +12,8 @@ async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAUL
 
     if target_arg.startswith('@'):
         username = target_arg[1:]
-        conn = sqlite3.connect(DB_FILE)
+        import sqlite3
+        conn = sqlite3.connect("mastermind_users.db")
         cursor = conn.cursor()
         cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
         row = cursor.fetchone()
@@ -52,14 +51,14 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
     else:
         if not args:
             await update.message.reply_text(
-                "⚠️ <b>Usage:</b> <code>/ban &lt;id|@username&gt; [reason]</code> (or <code>/ban_pm</code>, <code>/ban_support</code>)",
-                parse_mode="HTML"
+                "⚠️ **Usage:** `/ban <id|@username> [reason]` (or `/ban_pm`, `/ban_support`)",
+                parse_mode="Markdown"
             )
             return
 
         resolved_id, display_str = await resolve_target_identifier(update, context, args[0])
         if not resolved_id:
-            await update.message.reply_text(f"⚠️ Could not resolve target: <code>{html.escape(args[0])}</code>", parse_mode="HTML")
+            await update.message.reply_text(f"⚠️ Could not resolve target: `{args[0]}`", parse_mode="Markdown")
             return
 
         target_id = resolved_id
@@ -68,7 +67,7 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
 
     # Check reason requirement for Admin vs Owner
     if admin_role != 'Owner' and not reason:
-        await update.message.reply_text("⚠️ <b>Reason Required:</b> Admins must provide a reason.", parse_mode="HTML")
+        await update.message.reply_text("⚠️ **Reason Required:** Admins must provide a reason.", parse_mode="Markdown")
         return
 
     if not reason:
@@ -87,7 +86,7 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
         
         warning_msg = (
             "❌ <b>This chat is banned from using the bot.</b>\n"
-            f"📝 <b>Reason:</b> {html.escape(reason)}\n\n"
+            f"📝 <b>Reason:</b> {reason}\n\n"
             "Please contact support to know the reason and appeal for unban."
         )
         
@@ -104,9 +103,9 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
     }
 
     await update.message.reply_text(
-        f"✅ Ban applied to <b>{html.escape(str(target_display))}</b> (<code>{target_id}</code>).\n"
+        f"✅ Ban applied to <b>{target_display}</b> (<code>{target_id}</code>).\n"
         f"🔒 <b>Type:</b> {type_descriptions.get(ban_type, ban_type.upper())}\n"
-        f"📝 <b>Reason:</b> {html.escape(reason)}",
+        f"📝 <b>Reason:</b> {reason}",
         parse_mode="HTML"
     )
 
@@ -129,7 +128,7 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     args = context.args
     if not args:
-        await update.message.reply_text("⚠️ <b>Usage:</b> <code>/unban &lt;target_id|@username&gt;</code>", parse_mode="HTML")
+        await update.message.reply_text("⚠️ **Usage:** `/unban <target_id|@username>`", parse_mode="Markdown")
         return
         
     resolved_id, display_str = await resolve_target_identifier(update, context, args[0])
@@ -138,7 +137,10 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     remove_ban_db(resolved_id)
-    await update.message.reply_text(f"✅ Target <b>{html.escape(str(display_str))}</b> (<code>{resolved_id}</code>) has been unbanned.", parse_mode="HTML")
+    await update.message.reply_text(f"✅ Target <b>{display_str}</b> (<code>{resolved_id}</code>) has been unbanned.", parse_mode="HTML")
+
+from telegram.ext import ApplicationHandlerStop
+from modules.ban.ban import check_user_access
 
 async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Middleware to intercept messages and enforce user/chat bans."""
