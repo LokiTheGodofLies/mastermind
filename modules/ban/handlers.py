@@ -37,7 +37,7 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
     admin_id = update.effective_user.id
     admin_role = get_user_role_db(admin_id)
 
-    if admin_role not in ["Admin", "Owner"]:
+    if admin_role not in ["Admin", "GOD", "Owner"]:
         await update.message.reply_text("⛔ You do not have permission to use this command.")
         return
 
@@ -68,12 +68,12 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
         target_display = display_str
         reason = " ".join(args[1:]) if len(args) > 1 else ""
 
-    if admin_role != "Owner" and not reason:
+    if admin_role not in ("GOD", "Owner") and not reason:
         await update.message.reply_text("⚠️ **Reason Required:** Admins must provide a reason.", parse_mode="Markdown")
         return
 
     if not reason:
-        reason = "No reason provided (Owner action)"
+        reason = "No reason provided (GOD action)"
 
     set_ban_db(target_id, ban_type, reason)
 
@@ -125,7 +125,7 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = update.effective_user.id
     admin_role = get_user_role_db(admin_id)
 
-    if admin_role not in ["Admin", "Owner"]:
+    if admin_role not in ["Admin", "GOD", "Owner"]:
         await update.message.reply_text("⛔ You do not have permission to use this command.")
         return
 
@@ -149,13 +149,13 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Owner-only command to grant Admin role (/addadmin <user_id|@username> or reply)."""
+    """GOD-only command to grant Admin role (/addadmin <user_id|@username> or reply)."""
     caller = update.effective_user
     msg = update.effective_message
     if not caller or not msg:
         return
-    if get_user_role_db(caller.id) != "Owner":
-        await msg.reply_text("⛔ Only the Bot Owner can add administrators.")
+    if get_user_role_db(caller.id) not in ("GOD", "Owner"):
+        await msg.reply_text("⛔ Only GOD can add administrators.")
         return
 
     reply_msg = msg.reply_to_message
@@ -176,13 +176,13 @@ async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def removeadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Owner-only command to revoke Admin role (/removeadmin <user_id|@username> or reply)."""
+    """GOD-only command to revoke Admin role (/removeadmin <user_id|@username> or reply)."""
     caller = update.effective_user
     msg = update.effective_message
     if not caller or not msg:
         return
-    if get_user_role_db(caller.id) != "Owner":
-        await msg.reply_text("⛔ Only the Bot Owner can remove administrators.")
+    if get_user_role_db(caller.id) not in ("GOD", "Owner"):
+        await msg.reply_text("⛔ Only GOD can remove administrators.")
         return
 
     reply_msg = msg.reply_to_message

@@ -11,6 +11,26 @@ from modules.allowance.allowance import can_user_request, deduct_request_quota
 logger = logging.getLogger(__name__)
 
 
+REQUEST_GUIDE_TEXT = (
+    "📖 <b>How to Request Books & Audiobooks</b>\n\n"
+    "<b>Option 1: Standalone Book</b>\n"
+    "<code>/request\n"
+    "Title: The Striker\n"
+    "Author: Ana Huang\n"
+    "Format: Audiobook / EPUB / PDF</code>\n\n"
+    "<b>Option 2: Book Series</b>\n"
+    "<code>/request\n"
+    "Title 1: King of Wrath\n"
+    "Title 2: King of Pride\n"
+    "Title 3: King of Greed\n"
+    "Series: Kings of Sin\n"
+    "Author: Ana Huang\n"
+    "Format: EPUB / PDF</code>\n\n"
+    "💡 <i>Or quickly request by title or author:</i>\n"
+    "<code>/request The Striker Ana Huang</code>"
+)
+
+
 def fetch_goodreads_metadata(query):
     try:
         base_url = config.goodreads_base_url()
@@ -57,7 +77,7 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args).strip() if context.args else ""
     if not query:
         await message.reply_text(
-            "📖 Please provide a book title or keyword. Usage: <code>/request [book name]</code>",
+            REQUEST_GUIDE_TEXT,
             parse_mode="HTML",
         )
         return
@@ -67,12 +87,24 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = search_files_db(query, limit=5)
     if rows:
-        header = f"📁 <b>Local Database Matches for:</b> <i>\"{q_esc}\"</i>\n"
+        header = (
+            f"📁 <b>Local Database Matches Found!</b>\n\n"
+            f"Maybe <i>\"{q_esc}\"</i> is already in our library!\n"
+            f"Found matching files in database:\n"
+        )
         lines = [header]
         for row in rows:
-            lines.append(f"• {html.escape(row['file_name'] or 'Unknown')}")
+            lines.append(f"• <code>{html.escape(row['file_name'] or 'Unknown')}</code>")
+
+        lines.append("\n<b>Do you want to search our library first before submitting a request?</b>")
         text = "\n".join(lines)
-        await status_msg.edit_text(text, parse_mode="HTML")
+
+        safe_q = query[:30]
+        keyboard = [
+            [InlineKeyboardButton("🔍 Search in Library", callback_data=f"search_direct_{safe_q}")],
+            [InlineKeyboardButton("📤 Request Anyway", callback_data=f"req_sub_orig_{query[:40]}")],
+        ]
+        await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         await process_goodreads_or_request(status_msg, query, context)
 
@@ -152,18 +184,26 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
             f"👤 <b>Requested By:</b> {user_mention}\n"
             f"📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
         )
+        status_markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⏳ In Progress", callback_data=f"req_stat_prog_{user.id}"),
+                InlineKeyboardButton("✅ Completed", callback_data=f"req_stat_done_{user.id}"),
+                InlineKeyboardButton("❌ Rejected", callback_data=f"req_stat_rej_{user.id}"),
+            ]
+        ])
         try:
             await context.bot.send_message(
                 chat_id=request_channel_id,
                 text=req_text,
                 parse_mode="HTML",
+                reply_markup=status_markup,
             )
             deduct_request_quota(user.id)
 
             logger_group = config.logger_group_id()
             req_topic = config.log_topic("REQUEST")
             if logger_group and int(logger_group) != int(request_channel_id):
-                log_kwargs = {"chat_id": int(logger_group), "text": req_text, "parse_mode": "HTML"}
+                log_kwargs = {"chat_id": int(logger_group), "text": req_text, "parse_mode": "HTML", "reply_markup": status_markup}
                 if req_topic:
                     log_kwargs["message_thread_id"] = int(req_topic)
                 try:
@@ -178,6 +218,35 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
         except Exception as e:
             logger.error(f"Failed to send request to channel: {e}")
             await query.edit_message_text("❌ Failed to submit request to channel. Please try again later.")
+    elif data.startswith("req_stat_"):
+        user = query.from_user
+        user_id = user.id if user else 0
+        from modules.database.user_db import get_user_role_db
+        role = get_user_role_db(user_id)
+        if role not in ("Moderator", "Admin", "GOD", "Owner"):
+            await query.answer("⛔ Only Moderators, Admins, and GOD can change request status.", show_alert=True)
+            return
+
+        parts = data.split("_")
+        action = parts[2] if len(parts) > 2 else "done"
+        status_labels = {
+            "prog": "⏳ In Progress",
+            "done": "✅ Completed",
+            "rej": "❌ Rejected",
+        }
+        label = status_labels.get(action, "Updated")
+        actor_name = f"@{user.username}" if user.username else html.escape(user.first_name)
+
+        orig_text = query.message.text_html or query.message.text or ""
+        clean_text = re.sub(r"\n\n<b>Status:</b>.*", "", orig_text, flags=re.DOTALL)
+        new_text = f"{clean_text}\n\n<b>Status:</b> {label} (by {actor_name})"
+
+        try:
+            await query.edit_message_text(new_text, parse_mode="HTML", reply_markup=query.message.reply_markup)
+            await query.answer(f"Status changed to {label}!")
+        except Exception as exc:
+            logger.warning(f"Failed to update request status message: {exc}")
+            await query.answer("Status updated.")
     elif data == "req_join_no":
         await query.edit_message_text("❌ Request cancelled.")
 

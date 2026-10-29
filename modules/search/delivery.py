@@ -12,6 +12,7 @@ from config import (
     storage_group_id,
 )
 from modules.database.file_db import get_file_by_id_db, update_storage_message_id_db
+from modules.log.startup_log import report_error
 
 logger = logging.getLogger(__name__)
 
@@ -134,14 +135,31 @@ async def _ensure_storage_message_id(main_bot, row) -> int | None:
 
 
 async def _copy_with_bot(token: str | None, fallback_bot, target_chat_id: int, from_chat_id: int, message_id: int):
-    """Copies a message from STORAGE_GROUP_ID to target_chat_id using the selected helper bot."""
+    """Copies a message from STORAGE_GROUP_ID to target_chat_id using helper bot (with fallback bot retry)."""
     if token:
-        async with Bot(token) as hb:
-            return await hb.copy_message(
-                chat_id=int(target_chat_id),
-                from_chat_id=int(from_chat_id),
-                message_id=int(message_id),
+        try:
+            async with Bot(token) as hb:
+                return await hb.copy_message(
+                    chat_id=int(target_chat_id),
+                    from_chat_id=int(from_chat_id),
+                    message_id=int(message_id),
+                )
+        except Exception as helper_exc:
+            logger.warning(
+                "Helper bot failed to copy to %s (%s). Attempting fallback bot...",
+                target_chat_id,
+                helper_exc,
             )
+            # Retry with fallback (main bot)
+            try:
+                return await fallback_bot.copy_message(
+                    chat_id=int(target_chat_id),
+                    from_chat_id=int(from_chat_id),
+                    message_id=int(message_id),
+                )
+            except Exception:
+                raise helper_exc
+
     return await fallback_bot.copy_message(
         chat_id=int(target_chat_id),
         from_chat_id=int(from_chat_id),
@@ -207,7 +225,19 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 )
             )
         except Exception as exc:
-            logger.warning("Helper bot posting channel delivery failed: %s", exc)
+            logger.error("Helper bot posting channel delivery failed: %s", exc)
+            err_details = (
+                f"🚨 <b>Posting Channel Delivery Error</b>\n\n"
+                f"• Target Channel: <code>{post_chan_id}</code>\n"
+                f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
+                f"• Helper Bot: @{helper_username or 'unknown'}\n"
+                f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
+                f"<i>Ensure @{helper_username or 'helper_bot'} is added as an Administrator in both the Storage Group and Posting Channel with Post & Delete rights!</i>"
+            )
+            try:
+                await report_error(context.application, err_details, title="Posting Channel Delivery Error")
+            except Exception as report_err:
+                logger.error("Failed to report delivery error to logger group: %s", report_err)
 
     # 2. Send file to User's Bot PM using the SAME selected helper bot
     pm_delivered = False

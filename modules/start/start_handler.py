@@ -47,7 +47,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = (
         f"Hi <b>{user_name}</b>, welcome to {bot_name()} Bot! 👋\n\n"
-        "I am your modular assistant. Tap the buttons below to see my help menu or reach out to my owner."
+        "I am your modular assistant. Tap the buttons below to see my help menu or reach out to GOD."
         f"{referral_notice}"
     )
 
@@ -58,7 +58,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("📖 Help Menu", callback_data="help_button"),
-            InlineKeyboardButton("👑 Bot Owner", callback_data="bot_owner"),
+            InlineKeyboardButton("👑 GOD", callback_data="bot_owner"),
         ],
         [
             InlineKeyboardButton("📤 Refer & Earn Bonus", url=share_url),

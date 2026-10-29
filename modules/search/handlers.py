@@ -144,6 +144,9 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         parts = d.replace("search_page_", "", 1).rsplit("_", 1)
         if len(parts) == 2:
             await perform_search(update, context, parts[0], int(parts[1]))
+    elif d.startswith("search_direct_"):
+        query = d.replace("search_direct_", "", 1)
+        await perform_search(update, context, query, 1)
     elif d.startswith("file_dl_"):
         row_id = d.replace("file_dl_", "")
         await q.answer("Preparing dual delivery via helper bot...")

@@ -73,6 +73,14 @@ def _clean(name):
     return raw or None
 
 
+def _clean_any(names):
+    for name in names:
+        val = _clean(name)
+        if val is not None:
+            return val
+    return None
+
+
 def _int(name, default, minimum=None):
     raw = _clean(name)
     try:
@@ -130,15 +138,15 @@ def bot_name():
 
 
 def community_link():
-    """Community invite/channel URL (env COMMUNITY_LINK)."""
-    return _clean("COMMUNITY_LINK") or SAMPLE_COMMUNITY_LINK
+    """Community invite/channel URL (env COMMUNITY_LINK or COMMUNITY_URL)."""
+    return _clean_any(("COMMUNITY_LINK", "COMMUNITY_URL")) or SAMPLE_COMMUNITY_LINK
 
 
-def owner_id():
-    """Primary bot owner Telegram user ID (env OWNER_ID, fallback first ADMIN_IDS or sample)."""
-    oid = _opt_int("OWNER_ID")
-    if oid is not None:
-        return oid
+def god_id():
+    """Primary bot GOD Telegram user ID (env GOD_ID or OWNER_ID, fallback first ADMIN_IDS or sample)."""
+    gid = _opt_int("GOD_ID") or _opt_int("OWNER_ID")
+    if gid is not None:
+        return gid
     raw_admins = _clean("ADMIN_IDS") or ""
     for part in raw_admins.split(","):
         part = part.strip()
@@ -147,10 +155,15 @@ def owner_id():
     return SAMPLE_OWNER_ID
 
 
+def owner_id():
+    """Alias for god_id for backward compatibility."""
+    return god_id()
+
+
 def admin_ids():
-    """Set of configured Admin/Owner Telegram user IDs (env ADMIN_IDS + OWNER_ID)."""
+    """Set of configured Admin/GOD Telegram user IDs (env ADMIN_IDS + GOD_ID/OWNER_ID)."""
     ids = set()
-    oid = _opt_int("OWNER_ID")
+    oid = god_id()
     if oid is not None:
         ids.add(oid)
     raw = _clean("ADMIN_IDS") or ""
@@ -213,7 +226,7 @@ def backup_chat_id():
 
 def fsub_channel_ids():
     """Optional force-subscribe channel IDs (env FSUB_CHANNEL_IDS or FSUB_CHANNEL_ID)."""
-    raw = _clean("FSUB_CHANNEL_IDS") or _clean("FSUB_CHANNEL_ID") or ""
+    raw = _clean_any(("FSUB_CHANNEL_IDS", "FSUB_CHANNEL_ID")) or ""
     out = []
     for part in raw.split(","):
         part = part.strip()
@@ -241,8 +254,8 @@ def backup_interval_seconds():
 
 
 def auto_delete_seconds():
-    """Seconds before helper-bot file posts in POSTING_CHANNEL_ID are auto-deleted (default 300 = 5 mins)."""
-    return _int_any(("AUTO_DELETE_SECONDS", "FILE_AUTO_DELETE_SECONDS"), 300, 10)
+    """Seconds before helper-bot file posts in POSTING_CHANNEL_ID are auto-deleted."""
+    return _int_any(("AUTO_DELETE_SECONDS", "FILE_AUTO_DELETE_SECONDS", "FILE_DELETE_AFTER_SECONDS"), 300, 10)
 
 
 # ---------------------------------------------------------------------------

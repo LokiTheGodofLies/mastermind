@@ -29,7 +29,8 @@ from modules.indexing.book_index import (
 
 logger = logging.getLogger(__name__)
 
-FULL_ACCESS = {"Owner", "Admin"}
+INDEX_COMMAND_ACCESS = {"GOD", "Owner", "Admin"}
+FULL_ACCESS = INDEX_COMMAND_ACCESS
 APPROVAL_ACCESS = {"Moderator", "Volunteer"}
 
 PRIVATE_LINK_RE = re.compile(r"t\.me/c/(\d+)/(?:\d+/)?(\d+)")
@@ -365,8 +366,16 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user and user.id != anon_admin_id():
-        if get_user_role_db(user.id) not in (FULL_ACCESS | APPROVAL_ACCESS):
-            await msg.reply_text("⛔ You don't have access to the Index command.")
+        role = get_user_role_db(user.id)
+        if role not in INDEX_COMMAND_ACCESS:
+            if role in ("Volunteer", "Moderator"):
+                await msg.reply_text(
+                    "⛔ The <code>/index</code> batch command is exclusive to Administrators and GOD only.\n\n"
+                    "💡 <i>As a Volunteer or Moderator, you can index files directly without approvals by sending them to Helper Bot DMs!</i>",
+                    parse_mode="HTML",
+                )
+            else:
+                await msg.reply_text("⛔ You don't have access to the Index command.")
             return
 
     links, skip = _parse_args((msg.text or "").split()[1:])
@@ -400,7 +409,7 @@ async def index_flow_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not flow or not msg or not user:
         return
 
-    if get_user_role_db(user.id) not in (FULL_ACCESS | APPROVAL_ACCESS):
+    if get_user_role_db(user.id) not in INDEX_COMMAND_ACCESS:
         context.user_data.pop("idx_flow", None)
         return
 
