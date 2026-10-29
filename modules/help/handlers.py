@@ -253,6 +253,55 @@ COMMAND_DETAILS = {
     # =======================================================================
     # ⚔️ ADMINISTRATOR COMMANDS & GUIDES
     # =======================================================================
+    "addmoderator": {
+        "title": "🛡️ /addmoderator & /removemoderator",
+        "category": "admin",
+        "text": (
+            "🛡️ <b>Commands:</b> <code>/addmoderator</code> & <code>/removemoderator</code>\n"
+            "<i>(Aliases: <code>/addmod</code>, <code>/removemod</code>, <code>/delmod</code>)</i>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Promotes a user to <b>Moderator</b> or demotes them to Normal User. "
+            "Grants 40 daily searches/requests, helper bot direct indexing, and request status management buttons.\n\n"
+            "💡 <b>Usage:</b>\n"
+            "• <code>/addmoderator &lt;user_id|@username&gt;</code>\n"
+            "• <code>/removemoderator &lt;user_id|@username&gt;</code>\n"
+            "• Or reply to a user's message with <code>/addmod</code> or <code>/delmod</code>.\n\n"
+            "📋 <b>Access:</b> Administrators & GOD"
+        ),
+    },
+    "addvolunteer": {
+        "title": "🤝 /addvolunteer & /removevolunteer",
+        "category": "admin",
+        "text": (
+            "🤝 <b>Commands:</b> <code>/addvolunteer</code> & <code>/removevolunteer</code>\n"
+            "<i>(Aliases: <code>/addvol</code>, <code>/removevol</code>, <code>/delvol</code>)</i>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Promotes a user to <b>Volunteer</b> or demotes them to Normal User. "
+            "Grants 30 daily searches/requests and pre-approved direct indexing via Helper Bot DMs.\n\n"
+            "💡 <b>Usage:</b>\n"
+            "• <code>/addvolunteer &lt;user_id|@username&gt;</code>\n"
+            "• <code>/removevolunteer &lt;user_id|@username&gt;</code>\n"
+            "• Or reply to a user's message with <code>/addvol</code> or <code>/delvol</code>.\n\n"
+            "📋 <b>Access:</b> Administrators & GOD"
+        ),
+    },
+    "addpromoter": {
+        "title": "📣 /addpromoter & /removepromoter",
+        "category": "admin",
+        "text": (
+            "📣 <b>Commands:</b> <code>/addpromoter</code> & <code>/removepromoter</code>\n"
+            "<i>(Aliases: <code>/addpromo</code>, <code>/removepromo</code>, <code>/delpromo</code>)</i>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Promotes a user to <b>Promoter</b> or demotes them to Normal User. "
+            "Grants 20 daily searches and 20 daily requests.\n\n"
+            "💡 <b>Usage:</b>\n"
+            "• <code>/addpromoter &lt;user_id|@username&gt;</code>\n"
+            "• <code>/removepromoter &lt;user_id|@username&gt;</code>\n"
+            "• Or reply to a user's message with <code>/addpromo</code> or <code>/delpromo</code>.\n\n"
+            "📋 <b>Access:</b> Administrators & GOD"
+        ),
+    },
+
     "checkhelpers": {
         "title": "🤖 /checkhelpers Command",
         "category": "admin",
@@ -552,6 +601,11 @@ def build_admin_help_menu():
             InlineKeyboardButton("📋 /log", callback_data="help_cmd_log"),
         ],
         [
+            InlineKeyboardButton("🛡️ /addmod & /delmod", callback_data="help_cmd_addmoderator"),
+            InlineKeyboardButton("🤝 /addvol & /delvol", callback_data="help_cmd_addvolunteer"),
+        ],
+        [
+            InlineKeyboardButton("📣 /addpromo & /delpromo", callback_data="help_cmd_addpromoter"),
             InlineKeyboardButton("🏓 /ping", callback_data="help_cmd_ping"),
         ],
         [
@@ -569,6 +623,9 @@ def build_god_help_menu():
     buttons = [
         [
             InlineKeyboardButton("👑 /addadmin & /removeadmin", callback_data="help_cmd_addadmin"),
+        ],
+        [
+            InlineKeyboardButton("🛡️ Role Management (Mod/Vol/Promo)", callback_data="help_cmd_addmoderator"),
         ],
         [
             InlineKeyboardButton("♾️ GOD Supreme Privileges", callback_data="help_cmd_godpriv"),

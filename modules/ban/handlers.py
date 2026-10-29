@@ -202,6 +202,77 @@ async def removeadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await msg.reply_text(f"✅ Demoted <b>{display}</b> (<code>{target_id}</code>) to <b>Normal User</b>.", parse_mode="HTML")
 
 
+
+
+async def _process_role_change(update: Update, context: ContextTypes.DEFAULT_TYPE, new_role: str, action_label: str):
+    """Internal helper to assign or revoke user roles (Moderator, Volunteer, Promoter)."""
+    caller = update.effective_user
+    msg = update.effective_message
+    if not caller or not msg:
+        return
+    caller_role = get_user_role_db(caller.id)
+    if caller_role not in ("GOD", "Owner", "Admin"):
+        await msg.reply_text("⛔ Unauthorized. Only Administrators and GOD can manage roles.")
+        return
+
+    reply_msg = msg.reply_to_message
+    if reply_msg and reply_msg.from_user and not context.args:
+        target_id = reply_msg.from_user.id
+        display = f"@{reply_msg.from_user.username}" if reply_msg.from_user.username else reply_msg.from_user.first_name
+    else:
+        if not context.args:
+            cmd = (msg.text or "").split()[0]
+            await msg.reply_text(f"⚠️ <b>Usage:</b> <code>{cmd} &lt;user_id|@username&gt;</code>", parse_mode="HTML")
+            return
+        target_id, display = await resolve_target_identifier(update, context, context.args[0])
+        if not target_id:
+            await msg.reply_text(f"⚠️ Could not resolve user: <code>{context.args[0]}</code>", parse_mode="HTML")
+            return
+
+    target_role = get_user_role_db(target_id)
+    if target_role in ("GOD", "Owner"):
+        await msg.reply_text("⛔ Cannot modify the role of GOD.")
+        return
+    if target_role == "Admin" and caller_role != "GOD":
+        await msg.reply_text("⛔ Only GOD can modify an Administrator's role.")
+        return
+
+    set_user_role_db(target_id, new_role)
+    if new_role == "Normal User":
+        await msg.reply_text(f"✅ Demoted <b>{display}</b> (<code>{target_id}</code>) to <b>Normal User</b>.", parse_mode="HTML")
+    else:
+        await msg.reply_text(f"✅ Promoted <b>{display}</b> (<code>{target_id}</code>) to <b>{action_label}</b>.", parse_mode="HTML")
+
+
+async def addmoderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin/GOD command to promote a user to Moderator."""
+    await _process_role_change(update, context, "Moderator", "Moderator")
+
+
+async def removemoderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin/GOD command to demote a Moderator to Normal User."""
+    await _process_role_change(update, context, "Normal User", "Normal User")
+
+
+async def addvolunteer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin/GOD command to promote a user to Volunteer."""
+    await _process_role_change(update, context, "Volunteer", "Volunteer")
+
+
+async def removevolunteer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin/GOD command to demote a Volunteer to Normal User."""
+    await _process_role_change(update, context, "Normal User", "Normal User")
+
+
+async def addpromoter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin/GOD command to promote a user to Promoter."""
+    await _process_role_change(update, context, "Promoter", "Promoter")
+
+
+async def removepromoter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin/GOD command to demote a Promoter to Normal User."""
+    await _process_role_change(update, context, "Normal User", "Normal User")
+
 async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Middleware to intercept messages and enforce user/chat bans."""
     if not update.effective_user or not update.effective_chat:

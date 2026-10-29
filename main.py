@@ -11,6 +11,7 @@ from config import (
     log_topic,
     port,
     storage_group_id,
+    support_chat_id,
 )
 
 
@@ -61,6 +62,12 @@ from modules.ban.handlers import (  # noqa: E402
     unban_command,
     addadmin_command,
     removeadmin_command,
+    addmoderator_command,
+    removemoderator_command,
+    addvolunteer_command,
+    removevolunteer_command,
+    addpromoter_command,
+    removepromoter_command,
     enforce_ban_middleware,
 )
 from modules.editscript.handlers import editscript_command, editscript_callback  # noqa: E402
@@ -123,10 +130,20 @@ async def _helper_file_indexing_handler(update: Update, context: ContextTypes.DE
 
 
 async def handle_main_bot_file_rejection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Rejects all files sent to the main bot, forwards them to error logs, replies, and deletes the message."""
+    """Rejects files sent to the main bot in PM or Support Group, forwards to error logs, replies, and deletes."""
     msg = update.effective_message
+    chat = update.effective_chat
     user = update.effective_user
-    if not msg:
+    if not msg or not chat:
+        return
+
+    # Applies ONLY in private chat (PM) or in the support group
+    supp_id = support_chat_id()
+    is_pm = (chat.type == "private")
+    is_support = bool(supp_id and str(chat.id) == str(supp_id))
+
+    if not (is_pm or is_support):
+        # Files in other groups or channels are not affected
         return
 
     log_gid = logger_group_id()
@@ -263,8 +280,14 @@ def main():
     application.add_handler(CommandHandler("ban_pm", ban_pm_command))
     application.add_handler(CommandHandler("ban_support", ban_support_command))
     application.add_handler(CommandHandler("unban", unban_command))
-    application.add_handler(CommandHandler("addadmin", addadmin_command))
-    application.add_handler(CommandHandler("removeadmin", removeadmin_command))
+    application.add_handler(CommandHandler(["addadmin", "addgod"], addadmin_command))
+    application.add_handler(CommandHandler(["removeadmin", "deladmin"], removeadmin_command))
+    application.add_handler(CommandHandler(["addmoderator", "addmod", "addmoderators"], addmoderator_command))
+    application.add_handler(CommandHandler(["removemoderator", "removemod", "delmod", "delmoderator"], removemoderator_command))
+    application.add_handler(CommandHandler(["addvolunteer", "addvol", "addvolunteers"], addvolunteer_command))
+    application.add_handler(CommandHandler(["removevolunteer", "removevol", "delvol", "delvolunteer"], removevolunteer_command))
+    application.add_handler(CommandHandler(["addpromoter", "addpromotor", "addpromo"], addpromoter_command))
+    application.add_handler(CommandHandler(["removepromoter", "removepromotor", "removepromo", "delpromo"], removepromoter_command))
     application.add_handler(CommandHandler("editscript", editscript_command))
     application.add_handler(CommandHandler("log", log_command))
     application.add_handler(CommandHandler("id", id_command))

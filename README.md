@@ -16,10 +16,13 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 * `/stats`: Public bot operation statistics and media banners.
 * `/help`: Detailed user guide and command index.
 
-### 👑 Administrator,  & GOD Commands
-* `/checkhelpers` (alias: `/helpers`): Audits all helper bots in `HELPER_BOT_TOKENS`, verifying token reachability, storage group access, and administrator rights (Post,  & Delete permissions) in the posting channel. Both Admins and GOD have full access.
+### 👑 Administrator & GOD Commands
+* `/checkhelpers` (alias: `/helpers`): Audits all helper bots in `HELPER_BOT_TOKENS`, verifying token reachability, storage group access, and administrator rights (Post & Delete permissions) in the posting channel. Both Admins and GOD have full access.
 * `/index`: Batch indexes books from a source chat or message link range into `STORAGE_GROUP_ID` with Goodreads metadata enrichment and rate-limit sleep intervals.
-* `/addadmin <id|@username>`,  & `/removeadmin`: Dynamically grants or revokes the Administrator role (GOD only).
+* `/addadmin <id|@username>` & `/removeadmin`: Dynamically grants or revokes the Administrator role (GOD only).
+* `/addmoderator <id|@username>` & `/removemoderator` (alias: `/addmod`, `/delmod`): Promotes or demotes a Moderator with 40 daily searches/requests and request status management.
+* `/addvolunteer <id|@username>` & `/removevolunteer` (alias: `/addvol`, `/delvol`): Promotes or demotes a Volunteer with 30 daily searches/requests and pre-approved helper indexing.
+* `/addpromoter <id|@username>` & `/removepromoter` (alias: `/addpromo`, `/delpromo`): Promotes or demotes a Promoter with 20 daily searches/requests.
 * `/gift <id> <searches> <requests>`: Grants bonus search/request quota allowances to a user.
 * `/editscript`: Live administration hub to manage text templates, media URLs, and config variables in `config.db` without restarts.
 * `/ban`, `/ban_pm`, `/ban_support`, `/unban`: Granular user and chat access restriction management.
@@ -28,7 +31,7 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 
 ---
 
-## ⚙️ Configuration,  & Environment
+## ⚙️ Configuration & Environment
 
 Configuration is centralized in `config.py` with backward-compatible re-export in `configs.py`. Settings are loaded lazily from Render environment variables or a local `env.txt` file (see `env.example` for reference).
 

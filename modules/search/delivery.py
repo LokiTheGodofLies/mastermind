@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from config import (
     auto_delete_seconds,
+    community_link,
     helper_bot_tokens,
     posting_channel_id,
     storage_group_id,
@@ -21,7 +22,7 @@ _POSTING_CHAT_CACHE: dict[int, str | None] = {}
 _rr_counter = 0
 
 
-async def _get_helper_bot_meta(token: str) -> dict | None:
+async def _get_helper_bot_meta(token: str, app=None) -> dict | None:
     """Resolves and caches helper bot username and id from its token via get_me()."""
     if token in _HELPER_META_CACHE:
         return _HELPER_META_CACHE[token]
@@ -37,11 +38,22 @@ async def _get_helper_bot_meta(token: str) -> dict | None:
         _HELPER_META_CACHE[token] = meta
         return meta
     except Exception as exc:
-        logger.warning("Failed to resolve helper bot token (…%s): %s", token[-4:], exc)
+        logger.error("Failed to resolve helper bot token (…%s): %s", token[-4:], exc)
+        if app:
+            err_details = (
+                f"🚨 <b>Invalid / Unreachable Helper Bot Token</b>\n\n"
+                f"• Token Suffix: <code>…{token[-6:]}</code>\n"
+                f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
+                f"<i>Please verify HELPER_BOT_TOKENS in environment variables or @BotFather.</i>"
+            )
+            try:
+                asyncio.create_task(report_error(app, err_details, title="Invalid Helper Bot Token"))
+            except Exception:
+                pass
         return None
 
 
-async def select_helper_bot(fallback_bot) -> dict:
+async def select_helper_bot(fallback_bot, app=None) -> dict:
     """Selects one reachable helper bot (round-robin) and returns its token and username."""
     global _rr_counter
     tokens = helper_bot_tokens()
@@ -51,9 +63,20 @@ async def select_helper_bot(fallback_bot) -> dict:
         _rr_counter += 1
         for offset in range(n):
             tok = tokens[(start + offset) % n]
-            meta = await _get_helper_bot_meta(tok)
+            meta = await _get_helper_bot_meta(tok, app)
             if meta and meta.get("username"):
                 return meta
+
+    if app and tokens:
+        err_details = (
+            "🚨 <b>All Helper Bots Unreachable</b>\n\n"
+            f"• Configured Tokens Count: {len(tokens)}\n"
+            "• Issue: None of the configured helper bot tokens could resolve via get_me()."
+        )
+        try:
+            asyncio.create_task(report_error(app, err_details, title="All Helper Bots Unreachable"))
+        except Exception:
+            pass
 
     # Fallback to main bot if no helper bot tokens are configured or reachable
     username = getattr(fallback_bot, "username", None)
@@ -134,37 +157,16 @@ async def _ensure_storage_message_id(main_bot, row) -> int | None:
         return None
 
 
-async def _copy_with_bot(token: str | None, fallback_bot, target_chat_id: int, from_chat_id: int, message_id: int):
-    """Copies a message from STORAGE_GROUP_ID to target_chat_id using helper bot (with fallback bot retry)."""
-    if token:
-        try:
-            async with Bot(token) as hb:
-                return await hb.copy_message(
-                    chat_id=int(target_chat_id),
-                    from_chat_id=int(from_chat_id),
-                    message_id=int(message_id),
-                )
-        except Exception as helper_exc:
-            logger.warning(
-                "Helper bot failed to copy to %s (%s). Attempting fallback bot...",
-                target_chat_id,
-                helper_exc,
-            )
-            # Retry with fallback (main bot)
-            try:
-                return await fallback_bot.copy_message(
-                    chat_id=int(target_chat_id),
-                    from_chat_id=int(from_chat_id),
-                    message_id=int(message_id),
-                )
-            except Exception:
-                raise helper_exc
-
-    return await fallback_bot.copy_message(
-        chat_id=int(target_chat_id),
-        from_chat_id=int(from_chat_id),
-        message_id=int(message_id),
-    )
+async def _copy_with_bot(token: str | None, target_chat_id: int, from_chat_id: int, message_id: int):
+    """Copies a message from STORAGE_GROUP_ID to target_chat_id using helper bot ONLY (main bot never copies files)."""
+    if not token:
+        raise ValueError("No helper bot token configured.")
+    async with Bot(token) as hb:
+        return await hb.copy_message(
+            chat_id=int(target_chat_id),
+            from_chat_id=int(from_chat_id),
+            message_id=int(message_id),
+        )
 
 
 async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, row_id: int):
@@ -198,9 +200,59 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await msg.reply_text("❌ Storage group or file message is not available.")
         return
 
-    helper = await select_helper_bot(context.bot)
+    helper = await select_helper_bot(context.bot, context.application)
     helper_token = helper.get("token")
     helper_username = (helper.get("username") or "").lstrip("@")
+    helper_id = helper.get("id")
+
+    # Proactively audit Helper Bot presence in Storage Group and Posting Channel
+    if helper_token and storage_id:
+        try:
+            async with Bot(helper_token) as hb:
+                sm = await hb.get_chat_member(int(storage_id), helper_id)
+                if sm.status not in ("administrator", "creator", "member"):
+                    err_details = (
+                        f"🚨 <b>Helper Bot Missing in Storage Group</b>\n\n"
+                        f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
+                        f"• Storage Group: <code>{storage_id}</code>\n"
+                        f"• Status: <code>{sm.status}</code>\n\n"
+                        f"<i>Add @{helper_username} to the Storage Group so it can access messages!</i>"
+                    )
+                    await report_error(context.application, err_details, title="Helper Bot Missing in Storage Group")
+        except Exception as exc:
+            err_details = (
+                f"🚨 <b>Helper Bot Storage Group Access Error</b>\n\n"
+                f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
+                f"• Storage Group: <code>{storage_id}</code>\n"
+                f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
+                f"<i>Helper bot could not access the Storage Group. Verify it is added as Administrator.</i>"
+            )
+            await report_error(context.application, err_details, title="Helper Bot Storage Group Access Error")
+
+    if helper_token and post_chan_id:
+        try:
+            async with Bot(helper_token) as hb:
+                pm = await hb.get_chat_member(int(post_chan_id), helper_id)
+                can_post = getattr(pm, "can_post_messages", True)
+                can_delete = getattr(pm, "can_delete_messages", True)
+                if pm.status not in ("administrator", "creator") or not (can_post and can_delete):
+                    err_details = (
+                        f"🚨 <b>Helper Bot Posting Channel Permission Error</b>\n\n"
+                        f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
+                        f"• Posting Channel: <code>{post_chan_id}</code>\n"
+                        f"• Status: <code>{pm.status}</code> (Post: {can_post}, Delete: {can_delete})\n\n"
+                        f"<i>Helper bot must be an Administrator with Post & Delete rights in the Posting Channel!</i>"
+                    )
+                    await report_error(context.application, err_details, title="Helper Bot Posting Channel Permission Error")
+        except Exception as exc:
+            err_details = (
+                f"🚨 <b>Helper Bot Posting Channel Access Error</b>\n\n"
+                f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
+                f"• Posting Channel: <code>{post_chan_id}</code>\n"
+                f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
+                f"<i>Ensure @{helper_username} is added as Administrator to Posting Channel {post_chan_id}.</i>"
+            )
+            await report_error(context.application, err_details, title="Helper Bot Posting Channel Access Error")
 
     # 1. Send file to Posting Channel with auto-delete using the selected helper bot
     posting_link = None
@@ -208,7 +260,6 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         try:
             posted_msg = await _copy_with_bot(
                 helper_token,
-                context.bot,
                 int(post_chan_id),
                 int(storage_id),
                 int(storage_msg_id),
@@ -239,19 +290,32 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             except Exception as report_err:
                 logger.error("Failed to report delivery error to logger group: %s", report_err)
 
-    # 2. Send file to User's Bot PM using the SAME selected helper bot
+    # 2. Send file to User's Bot PM using the SAME selected helper bot ONLY
     pm_delivered = False
-    try:
-        await _copy_with_bot(
-            helper_token,
-            context.bot,
-            int(user.id),
-            int(storage_id),
-            int(storage_msg_id),
-        )
-        pm_delivered = True
-    except Exception as exc:
-        logger.info("Helper bot PM delivery pending user /start (%s): %s", user.id, exc)
+    if helper_token:
+        try:
+            await _copy_with_bot(
+                helper_token,
+                int(user.id),
+                int(storage_id),
+                int(storage_msg_id),
+            )
+            pm_delivered = True
+        except Exception as exc:
+            exc_str = str(exc)
+            logger.info("Helper bot PM delivery pending user /start for %s: %s", user.id, exc_str)
+            if "bot can't initiate conversation with a user" not in exc_str.lower() and "bot was blocked by the user" not in exc_str.lower():
+                err_details = (
+                    f"🚨 <b>Helper Bot Direct PM Delivery Error</b>\n\n"
+                    f"• Helper Bot: @{helper_username or 'unknown'}\n"
+                    f"• User ID: <code>{user.id}</code>\n"
+                    f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
+                    f"• Error: <code>{html.escape(exc_str)}</code>"
+                )
+                try:
+                    await report_error(context.application, err_details, title="Helper Bot Direct PM Delivery Error")
+                except Exception:
+                    pass
 
     # 3. Send Main Bot notification message with helper bot @username & posting channel link
     file_name_esc = html.escape(row["file_name"] or f"File #{row_id}")
@@ -315,7 +379,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, payload: str):
-    """Handles `/start dl_<row_id>` on helper bots (or main bot) to immediately send the requested file in PM."""
+    """Handles `/start dl_<row_id>` on helper bots to immediately send the requested file in PM."""
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user:
@@ -333,24 +397,56 @@ async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DE
         return
 
     storage_id = storage_group_id()
-    storage_msg_id = row["storage_message_id"]
+    storage_msg_id = row.get("storage_message_id")
     delete_mins = max(1, round(auto_delete_seconds() / 60))
 
-    if storage_id and storage_msg_id:
-        try:
-            await context.bot.copy_message(
-                chat_id=user.id,
-                from_chat_id=int(storage_id),
-                message_id=int(storage_msg_id),
-            )
-            await msg.reply_text(
-                f"✅ Here is your requested file!\n\n"
-                f"⚠️ <i>Don't forget to forward the files to your <b>Saved Messages</b> "
-                f"(posting channel copies are automatically deleted in {delete_mins} mins).</i>",
-                parse_mode="HTML",
-            )
-            return
-        except Exception as exc:
-            logger.warning("Deep-link copy_message failed: %s", exc)
+    if not storage_id:
+        await msg.reply_text("❌ Storage group is not configured.")
+        return
 
-    await msg.reply_text("❌ Could not retrieve the file from storage. Please try clicking the search result again.")
+    if not storage_msg_id:
+        err_msg = f"File #{row_id} has no storage_message_id in database."
+        comm_url = community_link()
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=comm_url)]]) if comm_url else None
+        await msg.reply_text("❌ Could not send file due to an error. Please contact support.", reply_markup=markup)
+        try:
+            await report_error(
+                context.application,
+                f"🚨 <b>Deep-Link Delivery Error</b>\n\n• File ID: <code>{row_id}</code>\n• Error: {err_msg}",
+                title="Deep-Link Delivery Error",
+            )
+        except Exception:
+            pass
+        return
+
+    try:
+        await context.bot.copy_message(
+            chat_id=user.id,
+            from_chat_id=int(storage_id),
+            message_id=int(storage_msg_id),
+        )
+        await msg.reply_text(
+            f"✅ <b>Here is your requested file!</b>\n\n"
+            f"⚠️ <i>Don't forget to forward the files to your <b>Saved Messages</b> "
+            f"(posting channel copies are automatically deleted in {delete_mins} mins).</i>",
+            parse_mode="HTML",
+        )
+        return
+    except Exception as exc:
+        logger.error("Deep-link copy_message failed: %s", exc)
+        err_details = (
+            f"🚨 <b>Helper Bot Deep-Link Copy Error</b>\n\n"
+            f"• Helper Bot: @{context.bot.username or 'unknown'}\n"
+            f"• User: {html.escape(user.full_name)} (<code>{user.id}</code>)\n"
+            f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
+            f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
+            f"<i>Ensure @{context.bot.username or 'helper_bot'} is an Administrator in the Storage Group with permission to access messages.</i>"
+        )
+        try:
+            await report_error(context.application, err_details, title="Helper Bot Deep-Link Copy Error")
+        except Exception as report_err:
+            logger.error("Failed to report delivery error: %s", report_err)
+
+        comm_url = community_link()
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=comm_url)]]) if comm_url else None
+        await msg.reply_text("❌ Could not send file due to an error. Please contact support.", reply_markup=markup)
