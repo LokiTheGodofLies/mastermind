@@ -166,6 +166,11 @@ async def build_startup_text(application, problems):
 
     now = datetime.datetime.now(IST).strftime("%d-%m-%Y | %I:%M:%S %p IST")
     parts += ["", f"⏱ <b>Timestamp:</b> {now}"]
+    parts += [
+        "",
+        "📌 <b>Reminder:</b> check that no other bot instance is running "
+        "(Termux: <code>pkill -f \"python.*main.py\"</code>)",
+    ]
     return "\n".join(parts)
 
 
