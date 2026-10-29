@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-from datetime import datetime
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -24,6 +23,7 @@ from modules.id.handlers import id_command
 from modules.stats.handlers import stats_command
 from modules.search.handlers import search_command, search_callback_handler
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler
+from modules.log.startup_log import send_startup_notification
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +39,6 @@ def load_env():
         print("✅ Environment variables loaded from env.txt successfully.")
     else:
         print("⚠️ env.txt not found, relying on system environment variables.")
-
-
-async def send_startup_log(application):
-    logger_group_id = os.getenv("LOGGER_GROUP_ID")
-    if logger_group_id:
-        try:
-            restart_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_text = "🔄 Bot Restarted Successfully\n\n🤖 Mastermind is now online.\n⏱️ Restarted at " + restart_time
-            await application.bot.send_message(
-                chat_id=int(logger_group_id),
-                text=log_text,
-                parse_mode="HTML"
-            )
-            print("✅ Restart log sent to log group successfully.")
-        except Exception as e:
-            print(f"Failed to send startup log: {e}")
 
 
 def main():
@@ -110,12 +94,9 @@ def main():
 
     print("🤖 Mastermind bot is up and running...")
 
-    if application.job_queue:
-        application.job_queue.run_once(lambda ctx: asyncio.create_task(send_startup_log(application)), when=1)
-    else:
-        async def post_init(app):
-            await send_startup_log(app)
-        application.post_init = post_init
+    async def post_init(app):
+        await send_startup_notification(app)
+    application.post_init = post_init
 
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
