@@ -10,44 +10,6 @@ from modules.allowance.allowance import can_user_request, deduct_request_quota
 
 logger = logging.getLogger(__name__)
 
-REQUEST_GUIDE_TEXT = (
-    "📖 <b>How to Request Books & Audiobooks</b>
-
-"
-    "<b>Option 1: Standalone Book</b>
-"
-    "<code>/request
-"
-    "Title: The Striker
-"
-    "Author: Ana Huang
-"
-    "Format: Audiobook / EPUB / PDF</code>
-
-"
-    "<b>Option 2: Book Series</b>
-"
-    "<code>/request
-"
-    "Title 1: King of Wrath
-"
-    "Title 2: King of Pride
-"
-    "Title 3: King of Greed
-"
-    "Series: Kings of Sin
-"
-    "Author: Ana Huang
-"
-    "Format: EPUB / PDF</code>
-
-"
-    "💡 <i>Or quickly request by title or author:</i>
-"
-    "<code>/request The Striker Ana Huang</code>"
-)
-
-
 
 def fetch_goodreads_metadata(query):
     try:
@@ -95,7 +57,7 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args).strip() if context.args else ""
     if not query:
         await message.reply_text(
-            REQUEST_GUIDE_TEXT,
+            "📖 Please provide a book title or keyword. Usage: <code>/request [book name]</code>",
             parse_mode="HTML",
         )
         return

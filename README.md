@@ -1,27 +1,55 @@
+🚀 Features
+/start Command: Greets the user with a customized welcome message, an interactive Help Menu button, and a direct Bot Owner link button.
+
+/help Command: Displays a clean, HTML-formatted list of all available modules and functions.
+
+Normal Text Handler: Gently responds to casual chat with an expandable blockquote notice and a quick shortcut button back to the help menu.
+
+Modular Architecture: Every feature lives inside its own independent folder and file for maximum maintainability.
+
+⚙️ Installation & Setup
+Clone or download this repository into your workspace (or Termux on your Android tablet).
+
+Install the required dependency:
+
+Bash
+
+
+pip install python-telegram-bot
+Create your env.txt file in the root folder with your bot token:
+
+Plaintext
+
+
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+Run main.py to start Mastermind!
+
 # 🤖 Mastermind Telegram Bot
 
-A modular Telegram bot built using Python and python-telegram-bot, designed for library search, requests, metadata enrichment, quota allowances, and dual file delivery via helper bots.
+A modular Telegram bot built using Python and the `python-telegram-bot` library, featuring a clean directory layout separating each command and feature into dedicated modules.
 
 ---
 
-## 🚀 Features & Commands
+## 📂 Project Structure
 
-### 👤 Standard User Commands
-* /start: Opens the interactive welcome menu, processes referral bonuses, and handles file deep-links.
-* /search <query>: Searches indexed ebooks and audiobooks with tokenized SQL matching, pagination, and file download cards.
-* /request: Interactive request assistant with standalone and series templates; prompts with a library search button if matches already exist in the database.
-* /quota: Displays remaining daily search and request allowances.
-* /refer & /myreferrals: Personal referral dashboard to invite friends and earn bonus search/request allowances.
-* /support: Verification quiz with single-use invite link generation to join the support community.
-* /stats: Public bot operation statistics and media banners.
-* /help: Detailed user guide and command index.
+<details>
+<summary><b>Click to expand directory structure</b></summary>
 
-### 👑 Administrator & Owner Commands
-* /checkhelpers (alias: /helpers): Audits all helper bots in HELPER_BOT_TOKENS, verifying token reachability, storage group access, and administrator rights (Post & Delete permissions) in the posting channel. Both Admins and the Bot Owner have full access.
-* /index: Batch indexes books from a source chat or message link range into STORAGE_GROUP_ID with Goodreads metadata enrichment and rate-limit sleep intervals.
-* /addadmin <id|@username> & /removeadmin: Dynamically grants or revokes the Administrator role (Owner only).
-* /gift <id> <searches> <requests>: Grants bonus search/request quota allowances to a user.
-* /editscript: Live administration hub to manage text templates, media URLs, and config variables in config.db without restarts.
-* /ban, /ban_pm, /ban_support, /unban: Granular user and chat access restriction management.
-* /log [count|10m]: Generates and exports in-memory log files directly in Telegram.
-* /ping: Diagnostic command displaying round-trip latency and network metrics.
+```text
+mastermind/
+│
+├── main.py                     # The main file that starts your bot and brings all modules together
+├── env.txt                     # Secret file storing your sensitive environment variables (like your bot token)
+├── .gitignore                  # Git configuration file to keep secret files out of GitHub
+│
+└── modules/                    # Folder holding all your bot's feature modules
+    │
+    ├── help_menu/              # Folder for the /help command and help button clicks
+    │   └── help_handler.py     # Contains the logic to display the help menu text
+    │
+    ├── start/                  # Folder for the /start command and welcome buttons
+    │   └── start_handler.py    # Contains the welcome message, help button, and bot owner button
+    │
+    └── message/                # Folder for handling regular chat messages
+        └── message_handler.py  # Contains the reply for normal text with an expandable section and help button
+# fantastic-eureka
