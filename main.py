@@ -215,7 +215,7 @@ def main():
         )
     )
     application.add_handler(CallbackQueryHandler(support_callback_handler, pattern=r"^(support_|quiz_ans_)"))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|search_direct_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^es_"))
 
