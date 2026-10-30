@@ -1,3 +1,4 @@
+import html
 from configs import referral_search_bonus, referral_request_bonus, referral_earned_label
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -62,7 +63,7 @@ async def process_referral_with_notification(*args, **kwargs):
     if context is not None and hasattr(context, "bot"):
         referrer_text = (
             f"👤 <b>New Referral Joined!</b>\n\n"
-            f"🔗 <b>{new_user_name}</b> joined using your referral link.\n"
+            f"🔗 <b>{html.escape(str(new_user_name))}</b> joined using your referral link.\n"
             f"🎁 You have been awarded <b>+{referral_search_bonus()} Search</b> and <b>+{referral_request_bonus()} Request</b> allowance bonuses!"
         )
         referrer_keyboard = [[
@@ -108,17 +109,17 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     referral_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
 
     text = (
-        "🔗 **Your Referral Link**\n\n"
+        "🔗 <b>Your Referral Link</b>\n\n"
         "Share this link with your friends. Whenever someone starts the bot using your link, "
-        f"both you and your friend will receive **+{referral_search_bonus()} Search** and **+{referral_request_bonus()} Request** bonuses!\n\n"
-        f"📋 `{referral_link}`"
+        f"both you and your friend will receive <b>+{referral_search_bonus()} Search</b> and <b>+{referral_request_bonus()} Request</b> bonuses!\n\n"
+        f"📋 <code>{html.escape(referral_link)}</code>"
     )
 
     keyboard = [[InlineKeyboardButton("📋 Copy Link", url=referral_link)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
         await update.callback_query.answer()
-    await msg.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    await msg.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
 
 
 async def my_referrals_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,11 +132,11 @@ async def my_referrals_command(update: Update, context: ContextTypes.DEFAULT_TYP
     stats = get_user_referral_stats(user_id)
 
     text = (
-        "📋 **Your Referral Statistics**\n\n"
-        f"• **Total Invites:** {stats['total_invites']} users\n"
-        f"• **Total Bonus Earned:** {referral_earned_label(stats['total_invites'])}\n\n"
-        "Keep sharing your link using `/refer` to earn more allowances!"
+        "📋 <b>Your Referral Statistics</b>\n\n"
+        f"• <b>Total Invites:</b> <code>{stats['total_invites']}</code> users\n"
+        f"• <b>Total Bonus Earned:</b> <code>{html.escape(str(referral_earned_label(stats['total_invites'])))}</code>\n\n"
+        "Keep sharing your link using <code>/refer</code> to earn more allowances!"
     )
     if update.callback_query:
         await update.callback_query.answer()
-    await msg.reply_text(text, parse_mode="Markdown")
+    await msg.reply_text(text, parse_mode="HTML")

@@ -132,7 +132,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             )
         except Exception as e:
             await q.message.edit_text(
-                f"❌ <b>Could not generate invite link.</b>\n\nReason: {e}",
+                f"❌ <b>Could not generate invite link.</b>\n\nReason: <code>{html.escape(str(e))}</code>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]),
             )
@@ -153,7 +153,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         try:
             await deliver_file_dual(update, context, int(row_id))
         except Exception as e:
-            await q.message.reply_text(f"❌ Error delivering file: {e}")
+            await q.message.reply_text(f"❌ Error delivering file: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
 
 
 async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

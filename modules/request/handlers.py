@@ -75,7 +75,10 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    query = " ".join(context.args).strip() if context.args else ""
+    raw_text = message.text or message.caption or ""
+    query = re.sub(r"^/(?:request|req)(?:@\w+)?\s*", "", raw_text, count=1, flags=re.IGNORECASE | re.DOTALL).strip()
+    if not query and context.args:
+        query = " ".join(context.args).strip()
     if not query:
         await message.reply_text(
             REQUEST_GUIDE_TEXT,

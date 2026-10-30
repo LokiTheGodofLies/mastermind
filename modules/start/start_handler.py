@@ -1,3 +1,4 @@
+import html
 from config import bot_name, owner_id, referral_bonus_label
 from datetime import datetime
 
@@ -18,7 +19,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target_message:
         return
 
-    user_name = user.first_name
+    user_name = html.escape(user.first_name or "Friend")
     today_str = datetime.now().strftime("%Y-%m-%d")
     bot_username = context.bot.username
 
@@ -96,8 +97,9 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         await search_command(update, context)
     elif data == "request_menu":
         await query.answer()
+        from modules.request.handlers import REQUEST_GUIDE_TEXT
         await query.message.reply_text(
-            "📖 To request a book, use: <code>/request [book name]</code>",
+            REQUEST_GUIDE_TEXT,
             parse_mode="HTML",
         )
     elif data == "stats_menu":

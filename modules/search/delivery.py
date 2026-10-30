@@ -378,10 +378,10 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
 
     buttons = []
-    if helper_username:
+    if helper_username and helper_start_url:
         if pm_delivered:
-            buttons.append([InlineKeyboardButton(f"💬 Open @{helper_username} (View in PM)", url=f"https://t.me/{helper_username}")])
-        elif helper_start_url:
+            buttons.append([InlineKeyboardButton(f"📥 Get / Re-send in @{helper_username} PM", url=helper_start_url)])
+        else:
             buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username} (Get in PM)", url=helper_start_url)])
     if posting_link:
         buttons.append([InlineKeyboardButton("📥 Get File from Posting Channel", url=posting_link)])

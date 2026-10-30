@@ -1,3 +1,4 @@
+import html
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -111,7 +112,7 @@ def gift_quota(admin_user_id, target_user_id, search_bonus=0, request_bonus=0):
         return False, "❌ You do not have permission to use the gift command."
 
     add_quota_limits_db(target_user_id, search_bonus, request_bonus)
-    return True, f"🎁 Successfully added +{search_bonus} search limit and +{request_bonus} request limit to user `{target_user_id}`."
+    return True, f"🎁 Successfully added <b>+{search_bonus}</b> search limit and <b>+{request_bonus}</b> request limit to user <code>{target_user_id}</code>."
 
 
 async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,22 +127,20 @@ async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "⚠️ Could not retrieve your quota record."
     elif summary["unlimited"]:
         text = (
-            f"👤 **Your Role:** {summary['role']}\n"
-            f"♾️ **Status:** Unlimited searches and requests."
+            f"👤 <b>Your Role:</b> {html.escape(str(summary['role']))}\n"
+            f"♾️ <b>Status:</b> Unlimited searches and requests."
         )
     else:
         text = (
-            f"👤 **Your Role:** {summary['role']}\n\n"
-            f"🔍 **Searches Remaining:** {summary['searches_left']} / {summary['searches_limit']}\n"
-            f"📥 **Requests Remaining:** {summary['requests_left']} / {summary['requests_limit']}\n\n"
-            f"*(Quotas reset automatically every day)*"
+            f"👤 <b>Your Role:</b> {html.escape(str(summary['role']))}\n\n"
+            f"🔍 <b>Searches Remaining:</b> <code>{summary['searches_left']} / {summary['searches_limit']}</code>\n"
+            f"📥 <b>Requests Remaining:</b> <code>{summary['requests_left']} / {summary['requests_limit']}</code>\n\n"
+            f"<i>(Quotas reset automatically every day)</i>"
         )
 
     if update.callback_query:
         await update.callback_query.answer()
-        await msg.reply_text(text, parse_mode="Markdown")
-    else:
-        await msg.reply_text(text, parse_mode="Markdown")
+    await msg.reply_text(text, parse_mode="HTML")
 
 
 async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -150,9 +149,9 @@ async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
 
     if len(args) < 3:
-        await update.message.reply_text(
-            "⚠️ **Usage:** `/gift <user_id> <search_bonus> <request_bonus>`",
-            parse_mode="Markdown"
+        await update.effective_message.reply_text(
+            "⚠️ <b>Usage:</b> <code>/gift &lt;user_id&gt; &lt;search_bonus&gt; &lt;request_bonus&gt;</code>",
+            parse_mode="HTML",
         )
         return
 
@@ -161,15 +160,15 @@ async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         search_bonus = int(args[1])
         request_bonus = int(args[2])
     except ValueError:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "⚠️ Invalid numbers provided.\n"
-            "**Usage:** `/gift <user_id> <search_bonus> <request_bonus>`",
-            parse_mode="Markdown"
+            "<b>Usage:</b> <code>/gift &lt;user_id&gt; &lt;search_bonus&gt; &lt;request_bonus&gt;</code>",
+            parse_mode="HTML",
         )
         return
 
     _, message = gift_quota(admin_id, target_id, search_bonus, request_bonus)
-    await update.message.reply_text(message, parse_mode="Markdown")
+    await update.effective_message.reply_text(message, parse_mode="HTML")
 
 
 async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,23 +185,23 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     referred_list = stats["referred_list"]
 
     text = (
-        f"🔗 **Your Referral Dashboard**\n\n"
-        f"📌 **Your Link:**\n`{referral_link}`\n\n"
-        f"📊 **Total Friends Invited:** `{total_invites}`\n"
-        f"🎁 **Bonus Earned:** `{referral_earned_label(total_invites)}`\n\n"
+        f"🔗 <b>Your Referral Dashboard</b>\n\n"
+        f"📌 <b>Your Link:</b>\n<code>{html.escape(referral_link)}</code>\n\n"
+        f"📊 <b>Total Friends Invited:</b> <code>{total_invites}</code>\n"
+        f"🎁 <b>Bonus Earned:</b> <code>{html.escape(str(referral_earned_label(total_invites)))}</code>\n\n"
     )
 
     if referred_list:
-        text += "👥 **Invited Users:**\n"
+        text += "👥 <b>Invited Users:</b>\n"
         for r_id, r_name, r_uname, timestamp in referred_list[:10]:
-            name_display = r_name or f"User {r_id}"
-            text += f"• {name_display} (ID: `{r_id}`)\n"
+            name_display = html.escape(r_name or f"User {r_id}")
+            text += f"• {name_display} (ID: <code>{r_id}</code>)\n"
         if total_invites > 10:
-            text += f"\n*(Showing latest 10 of {total_invites} invites)*\n"
+            text += f"\n<i>(Showing latest 10 of {total_invites} invites)</i>\n"
     else:
-        text += "💡 *You haven't invited anyone yet. Share your link to start earning bonuses!*"
+        text += "💡 <i>You haven't invited anyone yet. Share your link to start earning bonuses!</i>"
 
-    text += f"\n\n*When a new user starts via your link, both of you get {referral_bonus_label()}!*"
+    text += f"\n\n<i>When a new user starts via your link, both of you get {html.escape(str(referral_bonus_label()))}!</i>"
 
     share_text = f"Join {bot_name()} Bot and let's earn bonus searches & requests!"
     share_url = f"https://t.me/share/url?url={referral_link}&text={share_text}"
@@ -214,4 +213,4 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.callback_query:
         await update.callback_query.answer()
-    await msg.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    await msg.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)

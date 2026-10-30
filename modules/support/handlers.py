@@ -1,3 +1,4 @@
+import html
 from configs import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -23,7 +24,7 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Shows the safety disclaimer and button to start the quiz.
     """
     text = (
-        f"🛡️ **{bot_name()} Support Center**\n\n"
+        f"🛡️ <b>{html.escape(bot_name())} Support Center</b>\n\n"
         "If you need help, you can join our support chat. However, to keep our "
         "support chat safe and protected from unnecessary/irrelevant questions, "
         "spam, chats, and attacks, you must pass a quick verification quiz first."
@@ -33,9 +34,9 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.message:
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
     elif update.callback_query:
-        await update.callback_query.message.edit_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        await update.callback_query.message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
 
 async def support_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles all callback queries related to the support quiz flow."""
@@ -69,19 +70,19 @@ async def support_callback_handler(update: Update, context: ContextTypes.DEFAULT
             # Wrong answer! Reset quiz immediately
             context.user_data["quiz_step"] = 0
             fail_text = (
-                "❌ **Incorrect Answer!**\n\n"
+                "❌ <b>Incorrect Answer!</b>\n\n"
                 "You failed one of the screening questions. To protect the support chat, "
                 "the quiz has been reset from the beginning.\n\n"
                 "Let's try again."
             )
             keyboard = [[InlineKeyboardButton("🔄 Restart Quiz", callback_data="support_start_quiz")]]
-            await query.message.edit_text(fail_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.message.edit_text(fail_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def send_quiz_question(query, context, step: int):
     """Sends the current question with Yes/No inline buttons."""
     question_text, _ = QUIZ_QUESTIONS[step]
     text = (
-        f"📝 **Support Verification Quiz ({step + 1}/10)**\n\n"
+        f"📝 <b>Support Verification Quiz ({step + 1}/10)</b>\n\n"
         f"{question_text}"
     )
     keyboard = [
@@ -90,7 +91,7 @@ async def send_quiz_question(query, context, step: int):
             InlineKeyboardButton("❌ No", callback_data="quiz_ans_no")
         ]
     ]
-    await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def finalize_quiz_success(query, context):
     """Generates a single-use invite link for the support chat upon passing the quiz."""
@@ -98,9 +99,9 @@ async def finalize_quiz_success(query, context):
     
     if not support_chat_id:
         await query.message.edit_text(
-            "✅ **Quiz Passed Successfully!**\n\n"
+            "✅ <b>Quiz Passed Successfully!</b>\n\n"
             "⚠️ Support chat ID is not configured on this bot instance. Please contact the owner.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 
@@ -113,17 +114,17 @@ async def finalize_quiz_success(query, context):
         )
         
         success_text = (
-            "🎉 **Congratulations! You passed the verification quiz.**\n\n"
+            "🎉 <b>Congratulations! You passed the verification quiz.</b>\n\n"
             "Here is your secure, single-use invite link to join the support chat. "
             "Note that this link can only be used once."
         )
         keyboard = [[InlineKeyboardButton("🔗 Join Support Chat", url=invite_link.invite_link)]]
-        await query.message.edit_text(success_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.edit_text(success_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         
     except Exception as e:
         await query.message.edit_text(
-            f"✅ **Quiz Passed Successfully!**\n\n"
-            f"Could not generate invite link automatically: {e}\n"
+            f"✅ <b>Quiz Passed Successfully!</b>\n\n"
+            f"Could not generate invite link automatically: <code>{html.escape(str(e))}</code>\n"
             "Please contact the bot administrator directly.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )

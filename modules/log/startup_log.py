@@ -11,6 +11,7 @@ from telegram import Bot
 from telegram.error import TelegramError, Conflict
 from config import (
     admin_ids,
+    bot_mode,
     bot_name,
     helper_bot_tokens,
     logger_group_id,
@@ -57,6 +58,17 @@ _last_sent = {}
 
 
 def _cfg(env_name):
+    if bot_mode() == "testing":
+        val = (
+            get_config(f"testing_{env_name.lower()}", fallback_env=f"TESTING_{env_name}")
+            or get_config(f"test_{env_name.lower()}", fallback_env=f"TEST_{env_name}")
+        )
+        if val is not None:
+            return val
+    else:
+        val = get_config(f"public_{env_name.lower()}", fallback_env=f"PUBLIC_{env_name}")
+        if val is not None:
+            return val
     return get_config(env_name.lower(), fallback_env=env_name)
 
 
@@ -148,7 +160,9 @@ async def build_startup_text(application, problems):
     me = await bot.get_me()
     gen_topic = str(general_topic_id())
 
+    mode_str = "🧪 TESTING MAIN BOT (test branch)" if bot_mode() == "testing" else "🌐 PUBLIC MAIN BOT (main branch)"
     parts = ["🔄 <b>Bot Restarted Successfully</b>", ""]
+    parts.append(f"🏷️ <b>Environment:</b> <code>{mode_str}</code>")
     parts.append(f"🤖 <b>Main Bot:</b> {_bot_line(me)}")
 
     helpers = await _helper_lines(problems)

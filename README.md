@@ -34,12 +34,30 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 
 ---
 
+## 🏗️ Dual Main Bot Architecture (Public vs. Testing)
+
+The repository supports two completely isolated Main Bot environments (each with its own dedicated groups and channels) from the same codebase:
+
+1. **🌐 Public Main Bot (`main` branch)**
+   * **Purpose**: Production bot serving public users with stable, verified features.
+   * **Render Web Service**: `mastermind` (`srv-dbgi9nflk1mc73c0abmg`), auto-deployed from the `main` branch.
+   * **Dedicated Channels & Groups**: Public Book Storage Group (`STORAGE_GROUP_ID`), Public Posting Channel (`POSTING_CHANNEL_ID`), Public Bot Log Group (`LOGGER_GROUP_ID`), Public Index Logs / Backup Channel (`INDEX_CHANNEL_ID` / `BACKUP_CHAT_ID`), Public Request Logs Channel (`REQUEST_CHANNEL_ID`), Public Search Group (`SEARCH_GROUP_ID`), and Public Support Chat (`SUPPORT_CHAT_ID`).
+
+2. **🧪 Testing Main Bot (`test` branch)**
+   * **Purpose**: Staging & QA bot for testing new commits and experimental features on the `test` branch before merging to `main`.
+   * **Render Web Service**: Separate Render service connected to the `test` branch (`BOT_MODE=testing` or auto-detected via `RENDER_GIT_BRANCH=test`).
+   * **Isolated Testing Channels & Groups**: Uses separate testing channels and groups (configured via `TESTING_STORAGE_GROUP_ID`, `TESTING_POSTING_CHANNEL_ID`, `TESTING_LOGGER_GROUP_ID`, `TESTING_INDEX_CHANNEL_ID`, `TESTING_REQUEST_CHANNEL_ID`, `TESTING_SEARCH_GROUP_ID`, `TESTING_SUPPORT_CHAT_ID`, and `TESTING_BACKUP_CHAT_ID`—or the standard variable names on the separate Render service) so testing never touches or pollutes the live Public channels or database backups.
+
+---
+
 ## ⚙️ Configuration & Environment
 
 Configuration is centralized in `config.py` with backward-compatible re-export in `configs.py`. Settings are loaded lazily from Render environment variables or a local `env.txt` file (see `env.example` for reference).
 
 Key environment variables:
-* `TELEGRAM_BOT_TOKEN`: Main Telegram bot token from @BotFather.
+* `BOT_MODE`: Deployment mode (`public` for `main` branch or `testing` for `test` branch).
+* `TELEGRAM_BOT_TOKEN` / `PUBLIC_BOT_TOKEN` / `TESTING_BOT_TOKEN`: Bot tokens for the Public Main Bot and Testing Main Bot.
+* `HELPER_POLLING_ENABLED`: Controls helper bot polling (`true` on Public Main Bot, `false` on Testing Main Bot when sharing helper bots).
 * `HELPER_BOT_TOKENS`: Comma-separated helper bot tokens for dual file delivery.
 * `STORAGE_GROUP_ID`: Telegram group/channel where indexed files are stored.
 * `POSTING_CHANNEL_ID`: Channel where helper bots post files with automatic deletion.

@@ -119,17 +119,62 @@ def _opt_int_any(names):
 
 
 # ---------------------------------------------------------------------------
-# Bot Tokens & Identity
+# Bot Mode, Tokens & Identity (Dual Main Bot Architecture: Public vs Testing)
 # ---------------------------------------------------------------------------
+def bot_mode():
+    """Returns 'testing' or 'public'. Auto-detects 'testing' if RENDER_GIT_BRANCH/GIT_BRANCH is 'test'."""
+    mode = (_clean_any(("BOT_MODE", "DEPLOY_ENV", "ENVIRONMENT")) or "").lower()
+    if mode in ("test", "testing", "staging", "dev"):
+        return "testing"
+    if mode in ("public", "prod", "production", "main"):
+        return "public"
+    branch = (_clean_any(("RENDER_GIT_BRANCH", "GIT_BRANCH", "BRANCH")) or "").lower()
+    if branch in ("test", "testing", "staging", "dev"):
+        return "testing"
+    return "public"
+
+
+def is_testing_mode() -> bool:
+    """Returns True when deployed as the Testing Main Bot (BOT_MODE=testing or branch=test)."""
+    return bot_mode() == "testing"
+
+
+def public_bot_token():
+    """Token for the Public Main Bot (env PUBLIC_BOT_TOKEN or TELEGRAM_BOT_TOKEN)."""
+    return _clean_any(("PUBLIC_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "BOT_TOKEN"))
+
+
+def testing_bot_token():
+    """Token for the Testing Main Bot (env TESTING_BOT_TOKEN or TEST_BOT_TOKEN)."""
+    return _clean_any(("TESTING_BOT_TOKEN", "TEST_BOT_TOKEN", "TELEGRAM_BOT_TOKEN", "BOT_TOKEN"))
+
+
 def bot_token():
-    """Main Telegram bot token (env TELEGRAM_BOT_TOKEN or BOT_TOKEN)."""
-    return _clean("TELEGRAM_BOT_TOKEN") or _clean("BOT_TOKEN")
+    """Active Main Bot token resolved dynamically based on BOT_MODE (Public vs Testing)."""
+    if is_testing_mode():
+        return testing_bot_token()
+    return public_bot_token()
 
 
 def helper_bot_tokens():
-    """List of helper bot tokens (env HELPER_BOT_TOKENS, comma-separated)."""
-    raw = _clean("HELPER_BOT_TOKENS") or ""
+    """List of helper bot tokens (supports TESTING_HELPER_BOT_TOKENS override in testing mode)."""
+    if is_testing_mode():
+        raw = _clean_any(("TESTING_HELPER_BOT_TOKENS", "TEST_HELPER_BOT_TOKENS", "HELPER_BOT_TOKENS")) or ""
+    else:
+        raw = _clean_any(("PUBLIC_HELPER_BOT_TOKENS", "HELPER_BOT_TOKENS")) or ""
     return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+def helper_polling_enabled() -> bool:
+    """Controls whether this service polls helper bots (/start deep-links & DM indexing).
+    Defaults to True in Public mode and False in Testing mode so two Render services sharing
+    the same HELPER_BOT_TOKENS never collide with Telegram 409 Conflict errors."""
+    raw = _clean_any(("HELPER_POLLING_ENABLED", "ENABLE_HELPER_POLLING"))
+    if raw is not None:
+        return raw.lower() in ("true", "1", "yes", "on")
+    if is_testing_mode():
+        return bool(_clean_any(("TESTING_HELPER_BOT_TOKENS", "TEST_HELPER_BOT_TOKENS")))
+    return True
 
 
 def bot_name():
@@ -182,51 +227,65 @@ def anon_admin_id():
 
 
 # ---------------------------------------------------------------------------
-# Chats & Channels (env, no hardcoded real IDs)
+# Chats & Channels (Dual-Bot Aware: Public vs. Testing Separate Groups/Channels)
 # ---------------------------------------------------------------------------
+def _mode_opt_int(base_names):
+    """Resolves integer chat/topic ID with TESTING_* or PUBLIC_* priority based on BOT_MODE."""
+    if isinstance(base_names, str):
+        base_names = (base_names,)
+    if is_testing_mode():
+        prefixed = tuple(f"TESTING_{n}" for n in base_names) + tuple(f"TEST_{n}" for n in base_names)
+    else:
+        prefixed = tuple(f"PUBLIC_{n}" for n in base_names)
+    return _opt_int_any(prefixed + tuple(base_names))
+
+
 def search_group_id():
-    """Group used for single-use search-group invite links (env SEARCH_GROUP_ID)."""
-    return _opt_int("SEARCH_GROUP_ID")
+    """Group used for single-use search-group invite links (env SEARCH_GROUP_ID / TESTING_SEARCH_GROUP_ID)."""
+    return _mode_opt_int("SEARCH_GROUP_ID")
 
 
 def request_channel_id():
-    """Channel where book requests are posted (env REQUEST_CHANNEL_ID)."""
-    return _opt_int("REQUEST_CHANNEL_ID")
+    """Channel where book requests are posted (env REQUEST_CHANNEL_ID / TESTING_REQUEST_CHANNEL_ID)."""
+    return _mode_opt_int("REQUEST_CHANNEL_ID")
 
 
 def support_chat_id():
-    """Support group ID used for support quiz invites and support-only bans (env SUPPORT_CHAT_ID)."""
-    return _opt_int("SUPPORT_CHAT_ID")
+    """Support group ID used for support quiz invites and support-only bans (env SUPPORT_CHAT_ID / TESTING_SUPPORT_CHAT_ID)."""
+    return _mode_opt_int("SUPPORT_CHAT_ID")
 
 
 def storage_group_id():
-    """Storage group/channel ID (env STORAGE_GROUP_ID or STORAGE_CHANNEL_ID)."""
-    return _opt_int_any(("STORAGE_GROUP_ID", "STORAGE_CHANNEL_ID"))
+    """Storage group/channel ID (env STORAGE_GROUP_ID / TESTING_STORAGE_GROUP_ID)."""
+    return _mode_opt_int(("STORAGE_GROUP_ID", "STORAGE_CHANNEL_ID"))
 
 
 def posting_channel_id():
-    """Posting channel ID where helper bots send files with auto-delete (env POSTING_CHANNEL_ID)."""
-    return _opt_int_any(("POSTING_CHANNEL_ID", "INDEX_CHANNEL_ID"))
+    """Posting channel ID where helper bots send files with auto-delete (env POSTING_CHANNEL_ID / TESTING_POSTING_CHANNEL_ID)."""
+    return _mode_opt_int(("POSTING_CHANNEL_ID", "INDEX_CHANNEL_ID"))
 
 
 def index_channel_id():
-    """Index channel ID (env INDEX_CHANNEL_ID)."""
-    return _opt_int("INDEX_CHANNEL_ID")
+    """Index logs channel ID (env INDEX_CHANNEL_ID / TESTING_INDEX_CHANNEL_ID)."""
+    return _mode_opt_int("INDEX_CHANNEL_ID")
 
 
 def logger_group_id():
-    """Logger supergroup ID (env LOGGER_GROUP_ID)."""
-    return _opt_int("LOGGER_GROUP_ID")
+    """Logger supergroup ID (env LOGGER_GROUP_ID / TESTING_LOGGER_GROUP_ID)."""
+    return _mode_opt_int("LOGGER_GROUP_ID")
 
 
 def backup_chat_id():
     """Chat ID for Telegram database backups (BACKUP_CHAT_ID -> INDEX_CHANNEL_ID -> LOGGER_GROUP_ID)."""
-    return _opt_int_any(("BACKUP_CHAT_ID", "INDEX_CHANNEL_ID", "LOGGER_GROUP_ID"))
+    return _mode_opt_int(("BACKUP_CHAT_ID", "INDEX_CHANNEL_ID", "LOGGER_GROUP_ID"))
 
 
 def fsub_channel_ids():
-    """Optional force-subscribe channel IDs (env FSUB_CHANNEL_IDS or FSUB_CHANNEL_ID)."""
-    raw = _clean_any(("FSUB_CHANNEL_IDS", "FSUB_CHANNEL_ID")) or ""
+    """Optional force-subscribe channel IDs (env FSUB_CHANNEL_IDS or TESTING_FSUB_CHANNEL_IDS)."""
+    if is_testing_mode():
+        raw = _clean_any(("TESTING_FSUB_CHANNEL_IDS", "TEST_FSUB_CHANNEL_IDS", "FSUB_CHANNEL_IDS", "FSUB_CHANNEL_ID")) or ""
+    else:
+        raw = _clean_any(("PUBLIC_FSUB_CHANNEL_IDS", "FSUB_CHANNEL_IDS", "FSUB_CHANNEL_ID")) or ""
     out = []
     for part in raw.split(","):
         part = part.strip()
@@ -236,16 +295,17 @@ def fsub_channel_ids():
 
 
 # ---------------------------------------------------------------------------
-# Log topics & intervals
+# Log topics & intervals (Dual-Bot Aware)
 # ---------------------------------------------------------------------------
 def general_topic_id():
-    """General forum topic ID (env GENERAL_TOPIC_ID, default 1)."""
-    return _int("GENERAL_TOPIC_ID", 1, 1)
+    """General forum topic ID (env GENERAL_TOPIC_ID / TESTING_GENERAL_TOPIC_ID, default 1)."""
+    val = _mode_opt_int("GENERAL_TOPIC_ID")
+    return max(val, 1) if val is not None else 1
 
 
 def log_topic(kind):
     """kind: USER | INDEX | GROUP | CHANNEL | REQUEST | ERROR -> int or None."""
-    return _opt_int(f"{kind.upper()}_LOG_TOPIC_ID")
+    return _mode_opt_int(f"{kind.upper()}_LOG_TOPIC_ID")
 
 
 def backup_interval_seconds():
@@ -391,7 +451,9 @@ def users_db_path():
 
 
 def backup_filename():
-    return _clean("BACKUP_FILENAME") or "mastermind_backup.zip"
+    if is_testing_mode():
+        return _clean_any(("TESTING_BACKUP_FILENAME", "TEST_BACKUP_FILENAME", "BACKUP_FILENAME")) or "mastermind_test_backup.zip"
+    return _clean_any(("PUBLIC_BACKUP_FILENAME", "BACKUP_FILENAME")) or "mastermind_backup.zip"
 
 
 def max_upload_bytes():

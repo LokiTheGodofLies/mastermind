@@ -4,10 +4,12 @@ import asyncio
 import logging
 
 from config import (
+    bot_mode,
     bot_name,
     bot_token,
     env_file_path,
     helper_bot_tokens,
+    helper_polling_enabled,
     logger_group_id,
     log_topic,
     port,
@@ -205,6 +207,9 @@ async def _helper_error_handler(update, context):
 
 async def _start_helper_apps() -> list:
     """Starts polling on configured helper bots for /start deep-links and direct DM file indexing."""
+    if not helper_polling_enabled():
+        logger.info("Helper bot polling skipped in %s mode (shared helper bots remain active for API delivery).", bot_mode())
+        return []
     apps = []
     for tok in helper_bot_tokens():
         try:
