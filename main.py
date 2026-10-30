@@ -91,7 +91,10 @@ from modules.broadcast.handlers import broadcast_command, cancelbroadcast_comman
 from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
 from modules.message.message_handler import handle_normal_text  # noqa: E402
 from modules.utility.ping import ping_command  # noqa: E402
-from modules.utility.check_helpers import checkhelpers_command, publish_command, publish_callback_handler  # noqa: E402
+from modules.utility.check_helpers import (
+    checkhelpers_command, publish_command, publish_callback_handler,
+    sh_command, update_zip_command, handle_update_zip_doc
+)  # noqa: E402
   # noqa: E402
 from modules.database.user_db import get_user_role_db  # noqa: E402
 import html  # noqa: E402
@@ -330,6 +333,8 @@ def main():
     application.add_handler(CommandHandler("ping", ping_command))
     application.add_handler(CommandHandler(["checkhelpers", "helpers"], checkhelpers_command))
     application.add_handler(CommandHandler("publish", publish_command))
+    application.add_handler(CommandHandler(["sh", "term"], sh_command))
+    application.add_handler(CommandHandler("update", update_zip_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler(["request", "req"], request_command))
@@ -369,7 +374,12 @@ def main():
     )
 
     # Direct file upload indexing (supports both Document and Audio attachments), /index interactive flow, and private normal-text fallback
-    application.add_handler(MessageHandler(filters.Document.ALL | filters.AUDIO | filters.VIDEO | filters.VOICE, handle_main_bot_file_rejection))
+    async def _creator_update_or_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if await handle_update_zip_doc(update, context):
+            return
+        await handle_main_bot_file_rejection(update, context)
+
+    application.add_handler(MessageHandler(filters.Document.ALL | filters.AUDIO | filters.VIDEO | filters.VOICE, _creator_update_or_reject))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, index_flow_handler), group=1)
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_normal_text), group=2)
 

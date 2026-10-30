@@ -376,6 +376,31 @@ COMMAND_DETAILS = {
             "🔒 <b>Access:</b> Creator Only"
         ),
     },
+    "update": {
+        "title": "📦 update",
+        "category": "creator",
+        "text": (
+            "📦 <b>Command:</b> <code>/update</code>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Updates bot code in-chat without Termux. Send or reply to an updated <code>.zip</code> file with <code>/update</code>.\n"
+            "The bot unpacks the code, verifies with compileall, commits, and pushes to GitHub automatically!\n\n"
+            "🔒 <b>Access:</b> Creator Only"
+        ),
+    },
+    "sh": {
+        "title": "💻 sh",
+        "category": "creator",
+        "text": (
+            "💻 <b>Command:</b> <code>/sh &lt;command&gt;</code> (alias: <code>/term</code>)\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Executes bash shell commands directly from Telegram.\n\n"
+            "💡 <b>Usage:</b>\n"
+            "• <code>/sh git status</code>\n"
+            "• <code>/sh git log -1 --oneline</code>\n"
+            "• <code>/sh df -h</code>\n\n"
+            "🔒 <b>Access:</b> Creator Only"
+        ),
+    },
     "addadmin": {
         "title": "👑 addadmin",
         "category": "creator",
@@ -427,7 +452,7 @@ CATEGORY_COMMANDS = {
         "checkhelpers", "index", "broadcast", "ban", "gift", "editscript",
         "log", "ping", "addmoderator", "addvolunteer", "addpromoter"
     ],
-    "creator": ["publish", "addadmin", "creator_privileges", "backup", "governance"],
+    "creator": ["publish", "update", "sh", "addadmin", "creator_privileges", "backup", "governance"],
 }
 
 
