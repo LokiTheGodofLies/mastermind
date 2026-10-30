@@ -123,6 +123,31 @@ async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # ---------------------------------------------------------------------------
+# Helper to configure git remotes on Render / ephemeral environments
+def _ensure_git_remotes_configured(repo_path: str):
+    gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+    loki_url = f"https://{gh_token}@github.com/LokiTheGodofLies/mastermind.git" if gh_token else "https://github.com/LokiTheGodofLies/mastermind.git"
+    origin_url = f"https://{gh_token}@github.com/mastermindmayankofficial/mastermind.git" if gh_token else "https://github.com/mastermindmayankofficial/mastermind.git"
+
+    res = subprocess.run("git remote", shell=True, capture_output=True, text=True, cwd=repo_path)
+    remotes = set(res.stdout.split())
+
+    if "loki" not in remotes:
+        subprocess.run(f"git remote add loki {loki_url}", shell=True, capture_output=True, cwd=repo_path)
+    else:
+        subprocess.run(f"git remote set-url loki {loki_url}", shell=True, capture_output=True, cwd=repo_path)
+
+    if "origin" not in remotes:
+        subprocess.run(f"git remote add origin {origin_url}", shell=True, capture_output=True, cwd=repo_path)
+    else:
+        subprocess.run(f"git remote set-url origin {origin_url}", shell=True, capture_output=True, cwd=repo_path)
+
+    # Configure git committer if not set
+    subprocess.run('git config user.name "Mastermind Bot"', shell=True, capture_output=True, cwd=repo_path)
+    subprocess.run('git config user.email "bot@mastermind.local"', shell=True, capture_output=True, cwd=repo_path)
+
+
+# ---------------------------------------------------------------------------
 # Creator-Only /publish Command (Production Deploy)
 # ---------------------------------------------------------------------------
 async def publish_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -182,29 +207,32 @@ async def publish_callback_handler(update: Update, context: ContextTypes.DEFAULT
             if not os.path.isdir(repo_path):
                 repo_path = os.getcwd()
 
-            cmds = [
-                "git fetch loki main",
-                "git checkout main",
-                "git pull loki main",
-                "git merge test -m \"Merge verified test branch into main via /publish\"",
-                "git push loki main",
-                "git push origin main",
-                "git checkout test",
-            ]
-            logs = []
-            for cmd in cmds:
-                res = subprocess.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    cwd=repo_path,
+            gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+            if not gh_token:
+                return False, (
+                    "⚠️ <b>GITHUB_TOKEN is not set in Render Environment Variables!</b>\n\n"
+                    "To allow the bot to push to GitHub from Telegram, please add your GitHub "
+                    "Personal Access Token as <code>GITHUB_TOKEN</code> in your Render Dashboard (Environment tab)."
                 )
-                logs.append(f"$ {cmd}\n{res.stdout}{res.stderr}".strip())
-                if res.returncode != 0:
-                    subprocess.run("git checkout test", shell=True, cwd=repo_path, capture_output=True)
-                    return False, "\n".join(logs)
-            return True, "\n".join(logs)
+
+            loki_url = f"https://{gh_token}@github.com/LokiTheGodofLies/mastermind.git"
+            origin_url = f"https://{gh_token}@github.com/mastermindmayankofficial/mastermind.git"
+
+            logs = []
+            subprocess.run('git config user.name "Mastermind Bot"', shell=True, cwd=repo_path, capture_output=True)
+            subprocess.run('git config user.email "bot@mastermind.local"', shell=True, cwd=repo_path, capture_output=True)
+
+            cmd_loki = f"git push {loki_url} test:main"
+            res1 = subprocess.run(cmd_loki, shell=True, capture_output=True, text=True, cwd=repo_path)
+            logs.append(f"Loki Push (test -> main):\n{res1.stdout}{res1.stderr}".strip())
+
+            cmd_orig = f"git push {origin_url} test:main"
+            res2 = subprocess.run(cmd_orig, shell=True, capture_output=True, text=True, cwd=repo_path)
+            logs.append(f"Origin Push (test -> main):\n{res2.stdout}{res2.stderr}".strip())
+
+            if res1.returncode != 0:
+                return False, "\n\n".join(logs)
+            return True, "\n\n".join(logs)
 
         success, full_log = await asyncio.to_thread(_do_git_publish)
 
@@ -398,6 +426,8 @@ async def _process_update_zip(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             if res.returncode != 0:
                 return False, f"Compilation failed with errors:\n{res.stdout}\n{res.stderr}"
+
+            _ensure_git_remotes_configured(repo_path)
 
             git_res = subprocess.run(
                 "git status --porcelain",

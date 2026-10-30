@@ -190,11 +190,12 @@ async def perform_search(
     filter_label_str = filter_labels.get(filter_mode, "All Formats (📚 + 🎧)")
 
     bot_uname = context.bot.username or "GeorgeOrwellAi"
+    bot_title = getattr(context.bot, "first_name", None) or bot_name()
     esc_term = html.escape(search_term)
 
     # Build Header
     lines = [
-        f"🔍 <b>Search Results — {bot_name()} Library Bot</b>",
+        f"🔍 <b>Search Results — {html.escape(bot_title)} Library Bot</b>",
         f"🔎 <b>Query:</b> <code>{esc_term}</code> | <b>Filter:</b> {filter_label_str} ({total_matches} matches)\n",
     ]
 

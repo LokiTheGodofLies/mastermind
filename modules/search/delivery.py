@@ -396,7 +396,10 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, payload: str):
-    """Handles `/start dl_<row_id>` on helper bots to immediately send the requested file in PM."""
+    """
+    Handles `/start dl_<row_id|file_unique_id>` triggered by download text hyperlinks or deep-links.
+    Uses the exact same deliver_file_dual pipeline as inline keyboard buttons.
+    """
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user:
@@ -413,59 +416,12 @@ async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DE
     if not row:
         await msg.reply_text("❌ File record no longer found in database.")
         return
-    row_id = row["id"]
 
-    storage_id = storage_group_id()
-    storage_msg_id = row["storage_message_id"]
-    delete_mins = max(1, round(auto_delete_seconds() / 60))
-
-    if not storage_id:
-        await msg.reply_text("❌ Storage group is not configured.")
-        return
-
-    if not storage_msg_id:
-        err_msg = f"File #{row_id} has no storage_message_id in database."
-        comm_url = community_link()
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=comm_url)]]) if comm_url else None
-        await msg.reply_text("❌ Could not send file due to an error. Please contact support.", reply_markup=markup)
-        try:
-            await report_error(
-                context.application,
-                f"🚨 <b>Deep-Link Delivery Error</b>\n\n• File ID: <code>{row_id}</code>\n• Error: {err_msg}",
-                title="Deep-Link Delivery Error",
-            )
-        except Exception:
-            pass
-        return
-
+    # Trigger dual delivery using the configured helper bot pool
     try:
-        await context.bot.copy_message(
-            chat_id=user.id,
-            from_chat_id=int(storage_id),
-            message_id=int(storage_msg_id),
-        )
-        await msg.reply_text(
-            f"✅ <b>Here is your requested file!</b>\n\n"
-            f"⚠️ <i>Don't forget to forward the files to your <b>Saved Messages</b> "
-            f"(posting channel copies are automatically deleted in {delete_mins} mins).</i>",
-            parse_mode="HTML",
-        )
-        return
+        await deliver_file_dual(update, context, int(row["id"]))
     except Exception as exc:
-        logger.error("Deep-link copy_message failed: %s", exc)
-        err_details = (
-            f"🚨 <b>Helper Bot Deep-Link Copy Error</b>\n\n"
-            f"• Helper Bot: @{context.bot.username or 'unknown'}\n"
-            f"• User: {html.escape(user.full_name)} (<code>{user.id}</code>)\n"
-            f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
-            f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
-            f"<i>Ensure @{context.bot.username or 'helper_bot'} is an Administrator in the Storage Group with permission to access messages.</i>"
-        )
-        try:
-            await report_error(context.application, err_details, title="Helper Bot Deep-Link Copy Error")
-        except Exception as report_err:
-            logger.error("Failed to report delivery error: %s", report_err)
-
+        logger.error("Deep-link deliver_file_dual failed: %s", exc)
         comm_url = community_link()
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=comm_url)]]) if comm_url else None
-        await msg.reply_text("❌ Could not send file due to an error. Please contact support.", reply_markup=markup)
+        await msg.reply_text(f"❌ Error delivering file: <code>{html.escape(str(exc))}</code>", reply_markup=markup, parse_mode="HTML")
