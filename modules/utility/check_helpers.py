@@ -24,7 +24,7 @@ async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     tokens = helper_bot_tokens()
     if not tokens:
-        await msg.reply_text("⚠️ No helper bot tokens found in HELPER_BOT_TOKENS.")
+        await msg.reply_text("⚠️ No helper bot tokens found in PUBLIC_/TESTING_HELPER_BOT_TOKENS.")
         return
 
     storage_id = storage_group_id()
@@ -56,7 +56,7 @@ async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYP
                         all_ok = False
                         lines.append(f"• Storage Group: ❌ Not accessible ({html.escape(str(exc))})")
                 else:
-                    lines.append("• Storage Group: ⚠️ STORAGE_GROUP_ID not configured")
+                    lines.append("• Storage Group: ⚠️ PUBLIC_/TESTING_STORAGE_GROUP_ID not configured")
 
                 # 2. Posting Channel Check
                 if posting_id:
@@ -84,7 +84,7 @@ async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYP
                         all_ok = False
                         lines.append(f"• Posting Channel: ❌ Not accessible ({html.escape(str(exc))})")
                 else:
-                    lines.append("• Posting Channel: ⚠️ POSTING_CHANNEL_ID not configured")
+                    lines.append("• Posting Channel: ⚠️ PUBLIC_/TESTING_POSTING_CHANNEL_ID not configured")
 
         except Exception as exc:
             all_ok = False

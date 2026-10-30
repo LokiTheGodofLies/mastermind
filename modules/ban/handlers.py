@@ -6,6 +6,23 @@ from modules.database.user_db import get_user_role_db, set_user_role_db
 from modules.ban.ban import set_ban_db, remove_ban_db, check_user_access
 
 
+def _real_reply(msg):
+    """Returns the replied-to message only if it is a real user message.
+
+    In a forum topic, a message sent without replying to anything still carries
+    reply_to_message = the topic-creation service message (from the topic creator).
+    That must never be treated as a target.
+    """
+    reply = getattr(msg, "reply_to_message", None) if msg else None
+    if not reply or not reply.from_user:
+        return None
+    if (reply.forum_topic_created or reply.forum_topic_edited
+            or reply.forum_topic_closed or reply.forum_topic_reopened
+            or reply.general_forum_topic_hidden or reply.general_forum_topic_unhidden):
+        return None
+    return reply
+
+
 async def resolve_target_identifier(update: Update, context: ContextTypes.DEFAULT_TYPE, target_arg: str):
     """Resolves target ID whether it's a numeric ID, chat ID, or @username."""
     target_arg = target_arg.strip()
@@ -37,7 +54,7 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
     admin_id = update.effective_user.id
     admin_role = get_user_role_db(admin_id)
 
-    if admin_role not in ["Admin", "GOD", "Owner"]:
+    if admin_role not in ["Admin", "Creator", "Owner"]:
         await update.message.reply_text("⛔ You do not have permission to use this command.")
         return
 
@@ -46,8 +63,8 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
     target_display = ""
     reason = ""
 
-    reply_message = update.message.reply_to_message
-    if reply_message and reply_message.from_user:
+    reply_message = _real_reply(update.message)
+    if reply_message:
         target_id = reply_message.from_user.id
         target_display = f"@{reply_message.from_user.username}" if reply_message.from_user.username else reply_message.from_user.first_name
         reason = " ".join(args) if args else ""
@@ -68,12 +85,12 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
         target_display = display_str
         reason = " ".join(args[1:]) if len(args) > 1 else ""
 
-    if admin_role not in ("GOD", "Owner") and not reason:
+    if admin_role not in ("Creator", "Owner") and not reason:
         await update.message.reply_text("⚠️ **Reason Required:** Admins must provide a reason.", parse_mode="Markdown")
         return
 
     if not reason:
-        reason = "No reason provided (GOD action)"
+        reason = "No reason provided (Creator action)"
 
     set_ban_db(target_id, ban_type, reason)
 
@@ -125,12 +142,12 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = update.effective_user.id
     admin_role = get_user_role_db(admin_id)
 
-    if admin_role not in ["Admin", "GOD", "Owner"]:
+    if admin_role not in ["Admin", "Creator", "Owner"]:
         await update.message.reply_text("⛔ You do not have permission to use this command.")
         return
 
-    reply_message = update.message.reply_to_message
-    if reply_message and reply_message.from_user and not context.args:
+    reply_message = _real_reply(update.message)
+    if reply_message and not context.args:
         resolved_id = reply_message.from_user.id
         display_str = f"@{reply_message.from_user.username}" if reply_message.from_user.username else reply_message.from_user.first_name
     else:
@@ -149,17 +166,17 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """GOD-only command to grant Admin role (/addadmin <user_id|@username> or reply)."""
+    """Creator-only command to grant Admin role (/addadmin <user_id|@username> or reply)."""
     caller = update.effective_user
     msg = update.effective_message
     if not caller or not msg:
         return
-    if get_user_role_db(caller.id) not in ("GOD", "Owner"):
-        await msg.reply_text("⛔ Only GOD can add administrators.")
+    if get_user_role_db(caller.id) not in ("Creator", "Owner"):
+        await msg.reply_text("⛔ Only the Creator can add administrators.")
         return
 
-    reply_msg = msg.reply_to_message
-    if reply_msg and reply_msg.from_user and not context.args:
+    reply_msg = _real_reply(msg)
+    if reply_msg and not context.args:
         target_id = reply_msg.from_user.id
         display = f"@{reply_msg.from_user.username}" if reply_msg.from_user.username else reply_msg.from_user.first_name
     else:
@@ -176,17 +193,17 @@ async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def removeadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """GOD-only command to revoke Admin role (/removeadmin <user_id|@username> or reply)."""
+    """Creator-only command to revoke Admin role (/removeadmin <user_id|@username> or reply)."""
     caller = update.effective_user
     msg = update.effective_message
     if not caller or not msg:
         return
-    if get_user_role_db(caller.id) not in ("GOD", "Owner"):
-        await msg.reply_text("⛔ Only GOD can remove administrators.")
+    if get_user_role_db(caller.id) not in ("Creator", "Owner"):
+        await msg.reply_text("⛔ Only the Creator can remove administrators.")
         return
 
-    reply_msg = msg.reply_to_message
-    if reply_msg and reply_msg.from_user and not context.args:
+    reply_msg = _real_reply(msg)
+    if reply_msg and not context.args:
         target_id = reply_msg.from_user.id
         display = f"@{reply_msg.from_user.username}" if reply_msg.from_user.username else reply_msg.from_user.first_name
     else:
@@ -211,12 +228,12 @@ async def _process_role_change(update: Update, context: ContextTypes.DEFAULT_TYP
     if not caller or not msg:
         return
     caller_role = get_user_role_db(caller.id)
-    if caller_role not in ("GOD", "Owner", "Admin"):
-        await msg.reply_text("⛔ Unauthorized. Only Administrators and GOD can manage roles.")
+    if caller_role not in ("Creator", "Owner", "Admin"):
+        await msg.reply_text("⛔ Unauthorized. Only Administrators and the Creator can manage roles.")
         return
 
-    reply_msg = msg.reply_to_message
-    if reply_msg and reply_msg.from_user and not context.args:
+    reply_msg = _real_reply(msg)
+    if reply_msg and not context.args:
         target_id = reply_msg.from_user.id
         display = f"@{reply_msg.from_user.username}" if reply_msg.from_user.username else reply_msg.from_user.first_name
     else:
@@ -230,11 +247,11 @@ async def _process_role_change(update: Update, context: ContextTypes.DEFAULT_TYP
             return
 
     target_role = get_user_role_db(target_id)
-    if target_role in ("GOD", "Owner"):
-        await msg.reply_text("⛔ Cannot modify the role of GOD.")
+    if target_role in ("Creator", "Owner"):
+        await msg.reply_text("⛔ Cannot modify the role of the Creator.")
         return
-    if target_role == "Admin" and caller_role != "GOD":
-        await msg.reply_text("⛔ Only GOD can modify an Administrator's role.")
+    if target_role == "Admin" and caller_role != "Creator":
+        await msg.reply_text("⛔ Only the Creator can modify an Administrator's role.")
         return
 
     set_user_role_db(target_id, new_role)
@@ -245,32 +262,32 @@ async def _process_role_change(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def addmoderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin/GOD command to promote a user to Moderator."""
+    """Admin/Creator command to promote a user to Moderator."""
     await _process_role_change(update, context, "Moderator", "Moderator")
 
 
 async def removemoderator_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin/GOD command to demote a Moderator to Normal User."""
+    """Admin/Creator command to demote a Moderator to Normal User."""
     await _process_role_change(update, context, "Normal User", "Normal User")
 
 
 async def addvolunteer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin/GOD command to promote a user to Volunteer."""
+    """Admin/Creator command to promote a user to Volunteer."""
     await _process_role_change(update, context, "Volunteer", "Volunteer")
 
 
 async def removevolunteer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin/GOD command to demote a Volunteer to Normal User."""
+    """Admin/Creator command to demote a Volunteer to Normal User."""
     await _process_role_change(update, context, "Normal User", "Normal User")
 
 
 async def addpromoter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin/GOD command to promote a user to Promoter."""
+    """Admin/Creator command to promote a user to Promoter."""
     await _process_role_change(update, context, "Promoter", "Promoter")
 
 
 async def removepromoter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin/GOD command to demote a Promoter to Normal User."""
+    """Admin/Creator command to demote a Promoter to Normal User."""
     await _process_role_change(update, context, "Normal User", "Normal User")
 
 async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):

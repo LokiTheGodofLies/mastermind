@@ -5,7 +5,7 @@ from config import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
-from modules.database.user_db import is_admin_or_god, get_user_role_db, is_god, get_db_stats_counts
+from modules.database.user_db import is_admin_or_creator, get_user_role_db, is_creator, get_db_stats_counts
 from modules.database.file_db import get_file_stats_counts_db
 
 
@@ -44,8 +44,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     role = get_user_role_db(user.id)
-    is_admin = is_admin_or_god(user.id)
-    is_god_user = is_god(user.id)
+    is_admin = is_admin_or_creator(user.id)
+    is_creator_user = is_creator(user.id)
 
     default_header = f"📊 <b>{bot_name()} Bot Statistics & Status</b>"
     header_text = get_config("stats_header_script", default=default_header)

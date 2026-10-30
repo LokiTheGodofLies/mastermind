@@ -63,7 +63,7 @@ from modules.indexing.book_index import (
 
 logger = logging.getLogger(__name__)
 
-INDEX_COMMAND_ACCESS = {"GOD", "Owner", "Admin"}
+INDEX_COMMAND_ACCESS = {"Creator", "Owner", "Admin"}
 FULL_ACCESS = INDEX_COMMAND_ACCESS
 APPROVAL_ACCESS = {"Moderator", "Volunteer"}
 
@@ -199,7 +199,7 @@ async def _run_index(context, rid, job):
     final_state = "completed ✅"
 
     if not storage:
-        await _edit_prompt(context, job, "❌ STORAGE_GROUP_ID is not set. Cannot index.")
+        await _edit_prompt(context, job, "❌ PUBLIC_/TESTING_STORAGE_GROUP_ID is not set. Cannot index.")
         job["state"] = "done"
         return
 
@@ -453,7 +453,7 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if role not in INDEX_COMMAND_ACCESS:
             if role in ("Volunteer", "Moderator"):
                 await msg.reply_text(
-                    "⛔ The <code>/index</code> batch command is exclusive to Administrators and GOD only.\n\n"
+                    "⛔ The <code>/index</code> batch command is exclusive to Administrators and the Creator only.\n\n"
                     "💡 <i>As a Volunteer or Moderator, you can index files directly without approvals by sending them to Helper Bot DMs!</i>",
                     parse_mode="HTML",
                 )

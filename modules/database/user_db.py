@@ -2,7 +2,7 @@ from datetime import datetime
 import sqlite3
 from config import (
     admin_ids,
-    owner_id,
+    creator_id,
     users_db_path,
     default_search_quota,
     default_request_quota,
@@ -18,15 +18,15 @@ def _db_file():
 
 
 def _initial_role(user_id: int) -> str:
-    if int(user_id) == int(owner_id()):
-        return "GOD"
+    if int(user_id) == int(creator_id()):
+        return "Creator"
     if int(user_id) in admin_ids():
         return "Admin"
     return "Normal User"
 
 
 def _role_default_limits(role: str):
-    if role in ("GOD", "Owner", "Admin"):
+    if role in ("Creator", "Owner", "Admin"):
         u = unlimited_quota_value()
         return u, u
     if role == "Moderator":
@@ -178,33 +178,33 @@ def add_or_update_user_db(user_id, username, full_name, today_str):
 
 def get_user_role_db(user_id):
     """Retrieves a user's role from config or the database."""
-    if int(user_id) == int(owner_id()):
-        return "GOD"
+    if int(user_id) == int(creator_id()):
+        return "Creator"
     conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
     cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
     conn.close()
     if result and result[0] and result[0] != "Normal User":
-        return "GOD" if result[0] == "Owner" else result[0]
+        return "Creator" if result[0] in ("Owner", "GOD") else result[0]
     if int(user_id) in admin_ids():
         return "Admin"
     if result and result[0]:
-        return "GOD" if result[0] == "Owner" else result[0]
+        return "Creator" if result[0] in ("Owner", "GOD") else result[0]
     return "Normal User"
 
 
-def is_god(user_id: int) -> bool:
-    """Returns True if the user has the GOD role."""
-    return get_user_role_db(user_id) in ("GOD", "Owner") or int(user_id) == int(owner_id())
+def is_creator(user_id: int) -> bool:
+    """Returns True if the user has the Creator role."""
+    return get_user_role_db(user_id) in ("Creator", "Owner") or int(user_id) == int(creator_id())
 
 
-def is_admin_or_god(user_id: int) -> bool:
-    """Returns True if the user has Admin or GOD role."""
-    return get_user_role_db(user_id) in ("Admin", "GOD", "Owner") or int(user_id) in admin_ids()
+def is_admin_or_creator(user_id: int) -> bool:
+    """Returns True if the user has Admin or Creator role."""
+    return get_user_role_db(user_id) in ("Admin", "Creator", "Owner") or int(user_id) in admin_ids()
 
 
-is_admin_or_owner = is_admin_or_god
+is_admin_or_owner = is_admin_or_creator
 
 
 def set_user_role_db(user_id: int, role: str):
@@ -376,8 +376,8 @@ def get_users_by_role_db(role: str) -> list[dict]:
     try:
         conn = sqlite3.connect(_db_file())
         cursor = conn.cursor()
-        if role in ("Admin", "GOD"):
-            cursor.execute("SELECT user_id, full_name, username, role FROM users WHERE role IN ('Admin', 'GOD', 'Owner')")
+        if role in ("Admin", "Creator"):
+            cursor.execute("SELECT user_id, full_name, username, role FROM users WHERE role IN ('Admin', 'Creator', 'GOD', 'Owner')")
         else:
             cursor.execute("SELECT user_id, full_name, username, role FROM users WHERE role = ?", (role,))
         rows = cursor.fetchall()

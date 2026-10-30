@@ -21,7 +21,6 @@ from config import (
     files_db_path,
     users_db_path,
 )
-from modules.database.config_db import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -58,18 +57,11 @@ _last_sent = {}
 
 
 def _cfg(env_name):
-    if bot_mode() == "testing":
-        val = (
-            get_config(f"testing_{env_name.lower()}", fallback_env=f"TESTING_{env_name}")
-            or get_config(f"test_{env_name.lower()}", fallback_env=f"TEST_{env_name}")
-        )
-        if val is not None:
-            return val
-    else:
-        val = get_config(f"public_{env_name.lower()}", fallback_env=f"PUBLIC_{env_name}")
-        if val is not None:
-            return val
-    return get_config(env_name.lower(), fallback_env=env_name)
+    """Resolve a chat/topic ID through config.py (PUBLIC_/TESTING_ env only, no DB/env fallbacks)."""
+    import config as _config
+    if env_name.endswith("_LOG_TOPIC_ID"):
+        return _config.log_topic(env_name[: -len("_LOG_TOPIC_ID")])
+    return getattr(_config, env_name.lower())()
 
 
 def _count(db_path, query):
@@ -202,7 +194,7 @@ async def _send_chain(bots, text, topic):
     """Try to deliver `text`, falling back step by step:
     log group topic -> log group General topic -> log group (no topic) -> owner PM.
     Each bot in `bots` is tried in order (main first, then helpers)."""
-    group = _cfg("LOGGER_GROUP_ID") or _cfg("STORAGE_GROUP_ID")
+    group = logger_group_id()
     gen_topic = str(general_topic_id())
     targets = []
     if group:
@@ -372,7 +364,7 @@ async def _report_user_block(app, uid, name, uname, bot_title, bot_uname):
         except Exception:
             pass
     log_gid = logger_group_id()
-    topic = log_topic("USER_LOG_TOPIC_ID") or 2
+    topic = log_topic("USER") or 2
     if not log_gid:
         return
     uname_part = f" (@{html.escape(uname)})" if uname and uname.lower() != "none" else ""

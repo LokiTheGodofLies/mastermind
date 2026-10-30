@@ -4,9 +4,9 @@ import logging
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Forbidden, BadRequest
 from telegram.ext import ContextTypes
-from config import logger_group_id, log_topic, helper_bot_tokens
+from config import logger_group_id, log_topic, helper_bot_tokens, backup_chat_id
 from modules.database.user_db import (
-    is_admin_or_god,
+    is_admin_or_creator,
     get_all_users_for_broadcast_db,
     get_all_chats_db,
     record_user_blocked_bot_db,
@@ -110,8 +110,8 @@ def _build_broadcast_text(target: str, is_pin: bool, msg_text: str | None) -> st
 async def cancelbroadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _active_broadcast_cancelled, _active_broadcast_paused
     user_id = update.effective_user.id
-    if not is_admin_or_god(user_id):
-        await update.effective_message.reply_text("⛔ Access denied. Only Admins and Owners can stop broadcasts.")
+    if not is_admin_or_creator(user_id):
+        await update.effective_message.reply_text("⛔ Access denied. Only Admins and the Creator can stop broadcasts.")
         return
     _active_broadcast_cancelled = True
     _active_broadcast_paused = False
@@ -184,7 +184,7 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
             try:
                 sent_msg = await active_bot.send_message(chat_id=chat_id, text=msg_text, parse_mode="HTML", disable_web_page_preview=True)
                 sent += 1
-                if should_pin:
+                if should_pin and chat_id != backup_chat_id():  # never pin over the pinned DB backup
                     try:
                         await active_bot.pin_chat_message(chat_id=chat_id, message_id=sent_msg.message_id, disable_notification=False)
                         pinned += 1
@@ -239,8 +239,8 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     user_id = update.effective_user.id
-    if not is_admin_or_god(user_id):
-        await msg.reply_text("⛔ Access denied. Only Admins and Owners can broadcast.")
+    if not is_admin_or_creator(user_id):
+        await msg.reply_text("⛔ Access denied. Only Admins and the Creator can broadcast.")
         return
 
     if not get_config_bool("is_broadcast_enabled", True):
@@ -295,7 +295,7 @@ async def broadcast_callback_handler(update: Update, context: ContextTypes.DEFAU
         return
 
     user_id = q.from_user.id
-    if not is_admin_or_god(user_id):
+    if not is_admin_or_creator(user_id):
         await q.answer("⛔ Access denied.", show_alert=True)
         return
 

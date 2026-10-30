@@ -4,15 +4,11 @@ from modules.database.config_db import get_config
 
 
 def get_support_chat_id():
-    """Reads SUPPORT_CHAT_ID from environment/configs (with config.db fallback)."""
+    """Reads PUBLIC_/TESTING_SUPPORT_CHAT_ID via config.support_chat_id() (no fallback)."""
     cid = support_chat_id()
     if cid is not None:
         return cid
-    val = get_config("support_chat_id", fallback_env="SUPPORT_CHAT_ID")
-    try:
-        return int(val) if val else None
-    except ValueError:
-        return None
+    return None
 
 
 def set_ban_db(target_id: int, ban_type: str, reason: str):

@@ -2,7 +2,7 @@ import html
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from config import owner_id, admin_ids
+from config import creator_id, admin_ids
 from modules.database.user_db import get_users_by_role_db
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ def _format_user_roster_line(user: dict) -> str:
 
 
 async def admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays all Admins and Owners."""
+    """Displays all Admins and the Creator."""
     msg = update.effective_message
     if not msg:
         return
@@ -27,14 +27,14 @@ async def admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     seen_ids = set()
     formatted_list = []
 
-    oid = owner_id()
+    oid = creator_id()
     if oid:
         seen_ids.add(int(oid))
         owner_entry = next((u for u in users if u["user_id"] == int(oid)), None)
         if owner_entry:
             formatted_list.append(_format_user_roster_line(owner_entry))
         else:
-            formatted_list.append(f"• <a href=\"tg://user?id={oid}\">Owner</a> [<code>{oid}</code>] - <b>GOD/Owner</b>")
+            formatted_list.append(f"• <a href=\"tg://user?id={oid}\">Owner</a> [<code>{oid}</code>] - <b>Creator</b>")
 
     for u in users:
         if u["user_id"] not in seen_ids:

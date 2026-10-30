@@ -29,7 +29,7 @@ def check_and_reset_quota(user_id):
 def can_user_search(user_id):
     """Validates if a user has remaining search quota for the day."""
     role = get_user_role_db(user_id)
-    if role in ["Admin", "GOD", "Owner"]:
+    if role in ["Admin", "Creator", "Owner"]:
         return True
 
     check_and_reset_quota(user_id)
@@ -44,7 +44,7 @@ def can_user_search(user_id):
 def can_user_request(user_id):
     """Validates if a user has remaining request quota for the day."""
     role = get_user_role_db(user_id)
-    if role in ["Admin", "GOD", "Owner"]:
+    if role in ["Admin", "Creator", "Owner"]:
         return True
 
     check_and_reset_quota(user_id)
@@ -59,7 +59,7 @@ def can_user_request(user_id):
 def deduct_search_quota(user_id):
     """Deducts 1 search allowance ONLY after a successful search."""
     role = get_user_role_db(user_id)
-    if role in ["Admin", "GOD", "Owner"]:
+    if role in ["Admin", "Creator", "Owner"]:
         return
     check_and_reset_quota(user_id)
     increment_search_used_db(user_id)
@@ -68,7 +68,7 @@ def deduct_search_quota(user_id):
 def deduct_request_quota(user_id):
     """Deducts 1 request allowance ONLY after a successful request submission."""
     role = get_user_role_db(user_id)
-    if role in ["Admin", "GOD", "Owner"]:
+    if role in ["Admin", "Creator", "Owner"]:
         return
     check_and_reset_quota(user_id)
     increment_request_used_db(user_id)
@@ -80,7 +80,7 @@ def get_user_quota_summary(user_id):
     role = get_user_role_db(user_id)
     row = get_quota_record_db(user_id)
 
-    if role in ["Admin", "GOD", "Owner"]:
+    if role in ["Admin", "Creator", "Owner"]:
         return {
             "role": role,
             "unlimited": True,
@@ -106,9 +106,9 @@ def get_user_quota_summary(user_id):
 
 
 def gift_quota(admin_user_id, target_user_id, search_bonus=0, request_bonus=0):
-    """Allows Admins or GOD to increase a target user's quota limits via /gift."""
+    """Allows Admins or Creator to increase a target user's quota limits via /gift."""
     admin_role = get_user_role_db(admin_user_id)
-    if admin_role not in ["Admin", "GOD", "Owner"]:
+    if admin_role not in ["Admin", "Creator", "Owner"]:
         return False, "❌ You do not have permission to use the gift command."
 
     add_quota_limits_db(target_user_id, search_bonus, request_bonus)

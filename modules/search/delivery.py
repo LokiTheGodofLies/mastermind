@@ -45,7 +45,7 @@ async def _get_helper_bot_meta(token: str, app=None) -> dict | None:
                 f"🚨 <b>Invalid / Unreachable Helper Bot Token</b>\n\n"
                 f"• Token Suffix: <code>…{token[-6:]}</code>\n"
                 f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
-                f"<i>Please verify HELPER_BOT_TOKENS in environment variables or @BotFather.</i>"
+                f"<i>Please verify PUBLIC_/TESTING_HELPER_BOT_TOKENS in environment variables or @BotFather.</i>"
             )
             try:
                 asyncio.create_task(report_error(app, err_details, title="Invalid Helper Bot Token"))
@@ -133,7 +133,7 @@ async def _auto_delete_message(token: str | None, fallback_bot, chat_id: int, me
 
 
 async def _ensure_storage_message_id(main_bot, row) -> int | None:
-    """Ensures the file has a valid message inside STORAGE_GROUP_ID so helper bots can copy_message it."""
+    """Ensures the file has a valid message inside PUBLIC_/TESTING_STORAGE_GROUP_ID so helper bots can copy_message it."""
     storage_id = storage_group_id()
     storage_msg_id = row["storage_message_id"]
     if storage_msg_id and storage_id:
@@ -159,7 +159,7 @@ async def _ensure_storage_message_id(main_bot, row) -> int | None:
 
 
 async def _copy_with_bot(token: str | None, target_chat_id: int, from_chat_id: int, message_id: int):
-    """Copies a message from STORAGE_GROUP_ID to target_chat_id using helper bot ONLY (main bot never copies files)."""
+    """Copies a message from PUBLIC_/TESTING_STORAGE_GROUP_ID to target_chat_id using helper bot ONLY (main bot never copies files)."""
     if not token:
         raise ValueError("No helper bot token configured.")
     async with Bot(token) as hb:
@@ -173,8 +173,8 @@ async def _copy_with_bot(token: str | None, target_chat_id: int, from_chat_id: i
 async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, row_id: int):
     """
     Executes dual file delivery when a user clicks a search result:
-      1. Selects ONE helper bot (resolving its @username dynamically from HELPER_BOT_TOKENS).
-      2. Sends the file via that helper bot to POSTING_CHANNEL_ID with 5-minute auto-delete.
+      1. Selects ONE helper bot (resolving its @username dynamically from PUBLIC_/TESTING_HELPER_BOT_TOKENS).
+      2. Sends the file via that helper bot to PUBLIC_/TESTING_POSTING_CHANNEL_ID with 5-minute auto-delete.
       3. Sends the file via that SAME helper bot to the user's PM (if they have started that helper bot).
       4. Replies via the main bot with instructions to start that helper bot (@username) or
          click the link to get the file from the posting channel, reminding them to forward
@@ -373,7 +373,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
     else:
         text = (
-            "❌ Could not deliver the file. Please ensure HELPER_BOT_TOKENS and POSTING_CHANNEL_ID "
+            "❌ Could not deliver the file. Please ensure PUBLIC_/TESTING_HELPER_BOT_TOKENS and PUBLIC_/TESTING_POSTING_CHANNEL_ID "
             "are configured and the helper bot is an admin in the Storage Group and Posting Channel."
         )
 
@@ -414,7 +414,7 @@ async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DE
         return
 
     storage_id = storage_group_id()
-    storage_msg_id = row.get("storage_message_id")
+    storage_msg_id = row["storage_message_id"]
     delete_mins = max(1, round(auto_delete_seconds() / 60))
 
     if not storage_id:

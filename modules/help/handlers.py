@@ -1,7 +1,7 @@
 from config import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from modules.database.user_db import get_user_role_db, is_admin_or_god, is_god
+from modules.database.user_db import get_user_role_db, is_admin_or_creator, is_creator
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ COMMAND_DETAILS = {
         "text": (
             "👥 <b>Community Roster Commands</b>\n\n"
             "View real-time lists of community members with direct profile links:\n\n"
-            "• <code>/admins</code>: Lists all Administrators and GOD.\n"
+            "• <code>/admins</code>: Lists all Administrators and the Creator.\n"
             "• <code>/moderators</code>: Lists all active Moderators (alias: <code>/mods</code>).\n"
             "• <code>/volunteers</code>: Lists all active Volunteers (alias: <code>/vols</code>).\n"
             "• <code>/promoters</code>: Lists all active Promoters (alias: <code>/promos</code>)."
@@ -49,7 +49,7 @@ COMMAND_DETAILS = {
             "• <b>Target Toggles:</b> <code>🌐 All</code>, <code>👥 Users</code>, <code>🤖 Helper Bots</code>, <code>👥 Groups</code>, <code>📢 Channels</code>.\n"
             "• <b>Auto-Pin Toggle:</b> Switch <code>📌 Pin in Chats</code> ON or OFF directly on the panel.\n"
             "• <b>Live Controls:</b> Use inline <code>⏸ Pause</code>, <code>▶️ Resume</code>, and <code>🛑 Cancel Broadcast</code> buttons (or <code>/cancelbroadcast</code>) during active delivery.\n\n"
-            "🔒 <b>Access:</b> Administrators & GOD"
+            "🔒 <b>Access:</b> Administrators & Creator"
         ),
     },
 
@@ -80,7 +80,8 @@ COMMAND_DETAILS = {
             "💡 <b>Usage:</b>\n"
             "• <code>/search &lt;title or author&gt;</code>\n"
             "• Reply to any message containing a title with <code>/search</code>.\n"
-            "• Send <code>/search</code> alone to generate a single-use search group invite.\n\n"
+            "• Send <code>/search</code> alone in private chat to get a single-use invite to the Search topic.\n"
+            "• In the Search topic just type the title or author (no command needed; commands are deleted there).\n\n"
             "📋 <b>Example:</b>\n"
             "<code>/search The Striker Ana Huang</code>"
         ),
@@ -163,7 +164,7 @@ COMMAND_DETAILS = {
         "text": (
             "👥 <b>User Roles & Access Hierarchy</b>\n\n"
             "Every user in the library belongs to a specific role with dedicated daily allowances and privileges:\n\n"
-            "• 👑 <b>GOD:</b>\n"
+            "• 👑 <b>Creator:</b>\n"
             "  - Supreme system creator & authority.\n"
             "  - Unlimited searches and requests.\n"
             "  - Immunity from bans, admin promotion/demotion, and total governance.\n\n"
@@ -236,7 +237,7 @@ COMMAND_DETAILS = {
         "category": "volunteer",
         "text": (
             "⚠️ <b>Index Command Access Notice</b>\n\n"
-            "Please note that the <code>/index</code> batch command is reserved exclusively for Administrators and GOD.\n\n"
+            "Please note that the <code>/index</code> batch command is reserved exclusively for Administrators and the Creator.\n\n"
             "💡 <b>Why?</b>\n"
             "The <code>/index</code> command performs mass batch dumps across entire channel ranges. "
             "Volunteers and Moderators contribute files directly by sending them to <b>Helper Bot DMs</b>, "
@@ -279,7 +280,7 @@ COMMAND_DETAILS = {
             "🤖 <b>Direct Indexing via Helper Bot DMs</b>\n\n"
             "Moderators have full pre-approved indexing authority.\n\n"
             "Simply send or forward supported ebook or audiobook files to any Helper Bot in private chat. "
-            "The bot enriches metadata, stores the file in <code>STORAGE_GROUP_ID</code>, and records it in the database immediately."
+            "The bot enriches metadata, stores the file in <code>PUBLIC_/TESTING_STORAGE_GROUP_ID</code>, and records it in the database immediately."
         ),
     },
     "mod_notice": {
@@ -287,7 +288,7 @@ COMMAND_DETAILS = {
         "category": "moderator",
         "text": (
             "⚠️ <b>Index Command Access Notice</b>\n\n"
-            "The <code>/index</code> batch range command is exclusive to Administrators and GOD.\n"
+            "The <code>/index</code> batch range command is exclusive to Administrators and the Creator.\n"
             "Moderators index files cleanly and reliably via Helper Bot private messages."
         ),
     },
@@ -308,7 +309,7 @@ COMMAND_DETAILS = {
             "• <code>/addmoderator &lt;user_id|@username&gt;</code>\n"
             "• <code>/removemoderator &lt;user_id|@username&gt;</code>\n"
             "• Or reply to a user's message with <code>/addmod</code> or <code>/delmod</code>.\n\n"
-            "📋 <b>Access:</b> Administrators & GOD"
+            "📋 <b>Access:</b> Administrators & Creator"
         ),
     },
     "addvolunteer": {
@@ -324,7 +325,7 @@ COMMAND_DETAILS = {
             "• <code>/addvolunteer &lt;user_id|@username&gt;</code>\n"
             "• <code>/removevolunteer &lt;user_id|@username&gt;</code>\n"
             "• Or reply to a user's message with <code>/addvol</code> or <code>/delvol</code>.\n\n"
-            "📋 <b>Access:</b> Administrators & GOD"
+            "📋 <b>Access:</b> Administrators & Creator"
         ),
     },
     "addpromoter": {
@@ -340,7 +341,7 @@ COMMAND_DETAILS = {
             "• <code>/addpromoter &lt;user_id|@username&gt;</code>\n"
             "• <code>/removepromoter &lt;user_id|@username&gt;</code>\n"
             "• Or reply to a user's message with <code>/addpromo</code> or <code>/delpromo</code>.\n\n"
-            "📋 <b>Access:</b> Administrators & GOD"
+            "📋 <b>Access:</b> Administrators & Creator"
         ),
     },
 
@@ -350,12 +351,12 @@ COMMAND_DETAILS = {
         "text": (
             "🤖 <b>Command:</b> <code>/checkhelpers</code> (alias: <code>/helpers</code>)\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Audits all configured helper delivery bots in <code>HELPER_BOT_TOKENS</code>. "
+            "Audits all configured helper delivery bots in <code>PUBLIC_/TESTING_HELPER_BOT_TOKENS</code>. "
             "Verifies token reachability, username resolution, presence in the Storage Group, and "
             "verifies administrator rights (Post & Delete rights) in the Posting Channel for 5-min auto-delete.\n\n"
             "💡 <b>Usage:</b>\n"
             "<code>/checkhelpers</code>\n\n"
-            "📋 <b>Access:</b> Administrators & GOD"
+            "📋 <b>Access:</b> Administrators & Creator"
         ),
     },
     "index": {
@@ -372,7 +373,7 @@ COMMAND_DETAILS = {
             "• In private chat: send <code>/index</code> for interactive step-by-step setup.\n\n"
             "📋 <b>Example:</b>\n"
             "<code>/index https://t.me/c/12345/1 https://t.me/c/12345/250</code>\n\n"
-            "🔒 <b>Access:</b> Administrators & GOD Only"
+            "🔒 <b>Access:</b> Administrators & Creator Only"
         ),
     },
     "ban": {
@@ -442,11 +443,11 @@ COMMAND_DETAILS = {
     },
 
     # =======================================================================
-    # 👑 GOD COMMANDS & PRIVILEGES
+    # 👑 Creator COMMANDS & PRIVILEGES
     # =======================================================================
     "addadmin": {
         "title": "👑 /addadmin & /removeadmin",
-        "category": "god",
+        "category": "creator",
         "text": (
             "👑 <b>Commands:</b> <code>/addadmin</code> & <code>/removeadmin</code>\n\n"
             "📝 <b>Purpose:</b>\n"
@@ -458,45 +459,47 @@ COMMAND_DETAILS = {
             "• Or reply to a user's message with <code>/addadmin</code> or <code>/removeadmin</code>.\n\n"
             "📋 <b>Example:</b>\n"
             "<code>/addadmin 123456789</code>\n\n"
-            "🔒 <b>Access:</b> GOD Only"
+            "🔒 <b>Access:</b> Creator Only"
         ),
     },
-    "godpriv": {
-        "title": "♾️ GOD System Privileges",
-        "category": "god",
+    "creatorpriv": {
+        "title": "♾️ Creator System Privileges",
+        "category": "creator",
         "text": (
-            "♾️ <b>GOD Supreme Privileges</b>\n\n"
+            "♾️ <b>Creator Supreme Privileges</b>\n\n"
             "📝 <b>System Authority:</b>\n"
-            "• <b>Unlimited Quotas:</b> GOD is completely exempt from all search and request daily limits.\n"
-            "• <b>Absolute Ban Immunity:</b> GOD cannot be banned or restricted by administrators.\n"
-            "• <b>Reason-Optional Actions:</b> GOD can execute administrative bans without requiring a reason.\n"
-            "• <b>Admin Promotion:</b> Only GOD can promote or demote administrators via <code>/addadmin</code> and <code>/removeadmin</code>."
+            "• <b>Unlimited Quotas:</b> Creator is completely exempt from all search and request daily limits.\n"
+            "• <b>Absolute Ban Immunity:</b> Creator cannot be banned or restricted by administrators.\n"
+            "• <b>Reason-Optional Actions:</b> Creator can execute administrative bans without requiring a reason.\n"
+            "• <b>Admin Promotion:</b> Only the Creator can promote or demote administrators via <code>/addadmin</code> and <code>/removeadmin</code>."
         ),
     },
     "backup": {
         "title": "💾 SQLite Persistence & Telegram Backup",
-        "category": "god",
+        "category": "creator",
         "text": (
             "💾 <b>Database Persistence System</b>\n\n"
             "📝 <b>Overview:</b>\n"
             "The bot automatically takes consistent online SQLite snapshots of all 3 databases "
             "(<code>config.db</code>, <code>files.db</code>, <code>mastermind_users.db</code>) every 5 minutes "
             "when changes occur, keeping a pinned <code>mastermind_backup.zip</code> document in your "
-            "backup chat (<code>BACKUP_CHAT_ID</code>).\n\n"
+            "Backup Logs topic of the logger group (<code>PUBLIC_/TESTING_BACKUP_TOPIC_ID</code>).\n\n"
             "💡 <b>Restore Flow:</b>\n"
             "Whenever Render restarts or rebuilds a container, the bot automatically downloads the pinned "
-            "backup and verifies SQLite integrity before opening tables."
+            "backup and verifies SQLite integrity before opening tables. Do not pin any other message in the logger group: "
+            "if a different pinned message is found, restore stops and backups are paused (startup log shows it)."
         ),
     },
     "governance": {
         "title": "⚙️ Global Governance & Token Security",
-        "category": "god",
+        "category": "creator",
         "text": (
             "⚙️ <b>Global System Governance</b>\n\n"
             "📝 <b>Overview:</b>\n"
-            "• Master control over <code>TELEGRAM_BOT_TOKEN</code> and <code>HELPER_BOT_TOKENS</code>.\n"
-            "• Direct authority over <code>STORAGE_GROUP_ID</code> and <code>POSTING_CHANNEL_ID</code>.\n"
-            "• Real-time error routing to Logger Forum Topic 33."
+            "• Master control over <code>PUBLIC_BOT_TOKEN</code> / <code>TESTING_BOT_TOKEN</code> and <code>PUBLIC_/TESTING_HELPER_BOT_TOKENS</code>.\n"
+            "• Direct authority over <code>PUBLIC_/TESTING_STORAGE_GROUP_ID</code> and <code>PUBLIC_/TESTING_POSTING_CHANNEL_ID</code>.\n"
+            "• <code>CREATOR_ID</code> is required (the bot will not start without it).\n"
+            "• Real-time error routing to the Error log topic (<code>PUBLIC_/TESTING_ERROR_LOG_TOPIC_ID</code>)."
         ),
     },
 }
@@ -508,10 +511,10 @@ COMMAND_DETAILS = {
 def build_main_help_menu(user_id: int):
     """Builds the primary categorized help menu based on role permissions."""
     role = get_user_role_db(user_id)
-    is_god_user = is_god(user_id)
-    is_admin = is_admin_or_god(user_id)
-    is_mod = (role in ("Moderator", "Admin", "GOD", "Owner"))
-    is_vol = (role in ("Volunteer", "Moderator", "Admin", "GOD", "Owner"))
+    is_creator_user = is_creator(user_id)
+    is_admin = is_admin_or_creator(user_id)
+    is_mod = (role in ("Moderator", "Admin", "Creator", "Owner"))
+    is_vol = (role in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"))
 
     text = (
         f"📖 <b>{bot_name()} Bot — Help & Documentation</b>\n\n"
@@ -535,8 +538,8 @@ def build_main_help_menu(user_id: int):
     admin_row = []
     if is_admin:
         admin_row.append(InlineKeyboardButton("⚔️ Admin Help", callback_data="help_cat_admin"))
-    if is_god_user:
-        admin_row.append(InlineKeyboardButton("👑 GOD Help", callback_data="help_cat_god"))
+    if is_creator_user:
+        admin_row.append(InlineKeyboardButton("👑 Creator Help", callback_data="help_cat_creator"))
     if admin_row:
         buttons.append(admin_row)
 
@@ -660,9 +663,9 @@ def build_admin_help_menu():
     return text, InlineKeyboardMarkup(buttons)
 
 
-def build_god_help_menu():
+def build_creator_help_menu():
     text = (
-        "👑 <b>GOD Help Menu — Supreme System Control</b>\n\n"
+        "👑 <b>Creator Help Menu — Supreme System Control</b>\n\n"
         "Tap any feature below to inspect supreme management privileges:"
     )
     buttons = [
@@ -673,7 +676,7 @@ def build_god_help_menu():
             InlineKeyboardButton("🛡️ Role Management (Mod/Vol/Promo)", callback_data="help_cmd_addmoderator"),
         ],
         [
-            InlineKeyboardButton("♾️ GOD Supreme Privileges", callback_data="help_cmd_godpriv"),
+            InlineKeyboardButton("♾️ Creator Supreme Privileges", callback_data="help_cmd_creatorpriv"),
         ],
         [
             InlineKeyboardButton("💾 SQLite Persistence & Telegram Backup", callback_data="help_cmd_backup"),
@@ -727,31 +730,31 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
 
     elif data == "help_cat_volunteer":
-        if role not in ("Volunteer", "Moderator", "Admin", "GOD", "Owner"):
-            await q.answer("⛔ Access restricted to Volunteers, Moderators, Admins, and GOD.", show_alert=True)
+        if role not in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"):
+            await q.answer("⛔ Access restricted to Volunteers, Moderators, Admins, and the Creator.", show_alert=True)
             return
         text, markup = build_volunteer_help_menu()
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
 
     elif data == "help_cat_moderator":
-        if role not in ("Moderator", "Admin", "GOD", "Owner"):
-            await q.answer("⛔ Access restricted to Moderators, Admins, and GOD.", show_alert=True)
+        if role not in ("Moderator", "Admin", "Creator", "Owner"):
+            await q.answer("⛔ Access restricted to Moderators, Admins, and the Creator.", show_alert=True)
             return
         text, markup = build_moderator_help_menu()
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
 
     elif data == "help_cat_admin":
-        if not is_admin_or_god(user_id):
+        if not is_admin_or_creator(user_id):
             await q.answer("⛔ Access restricted to Administrators.", show_alert=True)
             return
         text, markup = build_admin_help_menu()
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
 
-    elif data == "help_cat_god" or data == "help_cat_owner":
-        if not is_god(user_id):
-            await q.answer("⛔ Access restricted to GOD only.", show_alert=True)
+    elif data == "help_cat_creator" or data == "help_cat_owner":
+        if not is_creator(user_id):
+            await q.answer("⛔ Access restricted to Creator only.", show_alert=True)
             return
-        text, markup = build_god_help_menu()
+        text, markup = build_creator_help_menu()
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
 
     elif data.startswith("help_cmd_"):
@@ -762,17 +765,17 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         cat = item["category"]
-        if cat == "admin" and not is_admin_or_god(user_id):
+        if cat == "admin" and not is_admin_or_creator(user_id):
             await q.answer("⛔ Access restricted to Administrators.", show_alert=True)
             return
-        if cat == "god" and not is_god(user_id):
-            await q.answer("⛔ Access restricted to GOD only.", show_alert=True)
+        if cat == "creator" and not is_creator(user_id):
+            await q.answer("⛔ Access restricted to Creator only.", show_alert=True)
             return
-        if cat == "moderator" and role not in ("Moderator", "Admin", "GOD", "Owner"):
-            await q.answer("⛔ Access restricted to Moderators, Admins, and GOD.", show_alert=True)
+        if cat == "moderator" and role not in ("Moderator", "Admin", "Creator", "Owner"):
+            await q.answer("⛔ Access restricted to Moderators, Admins, and the Creator.", show_alert=True)
             return
-        if cat == "volunteer" and role not in ("Volunteer", "Moderator", "Admin", "GOD", "Owner"):
-            await q.answer("⛔ Access restricted to Volunteers, Moderators, Admins, and GOD.", show_alert=True)
+        if cat == "volunteer" and role not in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"):
+            await q.answer("⛔ Access restricted to Volunteers, Moderators, Admins, and the Creator.", show_alert=True)
             return
 
         back_cat_data = f"help_cat_{cat}"

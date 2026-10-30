@@ -176,7 +176,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
         book_query = data.split("_", 3)[-1]
         request_channel_id = config.request_channel_id()
         if request_channel_id is None:
-            logger.error("REQUEST_CHANNEL_ID is not configured")
+            logger.error("PUBLIC_/TESTING_REQUEST_CHANNEL_ID is not configured")
             await query.edit_message_text("❌ Requests are not configured right now. Please try again later.")
             return
 
@@ -227,8 +227,8 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
         user_id = user.id if user else 0
         from modules.database.user_db import get_user_role_db
         role = get_user_role_db(user_id)
-        if role not in ("Moderator", "Admin", "GOD", "Owner"):
-            await query.answer("⛔ Only Moderators, Admins, and GOD can change request status.", show_alert=True)
+        if role not in ("Moderator", "Admin", "Creator", "Owner"):
+            await query.answer("⛔ Only Moderators, Admins, and the Creator can change request status.", show_alert=True)
             return
 
         parts = data.split("_")

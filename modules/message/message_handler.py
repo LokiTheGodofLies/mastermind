@@ -14,7 +14,7 @@ async def handle_normal_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "<blockquote expandable>"
         f"🤖 <b>{bot_name()} Notice</b>\n\n"
         "I am just a Telegram bot and cannot chat freely!\n\n"
-        "• <b>Want to search?</b> Use the /search command and join our search group.\n"
+        "• <b>Want to search?</b> Use <code>/search &lt;keyword&gt;</code> here or join our Search topic.\n"
         "• <b>Want to request?</b> Use the /request command and join our request group.\n"
         "• <b>Need help?</b> Use the /support command to contact support.\n\n"
         "Tap the buttons below to see options or view the help menu."
@@ -23,7 +23,7 @@ async def handle_normal_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     keyboard = [
         [
-            InlineKeyboardButton("🔍 Search Group", callback_data="search_menu"),
+            InlineKeyboardButton("🔍 Search Topic", callback_data="search_menu"),
             InlineKeyboardButton("📥 Request Group", callback_data="request_menu"),
         ],
         [

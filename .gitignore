@@ -4,3 +4,5 @@ __pycache__/
 /database/
 *.db
 *.zip
+Render_Variables*.txt
+*.env

@@ -4,7 +4,7 @@ import tempfile
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import log_topic, logger_group_id, max_log_lines
-from modules.database.user_db import get_user_role_db
+from modules.database.user_db import get_user_role_db, is_admin_or_creator
 from modules.log.logger import get_logs_by_count, get_logs_by_time, setup_in_memory_logger
 
 setup_in_memory_logger()
@@ -12,10 +12,10 @@ setup_in_memory_logger()
 
 async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    role = get_user_role_db(user_id)
-    if role not in ["Admin", "Owner"]:
+    if not is_admin_or_creator(user_id):
         await update.message.reply_text("⛔ You do not have permission to access system logs.")
         return
+    role = get_user_role_db(user_id)
     args = context.args
     log_content = ""
     filename = "mastermind_logs.txt"

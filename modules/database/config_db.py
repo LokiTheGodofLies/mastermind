@@ -36,7 +36,7 @@ def init_config_db():
     conn.close()
 
 
-def get_config(key, default=None, fallback_env=None):
+def get_config(key, default=None):
     init_config_db()
     conn = get_connection()
     cursor = conn.cursor()
@@ -46,9 +46,6 @@ def get_config(key, default=None, fallback_env=None):
 
     if row is not None:
         return row["value"]
-
-    if fallback_env and os.getenv(fallback_env):
-        return os.getenv(fallback_env)
 
     if default is not None:
         return default
@@ -86,9 +83,9 @@ def get_all_configs():
 init_config_db()
 
 
-def get_config_bool(key, default=True, fallback_env=None):
+def get_config_bool(key, default=True):
     """Retrieves a boolean config setting with fallback."""
-    val = get_config(key, default=None, fallback_env=fallback_env)
+    val = get_config(key, default=None)
     if val is None:
         return default
     if isinstance(val, bool):

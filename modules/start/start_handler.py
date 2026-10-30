@@ -1,5 +1,5 @@
 import html
-from config import bot_name, owner_id, referral_bonus_label
+from config import bot_name, creator_id, creator_username, referral_bonus_label
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -48,7 +48,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = (
         f"Hi <b>{user_name}</b>, welcome to {bot_name()} Bot! 👋\n\n"
-        "I am your modular assistant. Tap the buttons below to see my help menu or reach out to GOD."
+        "I am your modular assistant. Tap the buttons below to see my help menu or reach out to the Creator."
         f"{referral_notice}"
     )
 
@@ -59,7 +59,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("📖 Help Menu", callback_data="help_button"),
-            InlineKeyboardButton("👑 GOD", callback_data="bot_owner"),
+            InlineKeyboardButton("👑 Creator", callback_data="bot_owner"),
         ],
         [
             InlineKeyboardButton("📤 Refer & Earn Bonus", url=share_url),
@@ -86,9 +86,11 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         await help_command(update, context)
     elif data == "bot_owner":
         await query.answer()
-        oid = owner_id()
+        oid = creator_id()
+        _un = creator_username()
+        _link = f"@{_un}" if _un else f"<a href=\"tg://user?id={oid}\">Creator</a>"
         await query.message.edit_text(
-            f"👑 <b>Bot Owner & Administrator:</b>\n\n• Owner ID: <code>{oid}</code>\n• For support or inquiries, contact the administrator.",
+            f"👑 <b>Bot Creator:</b>\n\n• Creator: {_link}\n• Creator ID: <code>{oid}</code>\n• For support or inquiries, contact the Creator.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]),
         )

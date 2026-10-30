@@ -2,7 +2,7 @@
 
   * BACKUP  - periodically (when any DB file changes) and on shutdown, a
               consistent SQLite snapshot of all three databases is zipped and
-              uploaded to the backup chat, edited in place, and kept pinned.
+              uploaded to the Backup Logs topic of the logger group, edited in place, and kept pinned.
   * RESTORE - on a fresh container (no local marker file) the pinned backup is
               downloaded before the bot starts, verified with PRAGMA
               integrity_check, and placed on disk.
@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -25,6 +26,7 @@ import requests
 from config import (
     bot_token,
     backup_chat_id,
+    backup_topic_id,
     backup_interval_seconds,
     backup_filename,
     db_dir,
@@ -76,6 +78,11 @@ def _backup_chat() -> str:
     return str(cid) if cid is not None else ""
 
 
+def _backup_topic() -> str:
+    tid = backup_topic_id()
+    return str(tid) if tid is not None else ""
+
+
 def _api(method: str, **kw):
     url = f"https://api.telegram.org/bot{_token()}/{method}"
     timeout = kw.pop("timeout", 30)
@@ -84,6 +91,14 @@ def _api(method: str, **kw):
         return r.json()
     except Exception:
         return {"ok": False, "description": f"HTTP {r.status_code}: {r.text[:120]}"}
+
+
+_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+
+
+def _redact(text: str) -> str:
+    """Strip bot tokens (e.g. from requests URLs inside exception text)."""
+    return _TOKEN_RE.sub("bot<redacted>", text or "")
 
 
 def _ist_now() -> str:
@@ -180,10 +195,10 @@ def restore_if_fresh() -> dict:
             return dict(_state)
 
         token, chat = _token(), _backup_chat()
-        if not token or not chat:
+        if not token or not chat or not _backup_topic():
             _state.update(
                 restore="disabled",
-                restore_detail="no bot token or BACKUP_CHAT_ID configured",
+                restore_detail="no bot token, PUBLIC_/TESTING_LOGGER_GROUP_ID or PUBLIC_/TESTING_BACKUP_TOPIC_ID configured",
                 backup_allowed=False,
             )
             sync_startup_log()
@@ -197,10 +212,17 @@ def restore_if_fresh() -> dict:
 
             pinned = (info.get("result") or {}).get("pinned_message") or {}
             doc = pinned.get("document") or {}
-            if not doc or doc.get("file_name") != backup_filename():
+            if pinned and (not doc or doc.get("file_name") != backup_filename()):
+                # Something else is pinned (the logger group is shared). Starting empty here would later
+                # overwrite the real backup, so stop and pause backups instead of guessing.
+                raise RuntimeError(
+                    "the latest pinned message in the logger group is not the database backup - "
+                    "unpin it (or re-pin the backup in the Backup Logs topic) and restart"
+                )
+            if not doc:
                 _state.update(
                     restore="no_backup",
-                    restore_detail="no pinned backup found in backup chat - starting with fresh databases",
+                    restore_detail="no pinned backup found in logger group - starting with fresh databases",
                 )
                 with open(marker, "w", encoding="utf-8") as mf:
                     mf.write(str(time.time()))
@@ -258,11 +280,11 @@ def restore_if_fresh() -> dict:
         except Exception as exc:
             _state.update(
                 restore="failed",
-                restore_detail=str(exc)[:200],
+                restore_detail=_redact(str(exc))[:200],
                 backup_allowed=False,
-                last_error=str(exc)[:200],
+                last_error=_redact(str(exc))[:200],
             )
-            logger.error("Database restore FAILED: %s", exc)
+            logger.error("Database restore FAILED: %s", _redact(str(exc)))
 
         sync_startup_log()
         return dict(_state)
@@ -301,13 +323,13 @@ def backup_now(reason: str = "periodic") -> tuple:
             return False, f"backups are paused ({_state['restore_detail'] or 'restore did not complete'})"
         token = _token()
         chat = _state["backup_chat"] or _backup_chat()
-        if not token or not chat:
-            return False, "no backup chat configured (set BACKUP_CHAT_ID)"
+        if not token or not chat or not _backup_topic():
+            return False, "no backup topic configured (set PUBLIC_/TESTING_LOGGER_GROUP_ID and PUBLIC_/TESTING_BACKUP_TOPIC_ID)"
         _state["backup_chat"] = chat
 
         try:
             blob, st = _build_archive()
-            if len(blob) > max_upload_bytes():
+            if len(blob) > min(max_upload_bytes(), max_download_bytes()):
                 raise RuntimeError(f"backup is {len(blob)/1048576:.1f} MB (exceeds upload limit)")
             caption = (
                 "💾 Mastermind database backup\n"
@@ -337,7 +359,7 @@ def backup_now(reason: str = "periodic") -> tuple:
 
             res = _api(
                 "sendDocument",
-                data={"chat_id": chat, "caption": caption, "disable_notification": "true"},
+                data={"chat_id": chat, "message_thread_id": _backup_topic(), "caption": caption, "disable_notification": "true"},
                 files={"document": (fname, blob, "application/zip")},
                 timeout=90,
             )
@@ -358,12 +380,12 @@ def backup_now(reason: str = "periodic") -> tuple:
                 fingerprint=_fingerprint(),
             )
             if not _state["pin_ok"]:
-                return True, _state["last_backup_detail"] + " - ⚠️ pin failed, give the bot 'Pin messages' rights in the backup chat"
+                return True, _state["last_backup_detail"] + " - ⚠️ pin failed, give the bot 'Pin messages' rights in the logger group"
             return True, _state["last_backup_detail"]
         except Exception as exc:
-            _state["last_error"] = str(exc)[:200]
-            logger.error("Backup failed: %s", exc)
-            return False, str(exc)[:200]
+            _state["last_error"] = _redact(str(exc))[:200]
+            logger.error("Backup failed: %s", _redact(str(exc)))
+            return False, _redact(str(exc))[:200]
 
 
 def has_changed() -> bool:
@@ -379,7 +401,7 @@ async def backup_loop():
             if _state["backup_allowed"] and (_state["last_backup_ts"] == 0 or has_changed()):
                 await asyncio.to_thread(backup_now, "auto")
         except Exception as exc:
-            logger.error("backup_loop error: %s", exc)
+            logger.error("backup_loop error: %s", _redact(str(exc)))
         await asyncio.sleep(interval)
 
 

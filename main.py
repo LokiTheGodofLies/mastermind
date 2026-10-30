@@ -83,6 +83,7 @@ from modules.request.handlers import request_command, request_callback_handler  
 from modules.id.handlers import id_command  # noqa: E402
 from modules.stats.handlers import stats_command  # noqa: E402
 from modules.search.handlers import search_command, search_callback_handler  # noqa: E402
+from modules.search.topic import SEARCH_TOPIC_FILTER, search_topic_command_guard, search_topic_text_handler  # noqa: E402
 from modules.search.delivery import handle_deeplink_file_delivery  # noqa: E402
 from modules.indexing.book_index import handle_book_indexing  # noqa: E402
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler  # noqa: E402
@@ -126,16 +127,16 @@ async def _helper_start_command(update, context):
 
 
 async def _helper_file_indexing_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Direct indexing via Helper Bot DM for Volunteers, Moderators, Admins, and GOD."""
+    """Direct indexing via Helper Bot DM for Volunteers, Moderators, Admins, and the Creator."""
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user:
         return
     role = get_user_role_db(user.id)
-    if role not in ("Volunteer", "Moderator", "Admin", "GOD", "Owner"):
+    if role not in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"):
         await msg.reply_text(
             "⛔ <b>Access Denied</b>\n\n"
-            "Direct indexing via Helper Bot DM is reserved for Volunteers, Moderators, Admins, and GOD.",
+            "Direct indexing via Helper Bot DM is reserved for Volunteers, Moderators, Admins, and the Creator.",
             parse_mode="HTML",
         )
         return
@@ -160,7 +161,7 @@ async def handle_main_bot_file_rejection(update: Update, context: ContextTypes.D
         return
 
     log_gid = logger_group_id()
-    err_topic = log_topic("ERROR_LOG_TOPIC_ID")
+    err_topic = log_topic("ERROR")
     if log_gid:
         try:
             fwd_kwargs = {
@@ -246,16 +247,30 @@ def main():
     load_env()
     token = bot_token()
     if not token:
-        print("Please ensure your TELEGRAM_BOT_TOKEN is set inside env.txt or environment.")
+        from config import is_testing_mode
+        _var = "TESTING_BOT_TOKEN" if is_testing_mode() else "PUBLIC_BOT_TOKEN"
+        print(f"Please set {_var} inside env.txt or Render environment (no fallback token variable).")
+        exit(1)
+
+    # Fail fast if CREATOR_ID is missing (no silent sample fallback).
+    from config import creator_id as _creator_id, is_testing_mode as _is_test
+    try:
+        _creator_id()
+    except RuntimeError as _e:
+        print(f"❌ {_e}")
         exit(1)
 
     logging.basicConfig(level=logging.INFO)
+    # httpx/httpcore log full request URLs (which contain the bot token) at INFO -> keep them quiet.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    _pfx_name = "TESTING" if _is_test() else "PUBLIC"
     setup_in_memory_logger()
     init_config_db()
     init_file_db()
     init_user_db()
     print("✅ Database and tables initialized successfully.")
-    print(f"🔍 DEBUG: STORAGE_GROUP_ID from environment is -> {storage_group_id()}")
+    print(f"🔍 DEBUG: {_pfx_name}_STORAGE_GROUP_ID from environment is -> {storage_group_id()}")
 
     async def post_init(app):
         await send_startup_notification(app)
@@ -284,6 +299,10 @@ def main():
     # Group/Channel membership & admin change logger
     application.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
+    # Search topic (must be registered BEFORE the CommandHandlers so its commands are deleted, not executed)
+    application.add_handler(MessageHandler(SEARCH_TOPIC_FILTER & filters.UpdateType.MESSAGE & filters.COMMAND, search_topic_command_guard))
+    application.add_handler(MessageHandler(SEARCH_TOPIC_FILTER & filters.UpdateType.MESSAGE & filters.TEXT & ~filters.COMMAND, search_topic_text_handler))
+
     # User & Admin Commands
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -296,7 +315,7 @@ def main():
     application.add_handler(CommandHandler("ban_pm", ban_pm_command))
     application.add_handler(CommandHandler("ban_support", ban_support_command))
     application.add_handler(CommandHandler("unban", unban_command))
-    application.add_handler(CommandHandler(["addadmin", "addgod"], addadmin_command))
+    application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler(["removeadmin", "deladmin"], removeadmin_command))
     application.add_handler(CommandHandler(["addmoderator", "addmod", "addmoderators"], addmoderator_command))
     application.add_handler(CommandHandler(["removemoderator", "removemod", "delmod", "delmoderator"], removemoderator_command))
