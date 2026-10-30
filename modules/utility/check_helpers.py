@@ -222,13 +222,33 @@ async def publish_callback_handler(update: Update, context: ContextTypes.DEFAULT
             subprocess.run('git config user.name "Mastermind Bot"', shell=True, cwd=repo_path, capture_output=True)
             subprocess.run('git config user.email "bot@mastermind.local"', shell=True, cwd=repo_path, capture_output=True)
 
+            # 1. Fetch remote main to integrate any independent remote commits
+            f_res = subprocess.run(f"git fetch {loki_url} main", shell=True, capture_output=True, text=True, cwd=repo_path)
+            logs.append(f"Fetch Loki main:\n{f_res.stdout}{f_res.stderr}".strip())
+
+            # 2. Merge remote main into current branch with -X ours so verified test code takes precedence
+            m_res = subprocess.run('git merge FETCH_HEAD -m "Merge remote main into test before publish" -X ours', shell=True, capture_output=True, text=True, cwd=repo_path)
+            logs.append(f"Merge main:\n{m_res.stdout}{m_res.stderr}".strip())
+
+            # 3. Push to loki (fast-forward, with +test:main fallback)
             cmd_loki = f"git push {loki_url} test:main"
             res1 = subprocess.run(cmd_loki, shell=True, capture_output=True, text=True, cwd=repo_path)
+            if res1.returncode != 0:
+                cmd_loki_force = f"git push {loki_url} +test:main"
+                res1 = subprocess.run(cmd_loki_force, shell=True, capture_output=True, text=True, cwd=repo_path)
             logs.append(f"Loki Push (test -> main):\n{res1.stdout}{res1.stderr}".strip())
 
+            # 4. Push to origin (fast-forward, with +test:main fallback)
             cmd_orig = f"git push {origin_url} test:main"
             res2 = subprocess.run(cmd_orig, shell=True, capture_output=True, text=True, cwd=repo_path)
+            if res2.returncode != 0:
+                cmd_orig_force = f"git push {origin_url} +test:main"
+                res2 = subprocess.run(cmd_orig_force, shell=True, capture_output=True, text=True, cwd=repo_path)
             logs.append(f"Origin Push (test -> main):\n{res2.stdout}{res2.stderr}".strip())
+
+            # 5. Keep test branch synchronized with the merge commit
+            subprocess.run(f"git push {loki_url} test", shell=True, cwd=repo_path, capture_output=True)
+            subprocess.run(f"git push {origin_url} test", shell=True, cwd=repo_path, capture_output=True)
 
             if res1.returncode != 0:
                 return False, "\n\n".join(logs)
