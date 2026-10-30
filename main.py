@@ -1,3 +1,4 @@
+from modules.database.user_db import get_user_last_file_db  # noqa: E402
 import os
 import asyncio
 import logging
@@ -98,16 +99,24 @@ logger = logging.getLogger(__name__)
 
 
 async def _helper_start_command(update, context):
-    """Handles /start on Helper Bots so users starting a helper bot receive their requested file in PM."""
+    """Handles /start on Helper Bots: re-sends requested file on every tap, even if sent before or without args."""
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user:
         return
-    if context.args and context.args[0].startswith("dl_"):
-        await handle_deeplink_file_delivery(update, context, context.args[0])
+    payload = context.args[0] if (context.args and context.args[0]) else None
+    if payload and payload.startswith("dl_"):
+        await handle_deeplink_file_delivery(update, context, payload)
         return
+    # If sent without args, check user last requested file and re-deliver automatically
+    last_fid = get_user_last_file_db(user.id)
+    if last_fid:
+        await handle_deeplink_file_delivery(update, context, f"dl_{last_fid}")
+        return
+    u_name = html.escape(user.first_name or "Friend")
+    b_name = html.escape(bot_name())
     await msg.reply_text(
-        f"👋 Hi <b>{user.first_name}</b>! I am a {bot_name()} helper delivery bot.\n\n"
+        f"👋 Hi <b>{u_name}</b>! I am a <b>{b_name}</b> helper delivery bot.\n\n"
         "✅ You have started me — now whenever you click a search result in the main bot, "
         "I can send the files directly to your PM as well as the posting channel!",
         parse_mode="HTML",

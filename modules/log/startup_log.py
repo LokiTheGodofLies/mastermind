@@ -112,6 +112,11 @@ async def _chat_line(bot, me_id, label, chat_id_raw, default_name, problems):
     try:
         chat = await bot.get_chat(chat_id)
         name = chat.title or default_name
+        try:
+            from modules.database.user_db import register_chat_db
+            register_chat_db(chat.id, chat.type, name, getattr(chat, "username", ""))
+        except Exception:
+            pass
         link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
         if not link:
             try:
@@ -339,15 +344,28 @@ async def _auto_delete_msg(bot_inst, chat_id, message_id, delay):
 
 
 async def _report_user_block(app, uid, name, uname, bot_title, bot_uname):
-    from modules.database.user_db import record_user_blocked_bot_db
+    from modules.database.user_db import record_user_blocked_bot_db, _db_file
+    import sqlite3
     record_user_blocked_bot_db(uid, bot_uname)
+    if not name or name == "Unknown":
+        try:
+            conn = sqlite3.connect(_db_file())
+            row = conn.execute("SELECT full_name, username FROM users WHERE user_id = ?", (int(uid),)).fetchone()
+            conn.close()
+            if row:
+                name = row[0] or name
+                uname = row[1] or uname
+        except Exception:
+            pass
     log_gid = logger_group_id()
     topic = log_topic("USER_LOG_TOPIC_ID") or 2
     if not log_gid:
         return
+    uname_part = f" (@{html.escape(uname)})" if uname and uname.lower() != "none" else ""
+    name_part = f"{html.escape(name)}{uname_part} " if name and name != "Unknown" else f"{uname_part.strip()} " if uname_part else ""
     text = (
         "🚫 <b>Bot Blocked by User</b>\n\n"
-        f"• <b>User:</b> <a href=\"tg://user?id={uid}\">{html.escape(name or 'User')}</a> (@{html.escape(uname or 'none')}) [<code>{uid}</code>]\n"
+        f"• <b>User ID:</b> {name_part}[<code>{uid}</code>]\n"
         f"• <b>Blocked Bot:</b> {html.escape(bot_title)} (@{html.escape(bot_uname)})\n"
         f"• <b>Timestamp:</b> {datetime.datetime.now(IST).strftime('%d-%m-%Y | %I:%M:%S %p IST')}"
     )

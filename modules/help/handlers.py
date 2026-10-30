@@ -41,14 +41,14 @@ COMMAND_DETAILS = {
         "title": "📢 /broadcast & /pinbroadcast Commands",
         "category": "admin",
         "text": (
-            "📢 <b>Broadcast & Pinning Commands</b>\n\n"
+            "📢 <b>Interactive Broadcast Control Panel</b>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Dispatches announcements across all users, groups, and channels with multi-bot tracking and optional pinning.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• Reply to any message with <code>/broadcast</code> to open the multi-target dashboard.\n"
-            "• Reply with <code>/pinbroadcast</code> to broadcast and auto-pin the message in groups/channels.\n"
-            "• Direct targets: <code>/broadcast &lt;id1 id2 ...&gt;</code> in reply to message.\n"
-            "• Segment stop: <code>/cancelbroadcast &lt;bot_username&gt; &lt;users|groups|channels&gt;</code>\n\n"
+            "Dispatches announcements with an interactive toggle menu, multi-bot helper pool support, auto-pinning, and live Pause/Resume/Cancel controls.\n\n"
+            "💡 <b>Usage & Toggles:</b>\n"
+            "• Send <code>/broadcast &lt;message&gt;</code> or reply to any message with <code>/broadcast</code>.\n"
+            "• <b>Target Toggles:</b> <code>🌐 All</code>, <code>👥 Users</code>, <code>🤖 Helper Bots</code>, <code>👥 Groups</code>, <code>📢 Channels</code>.\n"
+            "• <b>Auto-Pin Toggle:</b> Switch <code>📌 Pin in Chats</code> ON or OFF directly on the panel.\n"
+            "• <b>Live Controls:</b> Use inline <code>⏸ Pause</code>, <code>▶️ Resume</code>, and <code>🛑 Cancel Broadcast</code> buttons (or <code>/cancelbroadcast</code>) during active delivery.\n\n"
             "🔒 <b>Access:</b> Administrators & GOD"
         ),
     },

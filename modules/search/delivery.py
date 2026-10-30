@@ -1,3 +1,4 @@
+from modules.database.user_db import record_user_last_file_db
 """Dual file delivery via Helper Bots (Posting Channel with Auto-Delete + Helper Bot PM)."""
 import asyncio
 import html
@@ -185,6 +186,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if not msg or not user:
         return
 
+    record_user_last_file_db(user.id, row_id)
     row = get_file_by_id_db(int(row_id))
     if not row:
         await msg.reply_text("❌ File record no longer found in database.")
@@ -332,24 +334,36 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     )
 
     if helper_username and posting_link:
-        text = (
-            f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-            f"{pm_status_line}"
-            f"🤖 You can start the below bot (<a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a>) "
-            f"if you haven't started it already to get the file in PM, or you can "
-            f"<a href=\"{posting_link}\"><b>click here</b></a> and get the file from the posting channel.\n\n"
-            f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
-            f"it will be automatically deleted in {delete_mins} mins!</b>"
-        )
+        if pm_delivered:
+            text = (
+                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
+                f"✅ <b>File sent directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
+                f"📢 You can also <a href=\"{posting_link}\"><b>click here</b></a> and view it in the posting channel.\n\n"
+                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
+                f"posting channel copies auto-delete in {delete_mins} mins!</b>"
+            )
+        else:
+            text = (
+                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
+                f"🤖 Start <a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a> below "
+                f"to receive your file in PM, or <a href=\"{posting_link}\"><b>click here</b></a> to get it from the posting channel.\n\n"
+                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
+                f"it will be automatically deleted in {delete_mins} mins!</b>"
+            )
     elif helper_username:
-        text = (
-            f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-            f"{pm_status_line}"
-            f"🤖 You can start the below bot (<a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a>) "
-            f"if you haven't started it already to receive your file in PM.\n\n"
-            f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
-            f"it will be automatically deleted in {delete_mins} mins!</b>"
-        )
+        if pm_delivered:
+            text = (
+                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
+                f"✅ <b>File sent directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
+                f"⚠️ <b>Don't forget to forward the files to your Saved Messages!</b>"
+            )
+        else:
+            text = (
+                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
+                f"🤖 Start <a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a> below "
+                f"to receive your file in PM.\n\n"
+                f"⚠️ <b>Don't forget to forward the files to your Saved Messages!</b>"
+            )
     elif posting_link:
         text = (
             f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
@@ -364,10 +378,13 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         )
 
     buttons = []
-    if helper_username and helper_start_url:
-        buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username}", url=helper_start_url)])
+    if helper_username:
+        if pm_delivered:
+            buttons.append([InlineKeyboardButton(f"💬 Open @{helper_username} (View in PM)", url=f"https://t.me/{helper_username}")])
+        elif helper_start_url:
+            buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username} (Get in PM)", url=helper_start_url)])
     if posting_link:
-        buttons.append([InlineKeyboardButton("📥 Click Here (Get File from Posting Channel)", url=posting_link)])
+        buttons.append([InlineKeyboardButton("📥 Get File from Posting Channel", url=posting_link)])
 
     markup = InlineKeyboardMarkup(buttons) if buttons else None
     await msg.reply_text(

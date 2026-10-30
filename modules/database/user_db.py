@@ -421,3 +421,39 @@ def get_db_stats_counts() -> dict:
         }
     except Exception:
         return {"users": 0, "groups": 0, "channels": 0, "blocked": 0}
+
+
+def record_user_last_file_db(user_id: int, file_id: int):
+    """Records the last file row_id clicked by a user for instant helper re-delivery."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS last_user_requests (
+                user_id INTEGER PRIMARY KEY,
+                file_id INTEGER,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO last_user_requests (user_id, file_id, timestamp)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET file_id = excluded.file_id, timestamp = CURRENT_TIMESTAMP
+        """, (int(user_id), int(file_id)))
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"record_user_last_file_db error: {exc}")
+
+
+def get_user_last_file_db(user_id: int) -> int | None:
+    """Retrieves the last requested file row_id for a user."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_id FROM last_user_requests WHERE user_id = ?", (int(user_id),))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None

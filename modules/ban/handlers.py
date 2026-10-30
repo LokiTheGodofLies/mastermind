@@ -281,6 +281,12 @@ async def enforce_ban_middleware(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     chat_type = update.effective_chat.type
+    if chat_type in ("group", "supergroup", "channel"):
+        try:
+            from modules.database.user_db import register_chat_db
+            register_chat_db(chat_id, chat_type, update.effective_chat.title or "", getattr(update.effective_chat, "username", ""))
+        except Exception:
+            pass
 
     allowed, reason = check_user_access(user_id, chat_id, chat_type)
     if not allowed:

@@ -30,7 +30,7 @@ A modular Telegram bot built using Python and `python-telegram-bot`, designed fo
 * `/ban`, `/ban_pm`, `/ban_support`, `/unban`: Granular user and chat access restriction management.
 * `/log [count|10m]`: Generates and exports in-memory log files directly in Telegram.
 * `/ping`: Diagnostic command displaying round-trip latency and network metrics.
-* `/broadcast`, `/pinbroadcast` & `/cancelbroadcast`: Multi-bot broadcast engine with real-time segmented progress cards, auto-pinning, and granular category cancellation.
+* `/broadcast`, `/pinbroadcast` & `/cancelbroadcast`: Interactive Broadcast Control Panel with target toggles (`🌐 All`, `👥 Users`, `🤖 Helper Bots`, `👥 Groups`, `📢 Channels`), `📌 Pin in Chats` toggle, and live inline `⏸ Pause`, `▶️ Resume`, and `🛑 Cancel Broadcast` controls.
 
 ---
 
@@ -64,6 +64,7 @@ mastermind/
 └── modules/                    # Feature modules
     ├── allowance/              # Daily quota tracking, gifts, and referral bonuses
     ├── ban/                    # Ban middleware, restrictions, and admin promotion
+    ├── broadcast/              # Interactive broadcast control panel, helper bot pool & live pause/cancel
     ├── database/               # SQLite persistence, files, users, and config schemas
     ├── editscript/             # Admin live configuration hub
     ├── help/                   # Help documentation and role-based guides
@@ -72,6 +73,7 @@ mastermind/
     ├── log/                    # In-memory logging, member auditing, and error routing
     ├── message/                # Fallback conversational notices
     ├── request/                # Book request flows and Goodreads auto-complete
+    ├── roster/                 # Public role rosters (/admins, /moderators, /volunteers, /promoters)
     ├── search/                 # Search engine and helper-bot dual delivery
     ├── start/                  # Welcome menu and deep-link routers
     ├── stats/                  # Public and admin metrics
