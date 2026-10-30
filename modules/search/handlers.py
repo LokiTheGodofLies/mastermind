@@ -205,8 +205,8 @@ async def perform_search(
     if page_items:
         for idx, row in enumerate(page_items, start=start_idx + 1):
             title, series, author, size_str, ext = _extract_item_fields(row)
-            unique_id = row["file_unique_id"] or str(row["id"])
-            dl_url = f"https://t.me/{bot_uname}?start=dl_{unique_id}"
+            row_id_val = str(row["id"])
+            dl_url = f"https://t.me/{bot_uname}?start=dl_{row_id_val}"
 
             lines.append(f"{idx}. <b>{html.escape(title)}</b>")
             lines.append(f"📚 <i>{html.escape(series)}</i>")
@@ -222,6 +222,17 @@ async def perform_search(
 
     # Build Buttons
     keyboard = []
+
+    # Row 0: Quick inline 1-tap download buttons for page items
+    if page_items:
+        dl_row = []
+        for idx, row in enumerate(page_items, start=start_idx + 1):
+            dl_row.append(InlineKeyboardButton(f"📥 {idx}", callback_data=f"file_dl_{row['id']}"))
+            if len(dl_row) == 5:
+                keyboard.append(dl_row)
+                dl_row = []
+        if dl_row:
+            keyboard.append(dl_row)
 
     # Row 1: Pagination
     if total_pages > 1:

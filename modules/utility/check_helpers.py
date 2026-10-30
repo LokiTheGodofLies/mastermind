@@ -237,14 +237,23 @@ async def publish_callback_handler(update: Update, context: ContextTypes.DEFAULT
         success, full_log = await asyncio.to_thread(_do_git_publish)
 
         if success:
-            await q.edit_message_text(
+            repo_path = os.path.expanduser("~/mastermind") if os.path.isdir(os.path.expanduser("~/mastermind")) else os.getcwd()
+            res_cm = subprocess.run('git log -1 --pretty=format:"%h — %s"', shell=True, capture_output=True, text=True, cwd=repo_path)
+            commit_info = res_cm.stdout.strip() or "Latest HEAD"
+            from datetime import datetime, timedelta, timezone
+            ist = timezone(timedelta(hours=5, minutes=30))
+            now_ist = datetime.now(ist).strftime("%d-%m-%Y | %I:%M:%S %p IST")
+
+            card = (
                 "🎉 <b>Successfully Published to Production!</b>\n\n"
-                "✅ Merged <code>test</code> into <code>main</code>\n"
-                "✅ Pushed to <code>loki main</code> and <code>origin main</code>\n"
+                "📦 <b>Repository:</b> <code>LokiTheGodofLies/mastermind</code>\n"
+                "🌿 <b>Branch:</b> <code>main</code> (Production)\n"
+                f"📝 <b>Commit:</b> <code>{html.escape(commit_info)}</code>\n"
+                f"⏰ <b>Timestamp:</b> <code>{now_ist}</code>\n\n"
                 "⚡ Render Public Books Bot deployment triggered automatically!\n"
-                "🔄 Switched back to <code>test</code> branch.",
-                parse_mode="HTML",
+                f"<pre>{html.escape(full_log[-500:]) if full_log else 'Pushed test:main successfully.'}</pre>"
             )
+            await q.edit_message_text(card, parse_mode="HTML")
         else:
             tail = html.escape(full_log[-1200:]) if full_log else "Unknown error"
             await q.edit_message_text(
@@ -466,18 +475,29 @@ async def _process_update_zip(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         ok, log = await asyncio.to_thread(_unpack_and_test)
         if ok:
+            res_cm = subprocess.run('git log -1 --pretty=format:"%h — %s"', shell=True, capture_output=True, text=True, cwd=repo_path)
+            commit_info = res_cm.stdout.strip() or "Latest HEAD"
+            res_br = subprocess.run('git rev-parse --abbrev-ref HEAD', shell=True, capture_output=True, text=True, cwd=repo_path)
+            current_branch = res_br.stdout.strip() or "test"
+            from datetime import datetime, timedelta, timezone
+            ist = timezone(timedelta(hours=5, minutes=30))
+            now_ist = datetime.now(ist).strftime("%d-%m-%Y | %I:%M:%S %p IST")
+
             gh_token_status = (
-                "✅ Pushed to GitHub automatically!"
+                "✅ <b>Pushed to GitHub automatically!</b>"
                 if os.environ.get("GITHUB_TOKEN")
-                else "ℹ️ Code updated and verified with 0 errors! (Add GITHUB_TOKEN to Render Environment Variables for automatic git push)."
+                else "ℹ️ <b>Code updated locally</b> (Add GITHUB_TOKEN to Render for auto-push)."
             )
-            await status_msg.edit_text(
+            card = (
                 "🎉 <b>Bot Updated Successfully!</b>\n\n"
-                "• Code unpacked and verified with <code>compileall</code>.\n"
+                "📦 <b>Repository:</b> <code>LokiTheGodofLies/mastermind</code>\n"
+                f"🌿 <b>Branch:</b> <code>{html.escape(current_branch)}</code>\n"
+                f"📝 <b>Commit:</b> <code>{html.escape(commit_info)}</code>\n"
+                f"⏰ <b>Timestamp:</b> <code>{now_ist}</code>\n\n"
                 f"• {gh_token_status}\n\n"
-                f"<pre>{html.escape(log[-800:]) if log else 'All files compiled successfully with 0 errors.'}</pre>",
-                parse_mode="HTML",
+                f"<pre>{html.escape(log[-600:]) if log else 'All files compiled successfully with 0 errors.'}</pre>"
             )
+            await status_msg.edit_text(card, parse_mode="HTML")
         else:
             await status_msg.edit_text(
                 f"❌ <b>Update Failed:</b>\n\n<pre>{html.escape(log[-1000:])}</pre>",
