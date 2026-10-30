@@ -91,7 +91,8 @@ from modules.broadcast.handlers import broadcast_command, cancelbroadcast_comman
 from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
 from modules.message.message_handler import handle_normal_text  # noqa: E402
 from modules.utility.ping import ping_command  # noqa: E402
-from modules.utility.check_helpers import checkhelpers_command  # noqa: E402
+from modules.utility.check_helpers import checkhelpers_command, publish_command, publish_callback_handler  # noqa: E402
+  # noqa: E402
 from modules.database.user_db import get_user_role_db  # noqa: E402
 import html  # noqa: E402
 from modules.log.startup_log import send_startup_notification, error_handler, report_fatal_sync  # noqa: E402
@@ -328,6 +329,7 @@ def main():
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(CommandHandler("ping", ping_command))
     application.add_handler(CommandHandler(["checkhelpers", "helpers"], checkhelpers_command))
+    application.add_handler(CommandHandler("publish", publish_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler(["request", "req"], request_command))
@@ -355,6 +357,7 @@ def main():
     application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|search_direct_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^es_"))
+    application.add_handler(CallbackQueryHandler(publish_callback_handler, pattern=r"^publish_"))
 
         # Storage Group Live Caption Edit Sync (Admin manual edits)
     application.add_handler(

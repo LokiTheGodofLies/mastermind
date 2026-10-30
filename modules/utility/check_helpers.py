@@ -98,3 +98,112 @@ async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYP
         lines.append("⚠️ <b>Issues detected!</b> Please ensure helper bots are added to the storage group and made Administrators with <b>Post Messages</b> and <b>Delete Messages</b> rights in the posting channel.")
 
     await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
+
+
+
+# ---------------------------------------------------------------------------
+# Creator-only /publish command to merge test into main and deploy
+# ---------------------------------------------------------------------------
+async def publish_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command handler for /publish — Creator-only deployment of test branch to main."""
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
+
+    from modules.database.user_db import is_creator
+    if not is_creator(user.id):
+        await msg.reply_text(
+            "⛔ <b>Access Denied:</b> The <code>/publish</code> command is exclusive to the <b>Creator</b>.",
+            parse_mode="HTML",
+        )
+        return
+
+    from config import bot_name
+    text = (
+        f"🚀 <b>Publish to Production — {bot_name()} Main Bot</b>\n\n"
+        "This will merge the tested & verified <code>test</code> branch into <code>main</code> "
+        "and push to both <code>loki main</code> and <code>origin main</code>, triggering "
+        "automatic deployment on Render's Public Books Bot service.\n\n"
+        "⚠️ <i>Please confirm to proceed with production deployment:</i>"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Confirm Publish to Main", callback_data="publish_confirm")],
+        [InlineKeyboardButton("⛔ Cancel", callback_data="publish_cancel")],
+    ])
+    await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
+
+
+async def publish_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles publish confirmation and execution."""
+    q = update.callback_query
+    user = update.effective_user
+    from modules.database.user_db import is_creator
+    if not q or not user or not is_creator(user.id):
+        if q:
+            await q.answer("⛔ Access restricted to Creator only.", show_alert=True)
+        return
+
+    await q.answer()
+    data = q.data
+
+    if data == "publish_cancel":
+        await q.edit_message_text("⛔ <b>Publish cancelled.</b>", parse_mode="HTML")
+        return
+
+    if data == "publish_confirm":
+        await q.edit_message_text(
+            "⏳ <b>Publishing to Production...</b>\n\n"
+            "• Merging <code>test</code> → <code>main</code>\n"
+            "• Pushing to <code>loki main</code> and <code>origin main</code>...",
+            parse_mode="HTML",
+        )
+
+        def _do_git_publish():
+            import subprocess
+            repo_path = os.path.expanduser("~/mastermind")
+            if not os.path.isdir(repo_path):
+                repo_path = os.getcwd()
+
+            cmds = [
+                "git fetch loki main",
+                "git checkout main",
+                "git pull loki main",
+                "git merge test -m \"Merge verified test branch into main via /publish\"",
+                "git push loki main",
+                "git push origin main",
+                "git checkout test",
+            ]
+            logs = []
+            for cmd in cmds:
+                res = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=repo_path,
+                )
+                logs.append(f"$ {cmd}\n{res.stdout}{res.stderr}".strip())
+                if res.returncode != 0:
+                    subprocess.run("git checkout test", shell=True, cwd=repo_path, capture_output=True)
+                    return False, "\n".join(logs)
+            return True, "\n".join(logs)
+
+        success, full_log = await asyncio.to_thread(_do_git_publish)
+
+        if success:
+            await q.edit_message_text(
+                "🎉 <b>Successfully Published to Production!</b>\n\n"
+                "✅ Merged <code>test</code> into <code>main</code>\n"
+                "✅ Pushed to <code>loki main</code> and <code>origin main</code>\n"
+                "⚡ Render Public Books Bot deployment triggered automatically!\n"
+                "🔄 Switched back to <code>test</code> branch.",
+                parse_mode="HTML",
+            )
+        else:
+            tail = html.escape(full_log[-1200:]) if full_log else "Unknown error"
+            await q.edit_message_text(
+                f"❌ <b>Publish Failed:</b>\n\n<pre>{tail}</pre>\n\n"
+                "<i>Reverted back to test branch safely.</i>",
+                parse_mode="HTML",
+            )

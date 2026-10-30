@@ -380,11 +380,11 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     buttons = []
     if helper_username and helper_start_url:
         if pm_delivered:
-            buttons.append([InlineKeyboardButton(f"📥 Get / Re-send in @{helper_username} PM", url=helper_start_url)])
+            buttons.append([InlineKeyboardButton(f"🤖 Open in @{helper_username} PM ↗️", url=helper_start_url)])
         else:
-            buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username} (Get in PM)", url=helper_start_url)])
+            buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username} (Receive in PM) ↗️", url=helper_start_url)])
     if posting_link:
-        buttons.append([InlineKeyboardButton("📥 Get File from Posting Channel", url=posting_link)])
+        buttons.append([InlineKeyboardButton("📢 View in Posting Channel ↗️", url=posting_link)])
 
     markup = InlineKeyboardMarkup(buttons) if buttons else None
     await msg.reply_text(
@@ -402,16 +402,18 @@ async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DE
     if not msg or not user:
         return
 
-    try:
-        row_id = int(payload.replace("dl_", "", 1))
-    except ValueError:
-        await msg.reply_text("⚠️ Invalid file link.")
-        return
+    from modules.database.file_db import get_file_by_unique_id_db
+    val = payload.replace("dl_", "", 1).strip()
+    row = None
+    if val.isdigit():
+        row = get_file_by_id_db(int(val))
+    if not row:
+        row = get_file_by_unique_id_db(val)
 
-    row = get_file_by_id_db(row_id)
     if not row:
         await msg.reply_text("❌ File record no longer found in database.")
         return
+    row_id = row["id"]
 
     storage_id = storage_group_id()
     storage_msg_id = row["storage_message_id"]

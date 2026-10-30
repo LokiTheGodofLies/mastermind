@@ -188,7 +188,7 @@ def search_files_db(search_term: str, limit: int = 200):
         where_clauses.append(f"({' OR '.join(sub_clauses)})")
 
     sql = (
-        f"SELECT id, file_name, caption, extension, category, is_enriched "
+        f"SELECT id, file_unique_id, file_id, storage_message_id, file_name, file_size, duration, user_id, user_title, caption, extension, file_type, category, is_enriched "
         f"FROM indexed_files "
         f"WHERE {' AND '.join(where_clauses)} "
         f"ORDER BY id DESC LIMIT ?"

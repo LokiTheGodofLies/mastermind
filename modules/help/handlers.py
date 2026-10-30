@@ -14,18 +14,19 @@ except ImportError:
     Update = object
     class ContextTypes:
         DEFAULT_TYPE = object
+
 from modules.database.user_db import get_user_role_db, is_admin_or_creator, is_creator
 
 
 # ---------------------------------------------------------------------------
-# Individual Command & Feature Documentation Cards
+# Individual Command & Feature Documentation Cards (with Emojis)
 # ---------------------------------------------------------------------------
 COMMAND_DETAILS = {
     # =======================================================================
     # 👤 USER COMMANDS & GUIDES
     # =======================================================================
     "start": {
-        "title": "start",
+        "title": "🚀 start",
         "category": "user",
         "text": (
             "🚀 <b>Command:</b> <code>/start</code>\n\n"
@@ -38,19 +39,19 @@ COMMAND_DETAILS = {
         ),
     },
     "search": {
-        "title": "search",
+        "title": "🔍 search",
         "category": "user",
         "text": (
             "🔍 <b>Command:</b> <code>/search</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Searches the indexed community book and audiobook library across filenames, authors, series, and captions.\n\n"
+            "Searches the indexed community book and audiobook library across filenames, titles, authors, series, and captions.\n\n"
             "💡 <b>Usage:</b>\n"
             "• <code>/search &lt;keywords&gt;</code> (in private chat or in the official Search topic).\n"
-            "• Supports partial matches, book numbers (e.g. <code>#8</code> or <code>Book 2</code>), and apostrophe tolerance (e.g. <code>Enders Game</code> matches <code>Ender's Game</code>)."
+            "• Features structured results, format filters (📚 / 🎧), Send All button, and deep-link downloads."
         ),
     },
     "request": {
-        "title": "request",
+        "title": "📥 request",
         "category": "user",
         "text": (
             "📥 <b>Command:</b> <code>/request</code>\n\n"
@@ -62,7 +63,7 @@ COMMAND_DETAILS = {
         ),
     },
     "quota": {
-        "title": "quota",
+        "title": "📊 quota",
         "category": "user",
         "text": (
             "📊 <b>Command:</b> <code>/quota</code>\n\n"
@@ -74,7 +75,7 @@ COMMAND_DETAILS = {
         ),
     },
     "refer": {
-        "title": "refer",
+        "title": "🔗 refer",
         "category": "user",
         "text": (
             "🔗 <b>Commands:</b> <code>/refer</code> & <code>/myreferrals</code>\n\n"
@@ -86,7 +87,7 @@ COMMAND_DETAILS = {
         ),
     },
     "support": {
-        "title": "support",
+        "title": "🛡️ support",
         "category": "user",
         "text": (
             "🛡️ <b>Command:</b> <code>/support</code>\n\n"
@@ -97,7 +98,7 @@ COMMAND_DETAILS = {
         ),
     },
     "stats": {
-        "title": "stats",
+        "title": "📈 stats",
         "category": "user",
         "text": (
             "📈 <b>Command:</b> <code>/stats</code>\n\n"
@@ -108,7 +109,7 @@ COMMAND_DETAILS = {
         ),
     },
     "id": {
-        "title": "id",
+        "title": "🆔 id",
         "category": "user",
         "text": (
             "🆔 <b>Command:</b> <code>/id</code>\n\n"
@@ -121,7 +122,7 @@ COMMAND_DETAILS = {
         ),
     },
     "rosters": {
-        "title": "rosters",
+        "title": "👥 rosters",
         "category": "user",
         "text": (
             "👥 <b>Community Roster Commands</b>\n\n"
@@ -133,17 +134,17 @@ COMMAND_DETAILS = {
         ),
     },
     "delivery": {
-        "title": "delivery",
+        "title": "📦 delivery",
         "category": "user",
         "text": (
-            "📥 <b>Dual File Delivery System</b>\n\n"
+            "📦 <b>Dual File Delivery System</b>\n\n"
             "When you download a file from search results, the bot offers two delivery methods:\n\n"
             "1. <b>🤖 Fast DM Delivery:</b> File is delivered directly to your private chat via helper bots.\n"
             "2. <b>📢 Posting Channel:</b> File is temporarily posted in the official channel and auto-deleted after 5 minutes for privacy."
         ),
     },
     "roles": {
-        "title": "roles",
+        "title": "👥 roles",
         "category": "user",
         "text": (
             "👥 <b>Community User Roles & Privileges Breakdown</b>\n\n"
@@ -164,7 +165,7 @@ COMMAND_DETAILS = {
             "• Quota: Unlimited searches & requests.\n"
             "• Batch range /index, /broadcast with auto-pin & pause/resume, /ban, /gift, /editscript, /checkhelpers, and promoting Mods/Vols/Promos.\n\n"
             "👑 <b>Creator:</b>\n"
-            "• Supreme governance, admin appointments (/addadmin), database persistence, and system backups."
+            "• Supreme governance, admin appointments (/addadmin), production deployment (/publish), and system backups."
         ),
     },
 
@@ -172,7 +173,7 @@ COMMAND_DETAILS = {
     # 🤝 VOLUNTEER COMMANDS & GUIDES
     # =======================================================================
     "vol_privileges": {
-        "title": "vol_privileges",
+        "title": "🤝 vol_privileges",
         "category": "volunteer",
         "text": (
             "🤝 <b>Volunteer Operational Privileges</b>\n\n"
@@ -182,7 +183,7 @@ COMMAND_DETAILS = {
         ),
     },
     "vol_indexing": {
-        "title": "vol_indexing",
+        "title": "🤖 vol_indexing",
         "category": "volunteer",
         "text": (
             "📚 <b>Volunteer Helper Bot Indexing Guide</b>\n\n"
@@ -192,7 +193,7 @@ COMMAND_DETAILS = {
         ),
     },
     "vol_notice": {
-        "title": "vol_notice",
+        "title": "⚠️ vol_notice",
         "category": "volunteer",
         "text": (
             "⚠️ <b>Index Command Notice for Volunteers</b>\n\n"
@@ -205,7 +206,7 @@ COMMAND_DETAILS = {
     # 🛡️ MODERATOR COMMANDS & GUIDES
     # =======================================================================
     "mod_privileges": {
-        "title": "mod_privileges",
+        "title": "⚖️ mod_privileges",
         "category": "moderator",
         "text": (
             "🛡️ <b>Moderator Operational Privileges</b>\n\n"
@@ -215,7 +216,7 @@ COMMAND_DETAILS = {
         ),
     },
     "mod_requests": {
-        "title": "mod_requests",
+        "title": "📋 mod_requests",
         "category": "moderator",
         "text": (
             "📋 <b>Request Status Management</b>\n\n"
@@ -228,7 +229,7 @@ COMMAND_DETAILS = {
         ),
     },
     "mod_indexing": {
-        "title": "mod_indexing",
+        "title": "🤖 mod_indexing",
         "category": "moderator",
         "text": (
             "🤖 <b>Moderator Direct Indexing Guide</b>\n\n"
@@ -237,7 +238,7 @@ COMMAND_DETAILS = {
         ),
     },
     "mod_notice": {
-        "title": "mod_notice",
+        "title": "⚠️ mod_notice",
         "category": "moderator",
         "text": (
             "⚠️ <b>Batch /index Command Access Notice</b>\n\n"
@@ -250,7 +251,7 @@ COMMAND_DETAILS = {
     # ⚔️ ADMINISTRATOR COMMANDS
     # =======================================================================
     "checkhelpers": {
-        "title": "checkhelpers",
+        "title": "🤖 checkhelpers",
         "category": "admin",
         "text": (
             "🤖 <b>Command:</b> <code>/checkhelpers</code> (alias: <code>/helpers</code>)\n\n"
@@ -260,7 +261,7 @@ COMMAND_DETAILS = {
         ),
     },
     "index": {
-        "title": "index",
+        "title": "📚 index",
         "category": "admin",
         "text": (
             "📚 <b>Command:</b> <code>/index</code>\n\n"
@@ -273,7 +274,7 @@ COMMAND_DETAILS = {
         ),
     },
     "broadcast": {
-        "title": "broadcast",
+        "title": "📢 broadcast",
         "category": "admin",
         "text": (
             "📢 <b>Command:</b> <code>/broadcast</code>\n\n"
@@ -283,7 +284,7 @@ COMMAND_DETAILS = {
         ),
     },
     "ban": {
-        "title": "ban",
+        "title": "🚫 ban",
         "category": "admin",
         "text": (
             "🚫 <b>Commands:</b> <code>/ban</code>, <code>/ban_pm</code>, <code>/ban_support</code>, <code>/unban</code>\n\n"
@@ -296,7 +297,7 @@ COMMAND_DETAILS = {
         ),
     },
     "gift": {
-        "title": "gift",
+        "title": "🎁 gift",
         "category": "admin",
         "text": (
             "🎁 <b>Command:</b> <code>/gift &lt;user_id&gt; &lt;searches&gt; &lt;requests&gt;</code>\n\n"
@@ -305,7 +306,7 @@ COMMAND_DETAILS = {
         ),
     },
     "editscript": {
-        "title": "editscript",
+        "title": "🛠️ editscript",
         "category": "admin",
         "text": (
             "🛠️ <b>Command:</b> <code>/editscript</code>\n\n"
@@ -315,7 +316,7 @@ COMMAND_DETAILS = {
         ),
     },
     "log": {
-        "title": "log",
+        "title": "📋 log",
         "category": "admin",
         "text": (
             "📋 <b>Command:</b> <code>/log [count|duration]</code>\n\n"
@@ -324,7 +325,7 @@ COMMAND_DETAILS = {
         ),
     },
     "ping": {
-        "title": "ping",
+        "title": "🏓 ping",
         "category": "admin",
         "text": (
             "🏓 <b>Command:</b> <code>/ping</code>\n\n"
@@ -333,7 +334,7 @@ COMMAND_DETAILS = {
         ),
     },
     "addmoderator": {
-        "title": "addmoderator",
+        "title": "🛡️ addmoderator",
         "category": "admin",
         "text": (
             "🛡️ <b>Commands:</b> <code>/addmoderator</code> & <code>/removemoderator</code>\n"
@@ -342,7 +343,7 @@ COMMAND_DETAILS = {
         ),
     },
     "addvolunteer": {
-        "title": "addvolunteer",
+        "title": "🤝 addvolunteer",
         "category": "admin",
         "text": (
             "🤝 <b>Commands:</b> <code>/addvolunteer</code> & <code>/removevolunteer</code>\n"
@@ -351,7 +352,7 @@ COMMAND_DETAILS = {
         ),
     },
     "addpromoter": {
-        "title": "addpromoter",
+        "title": "📣 addpromoter",
         "category": "admin",
         "text": (
             "📣 <b>Commands:</b> <code>/addpromoter</code> & <code>/removepromoter</code>\n"
@@ -363,8 +364,20 @@ COMMAND_DETAILS = {
     # =======================================================================
     # 👑 CREATOR COMMANDS
     # =======================================================================
+    "publish": {
+        "title": "🚀 publish",
+        "category": "creator",
+        "text": (
+            "🚀 <b>Command:</b> <code>/publish</code>\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Merges the tested & verified <code>test</code> branch into <code>main</code> and pushes to "
+            "both <code>loki main</code> and <code>origin main</code>.\n"
+            "Triggers the live deployment on Render Public Books Bot with a single tap right from Telegram.\n\n"
+            "🔒 <b>Access:</b> Creator Only"
+        ),
+    },
     "addadmin": {
-        "title": "addadmin",
+        "title": "👑 addadmin",
         "category": "creator",
         "text": (
             "👑 <b>Commands:</b> <code>/addadmin</code> & <code>/removeadmin</code>\n\n"
@@ -373,7 +386,7 @@ COMMAND_DETAILS = {
         ),
     },
     "creator_privileges": {
-        "title": "creator_privileges",
+        "title": "♾️ creator_privileges",
         "category": "creator",
         "text": (
             "👑 <b>Creator Supreme Authority</b>\n\n"
@@ -382,7 +395,7 @@ COMMAND_DETAILS = {
         ),
     },
     "backup": {
-        "title": "backup",
+        "title": "💾 backup",
         "category": "creator",
         "text": (
             "💾 <b>Automated SQLite Backups</b>\n\n"
@@ -391,7 +404,7 @@ COMMAND_DETAILS = {
         ),
     },
     "governance": {
-        "title": "governance",
+        "title": "⚙️ governance",
         "category": "creator",
         "text": (
             "⚙️ <b>Global Architecture & Identity Governance</b>\n\n"
@@ -402,7 +415,7 @@ COMMAND_DETAILS = {
 
 
 # ---------------------------------------------------------------------------
-# Menu Builders with Pagination (Max 4-6 buttons per page, Clean Command Labels)
+# Menu Builders with Pagination (Max 4-6 buttons per page, Clean Command Labels with Emojis)
 # ---------------------------------------------------------------------------
 PAGE_SIZE = 6
 
@@ -414,7 +427,7 @@ CATEGORY_COMMANDS = {
         "checkhelpers", "index", "broadcast", "ban", "gift", "editscript",
         "log", "ping", "addmoderator", "addvolunteer", "addpromoter"
     ],
-    "creator": ["addadmin", "creator_privileges", "backup", "governance"],
+    "creator": ["publish", "addadmin", "creator_privileges", "backup", "governance"],
 }
 
 
@@ -471,7 +484,7 @@ def build_main_help_menu(user_id: int):
     """
     Builds the main help menu page:
     1. Only displays categories accessible to the user's role level.
-    2. Includes a dedicated 'roles' (User Roles) button directly on the main page so all users
+    2. Includes a dedicated '👥 roles' (User Roles) button directly on the main page so all users
        can view and understand the roles of other users without seeing higher-level commands.
     """
     role = get_user_role_db(user_id)
@@ -489,30 +502,30 @@ def build_main_help_menu(user_id: int):
 
     buttons = [
         [
-            InlineKeyboardButton("user", callback_data="help_cat_user_p1"),
-            InlineKeyboardButton("roles", callback_data="help_cmd_roles"),
+            InlineKeyboardButton("👤 user", callback_data="help_cat_user_p1"),
+            InlineKeyboardButton("👥 roles", callback_data="help_cmd_roles"),
         ],
     ]
 
     second_row = []
     if is_vol:
-        second_row.append(InlineKeyboardButton("volunteer", callback_data="help_cat_volunteer_p1"))
+        second_row.append(InlineKeyboardButton("🤝 volunteer", callback_data="help_cat_volunteer_p1"))
     if is_mod:
-        second_row.append(InlineKeyboardButton("moderator", callback_data="help_cat_moderator_p1"))
+        second_row.append(InlineKeyboardButton("🛡️ moderator", callback_data="help_cat_moderator_p1"))
     if second_row:
         buttons.append(second_row)
 
     admin_row = []
     if is_admin:
-        admin_row.append(InlineKeyboardButton("admin", callback_data="help_cat_admin_p1"))
+        admin_row.append(InlineKeyboardButton("⚔️ admin", callback_data="help_cat_admin_p1"))
     if is_creator_user:
-        admin_row.append(InlineKeyboardButton("creator", callback_data="help_cat_creator_p1"))
+        admin_row.append(InlineKeyboardButton("👑 creator", callback_data="help_cat_creator_p1"))
     if admin_row:
         buttons.append(admin_row)
 
     buttons.append([
-        InlineKeyboardButton("search", callback_data="search_menu"),
-        InlineKeyboardButton("quota", callback_data="quota"),
+        InlineKeyboardButton("🔍 search", callback_data="search_menu"),
+        InlineKeyboardButton("📊 quota", callback_data="quota"),
     ])
     buttons.append([InlineKeyboardButton("« Back to Start", callback_data="start_menu")])
 

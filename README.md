@@ -49,6 +49,7 @@ The system implements a strict 6-tier role hierarchy:
 * `/index`: Batch indexes books from a source chat or message link range (`/index <first_link> <last_link>`) into `STORAGE_GROUP_ID` with multi-site metadata enrichment and rate-limit sleep intervals.
 * `/checkhelpers` (alias: `/helpers`): Audits all configured helper delivery bots, verifying token reachability, storage group access, and posting channel administrator rights (Post & Delete permissions) for 5-minute auto-delete.
 * `/broadcast` & `/cancelbroadcast`: Interactive Broadcast Control Panel with target toggles (`🌐 All`, `👥 Users`, `🤖 Helper Bots`, `👥 Groups`, `📢 Channels`), auto-pinning in chats (`📌 Pin in Chats`), and live inline `⏸ Pause`, `▶️ Resume`, and `🛑 Cancel` controls.
+* `/publish`: Exclusive to Creator. Merges the verified `test` branch into `main` and pushes to `loki main` & `origin main`, triggering live Render deployment on Public Books Bot.
 * `/addadmin <id|@username>` & `/removeadmin`: Appoints or removes an Administrator (exclusive to Creator).
 * `/addmoderator <id|@username>` & `/removemoderator` (alias: `/addmod`, `/delmod`): Promotes or demotes a Moderator.
 * `/addvolunteer <id|@username>` & `/removevolunteer` (alias: `/addvol`, `/delvol`): Promotes or demotes a Volunteer.

@@ -1,15 +1,38 @@
+import asyncio
 import html
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-from config import items_per_page, search_chat_id, search_topic_id, supported_audiobook_extensions
+import re
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import ContextTypes
+except ImportError:
+    class InlineKeyboardButton:
+        def __init__(self, text, callback_data=None, url=None):
+            self.text = text
+            self.callback_data = callback_data
+            self.url = url
+    class InlineKeyboardMarkup:
+        def __init__(self, inline_keyboard):
+            self.inline_keyboard = inline_keyboard
+    Update = object
+    class ContextTypes:
+        DEFAULT_TYPE = object
+from config import (
+    bot_name,
+    items_per_page,
+    search_chat_id,
+    search_topic_id,
+    supported_audiobook_extensions,
+    supported_ebook_extensions,
+)
 from modules.database.config_db import get_config
 from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
+from modules.indexing.book_index import parse_title_and_series
 from modules.search.delivery import deliver_file_dual
 
 
 def is_search_topic_message(msg) -> bool:
-    """True if msg lives in the configured Search topic (support chat on Public, logger group on Testing)."""
+    """True if msg lives in the configured Search topic."""
     cid, tid = search_chat_id(), search_topic_id()
     if msg is None or cid is None or tid is None:
         return False
@@ -25,22 +48,83 @@ def _search_allowed_here(update: Update) -> bool:
 
 
 def _topic_link():
-    """t.me link that opens the Search topic (works for members)."""
     cid, tid = search_chat_id(), search_topic_id()
     if cid is None or tid is None or not str(cid).startswith("-100"):
         return None
     return f"https://t.me/c/{str(cid)[4:]}/{tid}"
 
 
-def _clip_term(term: str, page: int, prefix: str = "search_page_") -> str:
-    """Builds callback_data that fits Telegram's 64-byte limit by clipping the term."""
-    tail = f"_{page}"
-    room = 64 - len(prefix.encode()) - len(tail.encode())
-    clipped = term.encode()[:room].decode("utf-8", "ignore")
-    return f"{prefix}{clipped}{tail}"
+def _format_size(size_bytes: int) -> str:
+    if not size_bytes:
+        return "Unknown size"
+    mb = size_bytes / (1024 * 1024)
+    if mb >= 1:
+        return f"{mb:.2f} MB"
+    return f"{size_bytes / 1024:.2f} KB"
 
 
-async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str, page: int = 1):
+def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
+    """
+    Extracts Title, Series, Author, Size, and Extension from DB record.
+    Parses caption if present; falls back to filename/metadata.
+    """
+    caption = row["caption"] or ""
+    file_name = row["file_name"] or f"File #{row['id']}"
+    ext = (row["extension"] or "").lstrip(".")
+    size_str = _format_size(row["file_size"])
+
+    # 1. Title
+    title = ""
+    m_t = re.search(r"(?:Book|Audiobook):\s*([^\n]+)", caption, re.IGNORECASE)
+    if m_t:
+        clean_t = re.sub(r"<[^>]+>", "", m_t.group(1)).strip()
+        if clean_t:
+            title = clean_t
+    if not title:
+        raw_t, _ = parse_title_and_series(file_name)
+        if " - " in raw_t:
+            raw_t = raw_t.split(" - ")[0].strip()
+        title = re.sub(r"\.[a-zA-Z0-9]{2,5}$", "", raw_t).strip()
+
+    # 2. Series
+    series = ""
+    m_s = re.search(r"Series:\s*([^\n]+)", caption, re.IGNORECASE)
+    if m_s:
+        clean_s = re.sub(r"<[^>]+>", "", m_s.group(1)).strip()
+        if clean_s:
+            series = clean_s
+    if not series:
+        _, series = parse_title_and_series(file_name)
+    if not series:
+        series = "Standalone"
+
+    # 3. Author
+    author = ""
+    m_a = re.search(r"(?:Author|By):\s*([^\n]+)", caption, re.IGNORECASE)
+    if m_a:
+        clean_a = re.sub(r"<[^>]+>", "", m_a.group(1)).strip()
+        if clean_a:
+            author = clean_a
+    if not author:
+        author = row["user_title"] or "Author Unknown"
+    author = re.sub(r"<[^>]+>", "", author).strip()
+    return title, series, author, size_str, ext
+
+
+async def perform_search(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    search_term: str,
+    page: int = 1,
+    filter_mode: str = "all",
+):
+    """
+    Renders search results in structured catalog format:
+    Title
+    Series name or standalone
+    Author name
+    File size | Extension — download (embedded deep-link)
+    """
     user = update.effective_user
     msg = update.effective_message
 
@@ -49,8 +133,12 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
         if update.callback_query:
             await update.callback_query.answer(note, show_alert=True)
         elif msg:
-            await msg.reply_text(f"🔍 {note}\nSend <code>/search &lt;keyword&gt;</code> to me in private chat.", parse_mode="HTML")
+            await msg.reply_text(
+                f"🔍 {note}\nSend <code>/search &lt;keyword&gt;</code> to me in private chat.",
+                parse_mode="HTML",
+            )
         return
+
     in_topic = update.effective_chat is not None and update.effective_chat.type != "private"
 
     if user and not can_user_search(user.id):
@@ -65,50 +153,119 @@ async def perform_search(update: Update, context: ContextTypes.DEFAULT_TYPE, sea
             await msg.reply_text(quota_msg, parse_mode="HTML")
         return
 
-    rows = search_files_db(search_term)
+    all_rows = search_files_db(search_term)
     audio_exts = supported_audiobook_extensions()
-    results = []
-    for row in rows:
-        row_id = row["id"]
-        label = row["file_name"] or f"File #{row_id}"
-        ext = (row["extension"] or "").lower()
-        cat = (row["category"] if "category" in row.keys() else "") or ""
-        icon = "🎧" if (cat == "audiobook" or ext in audio_exts) else "📁"
-        if len(label) > 40:
-            label = label[:37] + "..."
-        results.append((row_id, icon, label))
+    ebook_exts = supported_ebook_extensions()
 
-    total = len(results)
-    if total > 0 and page == 1 and user and not update.callback_query:
+    # Apply format filters
+    filtered_rows = []
+    for r in all_rows:
+        cat = (r["category"] or "").lower()
+        ext = f".{(r['extension'] or '').lstrip('.').lower()}"
+        is_audio = (cat == "audiobook" or ext in audio_exts)
+        is_ebook = (cat == "ebook" or ext in ebook_exts)
+
+        if filter_mode == "audio":
+            if is_audio:
+                filtered_rows.append(r)
+        elif filter_mode == "ebook":
+            if is_ebook:
+                filtered_rows.append(r)
+        else:
+            filtered_rows.append(r)
+
+    total_matches = len(filtered_rows)
+    if total_matches > 0 and page == 1 and user and not update.callback_query:
         deduct_search_quota(user.id)
 
-    keyboard = []
+    per_page = 10
+    total_pages = max(1, (total_matches + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+
+    filter_labels = {
+        "all": "All Formats (📚 + 🎧)",
+        "ebook": "Ebooks Only (📚)",
+        "audio": "Audiobooks Only (🎧)",
+    }
+    filter_label_str = filter_labels.get(filter_mode, "All Formats (📚 + 🎧)")
+
+    bot_uname = context.bot.username or "GeorgeOrwellAi"
     esc_term = html.escape(search_term)
-    if total > 0:
-        per_page = items_per_page()
-        tp = (total + per_page - 1) // per_page
-        page = max(1, min(page, tp))
-        for row_id, icon, lbl in results[(page - 1) * per_page : page * per_page]:
-            keyboard.append([InlineKeyboardButton(f"{icon} {lbl}", callback_data=f"file_dl_{row_id}")])
+
+    # Build Header
+    lines = [
+        f"🔍 <b>Search Results — {bot_name()} Library Bot</b>",
+        f"🔎 <b>Query:</b> <code>{esc_term}</code> | <b>Filter:</b> {filter_label_str} ({total_matches} matches)\n",
+    ]
+
+    start_idx = (page - 1) * per_page
+    page_items = filtered_rows[start_idx : start_idx + per_page]
+
+    if page_items:
+        for idx, row in enumerate(page_items, start=start_idx + 1):
+            title, series, author, size_str, ext = _extract_item_fields(row)
+            unique_id = row["file_unique_id"] or str(row["id"])
+            dl_url = f"https://t.me/{bot_uname}?start=dl_{unique_id}"
+
+            lines.append(f"{idx}. <b>{html.escape(title)}</b>")
+            lines.append(f"📚 <i>{html.escape(series)}</i>")
+            lines.append(f"✍️ <code>{html.escape(author)}</code>")
+            lines.append(f"📂 <code>{html.escape(size_str)}</code> | <code>.{html.escape(ext)}</code> — <a href=\"{dl_url}\">download</a>\n")
+    else:
+        lines.append(f"• No files found matching <code>{esc_term}</code> in {filter_label_str}.\n")
+
+    text_body = "\n".join(lines).strip()
+
+    # Short query clip to fit callback data inside 64 bytes
+    clip_q = search_term[:20]
+
+    # Build Buttons
+    keyboard = []
+
+    # Row 1: Pagination
+    if total_pages > 1:
         nav = []
         if page > 1:
-            nav.append(InlineKeyboardButton("« Prev", callback_data=_clip_term(search_term, page - 1)))
-        nav.append(InlineKeyboardButton(f"📄 {page}/{tp}", callback_data="noop"))
-        if page < tp:
-            nav.append(InlineKeyboardButton("Next »", callback_data=_clip_term(search_term, page + 1)))
-        if nav:
-            keyboard.append(nav)
-        txt = f"🔍 <b>Search Results for:</b> <code>{esc_term}</code>\n\nFound {total} matching file(s). Page {page} of {tp}:"
+            nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"sp_{filter_mode}_{page - 1}_{clip_q}"))
+        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"sp_{filter_mode}_{page + 1}_{clip_q}"))
+        keyboard.append(nav)
     else:
-        txt = f"🔍 <b>Search Results for:</b> <code>{esc_term}</code>\n\n• No matching files found in the database."
+        keyboard.append([InlineKeyboardButton("1/1", callback_data="noop")])
+
+    # Row 2: Filters & Send All
+    # Toggle behavior: if already on ebook, tapping 📚 resets to all; same for audio 🎧
+    ebk_target = "all" if filter_mode == "ebook" else "ebook"
+    aud_target = "all" if filter_mode == "audio" else "audio"
+
+    action_row = [
+        InlineKeyboardButton("📚", callback_data=f"sf_{ebk_target}_1_{clip_q}"),
+        InlineKeyboardButton("📨 Send All", callback_data=f"sa_{filter_mode}_{page}_{clip_q}"),
+        InlineKeyboardButton("🎧", callback_data=f"sf_{aud_target}_1_{clip_q}"),
+    ]
+    keyboard.append(action_row)
 
     if not in_topic:
         keyboard.append([InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")])
+
+    markup = InlineKeyboardMarkup(keyboard)
+
     if update.callback_query:
-        await update.callback_query.message.edit_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.callback_query.message.edit_text(
+            text_body,
+            parse_mode="HTML",
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
         await update.callback_query.answer()
     elif msg:
-        await msg.reply_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        await msg.reply_text(
+            text_body,
+            parse_mode="HTML",
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
 
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -117,19 +274,21 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat = update.effective_chat
     if chat is not None and chat.type != "private" and not update.callback_query:
-        # Groups: search only inside the Search topic (its commands are deleted there), never elsewhere.
         await msg.reply_text(
             "🔍 Search works only in the <b>Search topic</b> or in private chat with me.\n"
             "Open the Search topic and type the book title, or send me <code>/search &lt;keyword&gt;</code> in private chat.",
             parse_mode="HTML",
         )
         return
+
     if context.args:
-        await perform_search(update, context, " ".join(context.args).strip(), 1)
+        await perform_search(update, context, " ".join(context.args).strip(), 1, filter_mode="all")
         return
+
     if update.message and update.message.reply_to_message and update.message.reply_to_message.text:
-        await perform_search(update, context, update.message.reply_to_message.text.strip(), 1)
+        await perform_search(update, context, update.message.reply_to_message.text.strip(), 1, filter_mode="all")
         return
+
     txt = get_config(
         "search_script",
         default=(
@@ -151,9 +310,10 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    if not q:
+    if not q or not q.data:
         return
     d = q.data
+
     if d == "join_search_group_quiz":
         await q.message.edit_text(
             "📝 <b>Search Topic Invite</b>\n\nDo you want to join our group and use the Search topic?",
@@ -164,6 +324,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             ]),
         )
         await q.answer()
+
     elif d == "generate_group_invite":
         await q.answer("Generating invite link...")
         gid = search_chat_id()
@@ -193,17 +354,80 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]),
             )
+
     elif d == "search_menu":
         await search_command(update, context)
+
     elif d == "noop":
-        await q.answer("Current Page")
-    elif d.startswith("search_page_"):
-        parts = d.replace("search_page_", "", 1).rsplit("_", 1)
-        if len(parts) == 2:
-            await perform_search(update, context, parts[0], int(parts[1]))
-    elif d.startswith("search_direct_"):
-        query = d.replace("search_direct_", "", 1)
-        await perform_search(update, context, query, 1)
+        await q.answer("Page indicator")
+
+    # Page Navigation: sp_{filter}_{page}_{query}
+    elif d.startswith("sp_"):
+        parts = d.split("_", 3)
+        if len(parts) >= 4:
+            f_mode, p_str, query = parts[1], parts[2], parts[3]
+            page = int(p_str) if p_str.isdigit() else 1
+            await perform_search(update, context, query, page, filter_mode=f_mode)
+
+    # Filter Toggle: sf_{target_filter}_{page}_{query}
+    elif d.startswith("sf_"):
+        parts = d.split("_", 3)
+        if len(parts) >= 4:
+            f_mode, p_str, query = parts[1], parts[2], parts[3]
+            page = int(p_str) if p_str.isdigit() else 1
+            await perform_search(update, context, query, page, filter_mode=f_mode)
+
+    # Send All: sa_{filter}_{page}_{query}
+    elif d.startswith("sa_"):
+        parts = d.split("_", 3)
+        if len(parts) >= 4:
+            f_mode, p_str, query = parts[1], parts[2], parts[3]
+            page = int(p_str) if p_str.isdigit() else 1
+
+            all_rows = search_files_db(query)
+            audio_exts = supported_audiobook_extensions()
+            ebook_exts = supported_ebook_extensions()
+
+            # Filter rows
+            target_rows = []
+            for r in all_rows:
+                cat = (r["category"] or "").lower()
+                ext = f".{(r['extension'] or '').lstrip('.').lower()}"
+                is_audio = (cat == "audiobook" or ext in audio_exts)
+                is_ebook = (cat == "ebook" or ext in ebook_exts)
+
+                if f_mode == "audio" and is_audio:
+                    target_rows.append(r)
+                elif f_mode == "ebook" and is_ebook:
+                    target_rows.append(r)
+                elif f_mode == "all":
+                    target_rows.append(r)
+
+            per_page = 10
+            start_idx = (page - 1) * per_page
+            batch = target_rows[start_idx : start_idx + per_page]
+
+            if not batch:
+                await q.answer("No files to deliver.", show_alert=True)
+                return
+
+            await q.answer(f"🚀 Delivering {len(batch)} files via dual delivery...", show_alert=False)
+
+            delivered_count = 0
+            for row in batch:
+                try:
+                    await deliver_file_dual(update, context, int(row["id"]))
+                    delivered_count += 1
+                    await asyncio.sleep(0.4)
+                except Exception as e:
+                    pass
+
+            await q.message.reply_text(
+                f"✅ <b>Send All Complete:</b> Successfully queued <code>{delivered_count}</code> file(s) for dual delivery!",
+                parse_mode="HTML",
+            )
+
+    # Backward compatibility for file_dl_
     elif d.startswith("file_dl_"):
         row_id = d.replace("file_dl_", "")
         await q.answer("Preparing dual delivery via helper bot...")
