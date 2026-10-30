@@ -20,6 +20,86 @@ logger = logging.getLogger(__name__)
 # Active broadcast cancellation token
 _active_broadcast_cancelled = False
 
+TARGET_OPTIONS = [
+    ("users", "👥 Users"),
+    ("groups", "👥 Groups"),
+    ("channels", "📢 Channels"),
+    ("mods", "🛡️ Mods"),
+    ("vols", "🤝 Vols"),
+    ("promos", "📢 Promos"),
+]
+
+
+def _build_broadcast_keyboard(target: str, is_pin: bool, has_message: bool) -> InlineKeyboardMarkup:
+    """Builds interactive toggle menu for broadcast dashboard."""
+    kb = []
+
+    # Row 1 targets
+    r1 = []
+    for t_id, t_lbl in TARGET_OPTIONS[:3]:
+        active = " ✅" if t_id == target else ""
+        r1.append(InlineKeyboardButton(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}"))
+    kb.append(r1)
+
+    # Row 2 targets
+    r2 = []
+    for t_id, t_lbl in TARGET_OPTIONS[3:]:
+        active = " ✅" if t_id == target else ""
+        r2.append(InlineKeyboardButton(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}"))
+    kb.append(r2)
+
+    # Row 3 Pin toggle
+    pin_status = "✅ ON" if is_pin else "❌ OFF"
+    kb.append([InlineKeyboardButton(f"📌 Pin in Chats: {pin_status}", callback_data="bc_toggle_pin")])
+
+    # Row 4 Actions
+    if has_message:
+        kb.append([
+            InlineKeyboardButton("🚀 Send Broadcast", callback_data="bc_confirm"),
+            InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel"),
+        ])
+    else:
+        kb.append([InlineKeyboardButton("❌ Close Menu", callback_data="bc_cancel")])
+
+    return InlineKeyboardMarkup(kb)
+
+
+def _build_broadcast_text(target: str, is_pin: bool, msg_text: str | None) -> str:
+    """Builds formatted dashboard text for broadcast menu."""
+    target_names = {
+        "users": "All Bot Users",
+        "groups": "All Registered Groups",
+        "channels": "All Registered Channels",
+        "mods": "Moderators",
+        "vols": "Volunteers",
+        "promos": "Promoters",
+    }
+    t_name = target_names.get(target, target.capitalize())
+    pin_str = "Yes" if is_pin else "No"
+
+    header = (
+        "📢 <b>Broadcast Control Panel</b>\n\n"
+        f"🎯 <b>Target Audience:</b> <code>{html.escape(t_name)}</code>\n"
+        f"📌 <b>Auto-Pin:</b> <code>{pin_str}</code>\n"
+    )
+
+    if msg_text:
+        preview = (
+            f"\n💬 <b>Message Preview:</b>\n"
+            f"<blockquote>{html.escape(msg_text)}</blockquote>\n\n"
+            f"<i>Configure options using the toggle buttons below, then press <b>Send Broadcast</b>.</i>"
+        )
+    else:
+        preview = (
+            "\n⚠️ <i>No broadcast text attached yet.</i>\n\n"
+            "💡 <b>To attach a message:</b>\n"
+            "• Reply to any message with <code>/broadcast</code>\n"
+            "• Send <code>/broadcast &lt;message text&gt;</code>\n"
+            "• Or configure your target options above first!"
+        )
+
+    return header + preview
+
 
 async def cancelbroadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _active_broadcast_cancelled
@@ -35,26 +115,22 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
     global _active_broadcast_cancelled
     _active_broadcast_cancelled = False
 
-    # Collect target recipient list
     recipients = []
-    target_lower = target.lower()
+    t_lower = target.lower()
 
-    if target_lower in ("groups", "group"):
+    if t_lower in ("groups", "group"):
         chats = get_all_chats_db()
         recipients = [c["chat_id"] for c in chats if c["chat_type"] in ("group", "supergroup")]
-    elif target_lower in ("channels", "channel"):
+    elif t_lower in ("channels", "channel"):
         chats = get_all_chats_db("channel")
         recipients = [c["chat_id"] for c in chats]
-    elif target_lower in ("everyone", "all_users", "users", "all"):
-        users = get_all_users_for_broadcast_db()
-        recipients = [u["user_id"] for u in users]
-    elif target_lower in ("moderators", "mods"):
+    elif t_lower in ("mods", "moderators"):
         users = get_users_by_role_db("Moderator")
         recipients = [u["user_id"] for u in users]
-    elif target_lower in ("volunteers", "vols"):
+    elif t_lower in ("vols", "volunteers"):
         users = get_users_by_role_db("Volunteer")
         recipients = [u["user_id"] for u in users]
-    elif target_lower in ("promoters", "promos"):
+    elif t_lower in ("promos", "promoters"):
         users = get_users_by_role_db("Promoter")
         recipients = [u["user_id"] for u in users]
     else:
@@ -146,32 +222,21 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cmd = msg.text.split()[0].lstrip("/").lower()
     is_pin = "pin" in cmd
 
-    if not context.args:
-        help_text = (
-            "📢 <b>Broadcast Engine</b>\n\n"
-            "<b>Usage:</b>\n"
-            "• <code>/broadcast &lt;target&gt; &lt;message&gt;</code>\n"
-            "• <code>/pinbroadcast &lt;target&gt; &lt;message&gt;</code>\n"
-            "• <code>/cancelbroadcast</code> - Stop active broadcast\n\n"
-            "<b>Targets:</b>\n"
-            "• <code>everyone</code> or <code>users</code> - All registered bot users\n"
-            "• <code>groups</code> - All registered groups\n"
-            "• <code>channels</code> - All registered channels\n"
-            "• <code>moderators</code>, <code>volunteers</code>, <code>promoters</code>"
-        )
-        await msg.reply_text(help_text, parse_mode="HTML")
-        return
+    target = "users"
+    broadcast_text = None
 
-    target = context.args[0].lower()
-    broadcast_text = " ".join(context.args[1:])
+    args = context.args or []
+    if args:
+        first = args[0].lower()
+        if first in [t[0] for t in TARGET_OPTIONS] or first in ("all", "everyone"):
+            target = "users" if first in ("all", "everyone") else first
+            broadcast_text = " ".join(args[1:]) if len(args) > 1 else None
+        else:
+            broadcast_text = " ".join(args)
 
-    # Support replied-to message text if none provided in args
+    # Check replied message
     if not broadcast_text and msg.reply_to_message:
-        broadcast_text = msg.reply_to_message.text or msg.reply_to_message.caption or ""
-
-    if not broadcast_text:
-        await msg.reply_text("⚠️ Please provide a message text or reply to a message to broadcast.")
-        return
+        broadcast_text = msg.reply_to_message.text or msg.reply_to_message.caption
 
     context.user_data["pending_broadcast"] = {
         "target": target,
@@ -179,21 +244,9 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "pin": is_pin,
     }
 
-    pin_label = " (With Pin)" if is_pin else ""
-    kb = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Confirm Broadcast" + pin_label, callback_data="bc_confirm"),
-            InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel"),
-        ]
-    ])
-    preview = (
-        f"📢 <b>Broadcast Preview{pin_label}</b>\n\n"
-        f"🎯 <b>Target:</b> <code>{html.escape(target)}</code>\n"
-        f"📌 <b>Pin Message:</b> <code>{Yes if is_pin else No}</code>\n\n"
-        f"💬 <b>Message Preview:</b>\n<blockquote>{html.escape(broadcast_text)}</blockquote>\n\n"
-        f"<i>Press Confirm to begin broadcasting.</i>"
-    )
-    await msg.reply_text(preview, parse_mode="HTML", reply_markup=kb)
+    text = _build_broadcast_text(target, is_pin, broadcast_text)
+    kb = _build_broadcast_keyboard(target, is_pin, bool(broadcast_text))
+    await msg.reply_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 async def broadcast_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -208,16 +261,33 @@ async def broadcast_callback_handler(update: Update, context: ContextTypes.DEFAU
 
     await q.answer()
     data = q.data
+    pending = context.user_data.get("pending_broadcast", {"target": "users", "pin": False, "text": None})
 
     if data == "bc_cancel":
         context.user_data.pop("pending_broadcast", None)
-        await q.message.edit_text("❌ Broadcast cancelled.")
+        await q.message.edit_text("❌ Broadcast control panel closed.")
+        return
+
+    if data.startswith("bc_target_"):
+        new_target = data.replace("bc_target_", "", 1)
+        pending["target"] = new_target
+        context.user_data["pending_broadcast"] = pending
+        text = _build_broadcast_text(pending["target"], pending.get("pin", False), pending.get("text"))
+        kb = _build_broadcast_keyboard(pending["target"], pending.get("pin", False), bool(pending.get("text")))
+        await q.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        return
+
+    if data == "bc_toggle_pin":
+        pending["pin"] = not pending.get("pin", False)
+        context.user_data["pending_broadcast"] = pending
+        text = _build_broadcast_text(pending["target"], pending.get("pin", False), pending.get("text"))
+        kb = _build_broadcast_keyboard(pending["target"], pending.get("pin", False), bool(pending.get("text")))
+        await q.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
         return
 
     if data == "bc_confirm":
-        pending = context.user_data.pop("pending_broadcast", None)
-        if not pending:
-            await q.message.edit_text("⚠️ No pending broadcast found or it has expired.")
+        if not pending.get("text"):
+            await q.answer("⚠️ No broadcast message provided yet!", show_alert=True)
             return
 
         status_msg = await q.message.edit_text("⏳ Initializing broadcast...")
