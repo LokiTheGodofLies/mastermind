@@ -85,7 +85,7 @@ from modules.stats.handlers import stats_command  # noqa: E402
 from modules.search.handlers import search_command, search_callback_handler  # noqa: E402
 from modules.search.topic import SEARCH_TOPIC_FILTER, search_topic_command_guard, search_topic_text_handler  # noqa: E402
 from modules.search.delivery import handle_deeplink_file_delivery  # noqa: E402
-from modules.indexing.book_index import handle_book_indexing  # noqa: E402
+from modules.indexing.book_index import handle_book_indexing, handle_storage_caption_edit  # noqa: E402
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler  # noqa: E402
 from modules.broadcast.handlers import broadcast_command, cancelbroadcast_command, broadcast_callback_handler  # noqa: E402
 from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
@@ -355,6 +355,15 @@ def main():
     application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|search_direct_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^es_"))
+
+        # Storage Group Live Caption Edit Sync (Admin manual edits)
+    application.add_handler(
+        MessageHandler(
+            filters.UpdateType.EDITED_MESSAGE & (filters.Document.ALL | filters.AUDIO),
+            handle_storage_caption_edit,
+        ),
+        group=0,
+    )
 
     # Direct file upload indexing (supports both Document and Audio attachments), /index interactive flow, and private normal-text fallback
     application.add_handler(MessageHandler(filters.Document.ALL | filters.AUDIO | filters.VIDEO | filters.VOICE, handle_main_bot_file_rejection))

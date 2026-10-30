@@ -1,6 +1,4 @@
 import html
-import logging
-from telegram.error import TelegramError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import items_per_page, search_chat_id, search_topic_id, supported_audiobook_extensions
@@ -208,20 +206,11 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await perform_search(update, context, query, 1)
     elif d.startswith("file_dl_"):
         row_id = d.replace("file_dl_", "")
-        try:
-            await q.answer("Preparing dual delivery via helper bot...")
-        except TelegramError as exc:
-            logging.getLogger(__name__).warning(
-                "File-download callback acknowledgement failed; "
-                "continuing delivery: %s", exc
-            )
+        await q.answer("Preparing dual delivery via helper bot...")
         try:
             await deliver_file_dual(update, context, int(row_id))
         except Exception as e:
-            await q.message.reply_text(
-                f"❌ Error delivering file: <code>{html.escape(str(e))}</code>",
-                parse_mode="HTML"
-            )
+            await q.message.reply_text(f"❌ Error delivering file: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
 
 
 async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

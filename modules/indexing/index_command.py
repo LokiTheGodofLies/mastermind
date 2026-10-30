@@ -1,4 +1,3 @@
-
 import sqlite3
 from config import users_db_path
 
@@ -55,112 +54,129 @@ from modules.database.user_db import get_user_role_db
 from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db
 from modules.indexing.book_index import (
     _format_duration,
+    _make_storage_msg_link,
+    enrich_book_metadata,
     extract_media_info,
     fetch_goodreads_metadata,
     format_index_channel_caption,
+    format_index_log_message,
     send_media_to_storage,
 )
 
 logger = logging.getLogger(__name__)
 
-INDEX_COMMAND_ACCESS = {"Creator", "Owner", "Admin"}
-FULL_ACCESS = INDEX_COMMAND_ACCESS
-APPROVAL_ACCESS = {"Moderator", "Volunteer"}
-
-PRIVATE_LINK_RE = re.compile(r"t\.me/c/(\d+)/(?:\d+/)?(\d+)")
-PUBLIC_LINK_RE = re.compile(r"t\.me/([A-Za-z][A-Za-z0-9_]{3,})/(?:\d+/)?(\d+)")
+INDEX_COMMAND_ACCESS = {"Admin", "Administrator", "Creator", "Owner"}
+FULL_ACCESS = {"Admin", "Administrator", "Creator", "Owner"}
+APPROVAL_ACCESS = set()
 
 
-def _parse_args(tokens):
-    """Returns (links, skip). links = [(chat_ref, message_id)], skip = int or None."""
-    links, skip = [], None
-    for t in tokens:
-        m = PRIVATE_LINK_RE.search(t)
-        if m:
-            links.append((int("-100" + m.group(1)), int(m.group(2))))
-            continue
-        m = PUBLIC_LINK_RE.search(t)
-        if m:
-            links.append(("@" + m.group(1).lower(), int(m.group(2))))
-            continue
-        if t.isdigit():
-            skip = int(t)
+def _jobs(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    if "index_jobs" not in context.bot_data:
+        context.bot_data["index_jobs"] = {}
+    return context.bot_data["index_jobs"]
+
+
+def _seconds(val) -> float:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+async def _get_safe_source_link(bot, chat_id: int, title: str) -> str:
+    """
+    Safely generates source chat info for the index log:
+    - If public: hyperlinks using official https://t.me/username link.
+    - If private and bot has invite permission: attempts export_chat_invite_link.
+    - If private without permission or on error: falls back gracefully to title (chat_id) with ZERO exceptions.
+    """
+    esc_title = html.escape(title or "Source Chat")
+    try:
+        chat = await bot.get_chat(chat_id)
+        if chat.username:
+            return f'<a href="https://t.me/{chat.username}">{esc_title}</a> (<code>{chat_id}</code>)'
+
+        member = await bot.get_chat_member(chat_id, bot.id)
+        if getattr(member, "can_invite_users", False) or getattr(member, "status", "") in ("creator", "administrator"):
+            inv = await bot.export_chat_invite_link(chat_id)
+            if inv:
+                return f'<a href="{inv}">{esc_title}</a> (<code>{chat_id}</code>)'
+    except Exception:
+        pass
+    return f'{esc_title} (<code>{chat_id}</code>)'
+
+
+def _parse_args(args: list[str]) -> tuple[list[str], int | None]:
+    links = []
+    skip = None
+    for a in args:
+        if a.isdigit():
+            skip = int(a)
+        elif "t.me/" in a:
+            links.append(a)
     return links, skip
 
 
-def _range_from_links(links):
-    """One link = 1..link. Two links = first..last. Returns (chat, start, end) or None."""
+def _parse_link(link: str) -> tuple[int, int] | None:
+    m = re.search(r"t\.me/(?:c/(\d+)|([a-zA-Z0-9_]+))/(\d+)", link)
+    if not m:
+        return None
+    cid, uname, mid = m.groups()
+    if cid:
+        return -1000000000000 - int(cid) if not cid.startswith("100") else -int(f"100{cid}"), int(mid)
+    return uname, int(mid)
+
+
+def _range_from_links(links: list[str]) -> tuple[int | str, int, int] | None:
     if not links:
         return None
     if len(links) == 1:
-        return links[0][0], 1, links[0][1]
-    if links[0][0] != links[1][0]:
+        p = _parse_link(links[0])
+        return (p[0], 1, p[1]) if p else None
+    p1 = _parse_link(links[0])
+    p2 = _parse_link(links[1])
+    if not p1 or not p2:
+        return None
+    if p1[0] != p2[0]:
         raise ValueError("different chats")
-    a, b = links[0][1], links[1][1]
-    return links[0][0], min(a, b), max(a, b)
+    start, end = sorted([p1[1], p2[1]])
+    return p1[0], start, end
 
 
-def _link_from_forward(msg):
-    origin = getattr(msg, "forward_origin", None)
-    chat = getattr(origin, "chat", None)
-    mid = getattr(origin, "message_id", None)
-    if chat is not None and mid:
-        return (chat.id, mid)
-    return None
+def _link_from_forward(msg) -> str | None:
+    fwd = getattr(msg, "forward_from_chat", None)
+    fwd_mid = getattr(msg, "forward_from_message_id", None)
+    if not fwd or not fwd_mid:
+        return None
+    if fwd.username:
+        return f"https://t.me/{fwd.username}/{fwd_mid}"
+    cid_str = str(fwd.id).replace("-100", "")
+    return f"https://t.me/c/{cid_str}/{fwd_mid}"
 
 
-def _jobs(context) -> dict:
-    return context.application.bot_data.setdefault("idx_jobs", {})
+def _status_text(job: dict, stats: dict, phase: str = "running") -> str:
+    total = max(1, job["end_id"] - job["start_id"] + 1)
+    done = stats["fetched"]
+    pct = min(100, int((done / total) * 100))
+    bar_len = 16
+    filled = int(bar_len * (pct / 100))
+    bar = "█" * filled + "▒" * (bar_len - filled)
 
-
-def _seconds(value) -> float:
-    return value.total_seconds() if hasattr(value, "total_seconds") else float(value)
-
-
-async def _edit(bot, chat_id, message_id, text, markup=None):
-    try:
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id, text=text,
-            parse_mode="HTML", reply_markup=markup,
-        )
-    except BadRequest as e:
-        if "not modified" not in str(e).lower():
-            logger.warning(f"[INDEX] edit failed: {e}")
-    except TelegramError as e:
-        logger.warning(f"[INDEX] edit failed: {e}")
-
-
-async def _edit_prompt(context, job, text, markup=None):
-    await _edit(context.bot, job["prompt_chat"], job["prompt_msg_id"], text, markup)
-
-
-async def _edit_approval(context, job, text):
-    if job.get("approval_msg_id"):
-        await _edit(context.bot, job["approval_chat"], job["approval_msg_id"], text, None)
-
-
-def _status_text(job, stats, state):
-    total = job["end_id"] - job["start_id"] + 1
-    fetched = stats["fetched"]
-    remaining = max(total - fetched, 0)
-    pct = int(fetched * 100 / total) if total else 100
     return (
-        "<pre>"
-        "╭──────❪ INDEX STATUS ❫──〇⚙️\n"
-        "│╭─────────────────────────➤\n"
-        f"│├─»◇ CHAT: {html.escape(job['title'])}\n││\n"
-        f"│├─»◇ FETCHED MESSAGES: {fetched}\n││\n"
-        f"│├─»◇ REMAINING MESSAGES: {remaining}\n││\n"
-        f"│├─»◇ SUCCESSFULLY INDEXED: {stats['ok']}\n││\n"
-        f"│├─»◇ DUPLICATE FILES: {stats['dup']}\n││\n"
-        f"│├─»◇ DELETED MESSAGES: {stats['deleted']}\n││\n"
-        f"│├─»◇ SKIPPED (ERRORS): {stats['skipped']}\n││\n"
-        f"│├─»◇ FILTERED (UNSUPPORTED): {stats['filtered']}\n││\n"
-        f"│├─»◇ CURRENT STATUS: {html.escape(state)}\n││\n"
-        f"│├─»◇ PERCENTAGE: {pct} %\n"
-        "│╰─────────────────────────➤\n"
-        "╰─────────❪ PROGRESSING ❫──〇⚙️"
-        "</pre>"
+        f"╭─────────❪ INDEXING ❫──〇\n"
+        f"│ 📂 <b>Chat:</b> {html.escape(job['title'])}\n"
+        f"│ 🔢 <b>Range:</b> <code>{job['start_id']} → {job['end_id']}</code>\n"
+        f"│ ⚙️ <b>Phase:</b> <code>{html.escape(phase)}</code>\n"
+        f"│ 📊 <b>Progress:</b> <code>[{bar}] {pct}%</code>\n"
+        f"│\n"
+        f"│ 📥 Fetched: <code>{stats['fetched']}/{total}</code>\n"
+        f"│ ✅ Indexed: <code>{stats['ok']}</code>\n"
+        f"│ ♻️ Duplicates: <code>{stats['dup']}</code>\n"
+        f"│ 🚫 Filtered: <code>{stats['filtered']}</code>\n"
+        f"│ 🗑 Deleted: <code>{stats['deleted']}</code>\n"
+        f"│ ⚠️ Errors: <code>{stats['skipped']}</code>\n"
+        f"│╰─────────────────────────➤\n"
+        f"╰─────────❪ PROGRESSING ❫──〇⚙️"
     )
 
 
@@ -203,6 +219,13 @@ async def _run_index(context, rid, job):
         job["state"] = "done"
         return
 
+    log_group_id = logger_group_id()
+    index_log_topic_id = log_topic("INDEX")
+    error_log_topic_id = log_topic("ERROR")
+
+    # Resolve safe source link
+    source_info = await _get_safe_source_link(bot, job["chat_id"], job["title"])
+
     try:
         for mid in range(job["start_id"], job["end_id"] + 1):
             if job["cancel"]:
@@ -223,16 +246,20 @@ async def _run_index(context, rid, job):
                         stats["dup"] += 1
                         await _safe_delete(fwd)
                     else:
-                        meta = await fetch_goodreads_metadata(info["file_name"])
+                        meta = await enrich_book_metadata(info["file_name"], category=info["category"])
+                        is_matched = meta.get("is_matched", False)
+
                         for k, v in (info.get("caption_meta") or {}).items():
-                            if v and k in ("book_title", "book_author", "narrator", "length", "book_published", "publisher"):
+                            if v and k in ("book_title", "book_author", "narrator", "length", "book_published"):
                                 meta[k] = v
-                        if info["category"] == "audiobook" and (not meta.get("length") or meta.get("length") == "N/A") and info["duration"] > 0:
+
+                        if info["category"] == "audiobook" and (not meta.get("length")) and info["duration"] > 0:
                             meta["length"] = _format_duration(info["duration"])
 
                         size = info["file_size"]
                         size_mb = size / (1024 * 1024)
                         size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{size / 1024:.2f} KB"
+
                         caption = format_index_channel_caption(
                             file_name=info["file_name"],
                             file_size_str=size_str,
@@ -241,8 +268,12 @@ async def _run_index(context, rid, job):
                             book_meta=meta,
                             category=info["category"],
                         )
+
                         sent = await send_media_to_storage(bot, int(storage), info, caption)
                         await _safe_delete(fwd)
+
+                        storage_link = _make_storage_msg_link(int(storage), sent.message_id)
+
                         save_indexed_file_db(
                             file_unique_id=info["file_unique_id"],
                             file_id=info["file_id"],
@@ -253,14 +284,64 @@ async def _run_index(context, rid, job):
                             user_id=job["requester_id"],
                             user_title=job["requester_name"],
                             caption=(
-                                f"{fwd.caption or ''} {meta.get('book_title', '')} "
-                                f"{meta.get('book_author', '')} {meta.get('narrator', '')}"
+                                f"{caption} {info['file_name']} {meta.get('title', '')} "
+                                f"{meta.get('author', '')} {meta.get('series', '')}"
                             ).strip(),
                             extension=info["extension"],
                             file_type=info["mime_type"],
                             category=info["category"],
+                            is_enriched=1 if is_matched else 0,
                         )
                         stats["ok"] += 1
+
+                        caption_badge = "📝 caption enriched" if is_matched else "🚧 info not found reported to error logs"
+
+                        # Post Error Log if enrichment failed (< 2 parameters)
+                        if not is_matched and error_log_topic_id and log_group_id:
+                            try:
+                                err_text = (
+                                    f"⚠️ <b>Caption Enrichment Failed (&lt;2 Parameters Matched)</b>\n\n"
+                                    f"📁 <b>File:</b> <code>{html.escape(info['file_name'])}</code>\n"
+                                    f"🔗 <b>Storage Message:</b> <a href=\"{storage_link}\">Message #{sent.message_id}</a>\n"
+                                    f"🔑 <b>Unique ID:</b> <code>{info['file_unique_id']}</code>\n"
+                                    f"🌐 <b>Source:</b> {source_info}\n\n"
+                                    f"<i>Admins please edit the storage message caption manually. The bot will automatically capture your edit and update the database.</i>"
+                                )
+                                await context.bot.send_message(
+                                    chat_id=int(log_group_id),
+                                    text=err_text,
+                                    parse_mode="HTML",
+                                    message_thread_id=int(error_log_topic_id),
+                                )
+                            except Exception:
+                                pass
+
+                        # Post Standardized Index Log for this file
+                        if log_group_id:
+                            try:
+                                log_msg = format_index_log_message(
+                                    file_name=info["file_name"],
+                                    file_size_str=size_str,
+                                    file_unique_id=info["file_unique_id"],
+                                    storage_link=storage_link,
+                                    user_id=job["requester_id"],
+                                    user_title=job["requester_name"],
+                                    db_badge="✅ updated",
+                                    storage_badge="🗃️ added to storage group",
+                                    caption_badge=caption_badge,
+                                    source_info=source_info,
+                                )
+                                log_kwargs = {
+                                    "chat_id": int(log_group_id),
+                                    "text": log_msg,
+                                    "parse_mode": "HTML",
+                                }
+                                if index_log_topic_id:
+                                    log_kwargs["message_thread_id"] = int(index_log_topic_id)
+                                await context.bot.send_message(**log_kwargs)
+                            except Exception:
+                                pass
+
             except BadRequest:
                 stats["deleted"] += 1
             except Exception as e:
@@ -341,7 +422,6 @@ async def _send_approval(context, rid, job):
     return False
 
 
-
 async def _show_skip_menu(context, rid: str, job: dict):
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("⏩ No Skip", callback_data=f"idx_sk_none_{rid}")],
@@ -358,93 +438,84 @@ async def _show_skip_menu(context, rid: str, job: dict):
         f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
         f"🔢 Range: <code>{job['start_id']} → {job['end_id']}</code>\n\n"
         f"Select an option below to filter messages before starting:",
-        markup
+        markup,
     )
 
 
-async def _show_confirm_card(context, rid: str, job: dict):
-    start = job["start_id"]
-    end = job["end_id"]
-    skip = job.get("skip_count", 0)
-    total = max(0, end - start + 1 - skip)
+async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, skip=None):
+    try:
+        source_chat = await context.bot.get_chat(chat_ref)
+        title = source_chat.title or source_chat.username or str(chat_ref)
+        cid = source_chat.id
+    except TelegramError as e:
+        await context.bot.send_message(
+            chat_id=prompt_chat,
+            text=f"❌ I can't reach that chat ({e}). Make sure I am a member / admin there.",
+        )
+        return
+
+    rid = uuid.uuid4().hex[:8]
+    job = {
+        "rid": rid,
+        "chat_id": cid,
+        "title": title,
+        "start_id": start_id,
+        "end_id": end_id,
+        "requester_id": user.id if user else 0,
+        "requester_name": user.full_name if user else "Anon Admin",
+        "requester_role": get_user_role_db(user.id) if user else "Admin",
+        "prompt_chat": prompt_chat,
+        "prompt_msg_id": None,
+        "approval_chat": None,
+        "approval_msg_id": None,
+        "cancel": False,
+        "state": "pending",
+    }
+    _jobs(context)[rid] = job
+
+    if skip is not None:
+        if skip > 0:
+            job["start_id"] = min(job["end_id"], job["start_id"] + skip)
+        await _show_priority_menu(context, rid, job)
+    else:
+        await _show_skip_menu(context, rid, job)
+
+
+async def _show_priority_menu(context, rid: str, job: dict):
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Confirm & Start Indexing", callback_data=f"idx_yes_{rid}")],
-        [InlineKeyboardButton("❌ Cancel", callback_data=f"idx_no_{rid}")],
+        [InlineKeyboardButton("🚀 Priority Mode (Direct)", callback_data=f"idx_pr_dir_{rid}")],
+        [InlineKeyboardButton("🤝 Helper Pool (Round-Robin)", callback_data=f"idx_pr_hlp_{rid}")],
+        [InlineKeyboardButton("⛔ Cancel", callback_data=f"idx_cancel_{rid}")],
     ])
     await _edit_prompt(
         context, job,
-        f"📚 <b>Ready to Index!</b>\n\n"
-        f"📂 <b>Chat:</b> {html.escape(job['title'])}\n"
-        f"🔢 <b>Message Range:</b> <code>{start} → {end}</code> (Total: {total})\n"
-        f"⚡ <b>Priority Mode:</b> <code>Direct DM First</code>\n\n"
-        f"Tap below to begin background indexing:",
-        markup
+        f"⚡ <b>Delivery Priority Setup</b>\n\n"
+        f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
+        f"🔢 Range: <code>{job['start_id']} → {job['end_id']}</code>\n\n"
+        f"Select delivery mode:",
+        markup,
     )
 
 
-async def _open_prompt(context, reply_chat_id, user, source_ref, start_id, end_id, skip):
-    skip = skip or 0
-    first = start_id + skip
-    if first > end_id:
-        await context.bot.send_message(
-            chat_id=reply_chat_id,
-            text="❌ Nothing to index: the skip number covers the whole range.",
-        )
-        return
-
-    try:
-        src = await context.bot.get_chat(source_ref)
-    except TelegramError:
-        await context.bot.send_message(
-            chat_id=reply_chat_id,
-            text="❌ I can't access that chat. Add me there first.",
-        )
-        return
-
-    title = src.title or src.username or str(src.id)
-    rid = uuid.uuid4().hex[:8]
-    markup = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Yes, index", callback_data=f"idx_yes_{rid}"),
-        InlineKeyboardButton("❌ No", callback_data=f"idx_no_{rid}"),
-    ]])
-    skip_note = f" (skipping first {skip})" if skip else ""
-    wizard_markup = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🌐 Public Channel / Group", callback_data=f"idx_pub_{rid}"),
-            InlineKeyboardButton("🔒 Private Channel / Group", callback_data=f"idx_priv_{rid}"),
-        ],
-        [InlineKeyboardButton("❌ Cancel", callback_data=f"idx_cancel_{rid}")],
-    ])
-    sent = await context.bot.send_message(
-        chat_id=reply_chat_id,
-        text=(
-            "📚 <b>Index Setup Wizard — Step 1: Access Type</b>\n\n"
-            f"📂 <b>Target Chat:</b> <code>{html.escape(title)}</code>\n"
-            f"🔢 <b>Message Range:</b> <code>{first} → {end_id}</code>\n\n"
-            "Is this target chat <b>Public</b> or <b>Private</b>?"
-        ),
-        parse_mode="HTML",
-        reply_markup=wizard_markup,
-    )
-    _jobs(context)[rid] = {
-        "chat_id": src.id,
-        "start_id": first,
-        "end_id": end_id,
-        "title": title,
-        "state": "prompt",
-        "cancel": False,
-        "requester_id": user.id if user else 0,
-        "requester_name": user.full_name if user else "Channel admin",
-        "requester_role": "",
-        "prompt_chat": sent.chat_id,
-        "prompt_msg_id": sent.message_id,
-    }
+async def _edit_prompt(context, job, text, markup=None):
+    cid = job["prompt_chat"]
+    mid = job.get("prompt_msg_id")
+    if mid is None:
+        m = await context.bot.send_message(chat_id=cid, text=text, parse_mode="HTML", reply_markup=markup)
+        job["prompt_msg_id"] = m.message_id
+    else:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=cid, message_id=mid, text=text, parse_mode="HTML", reply_markup=markup
+            )
+        except TelegramError:
+            pass
 
 
 async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    chat = update.effective_chat
     user = update.effective_user
+    chat = update.effective_chat
     if not msg or not chat:
         return
 
@@ -485,7 +556,6 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def index_flow_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Private-chat follow-up: collects the link(s), then the skip number."""
     flow = (context.user_data or {}).get("idx_flow")
     msg = update.effective_message
     user = update.effective_user
@@ -559,118 +629,57 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full = role in FULL_ACCESS
     partial = role in APPROVAL_ACCESS
 
-    if action == "yes":
-        if job["state"] != "prompt":
-            await q.answer("Already handled.", show_alert=True)
-            return
-        if not (full or partial):
-            await q.answer("⛔ You don't have access to the Index command.", show_alert=True)
-            return
-        job.update(requester_id=user.id, requester_name=user.full_name, requester_role=role)
+    if action == "cancel":
+        job["cancel"] = True
+        await q.answer("Indexing cancelled.")
+        await _edit_prompt(context, job, f"⛔ Indexing of <b>{html.escape(job['title'])}</b> was cancelled.")
+        return
+
+    if action.startswith("sk_"):
+        mode = action[3:]
+        if mode == "none":
+            await _show_priority_menu(context, rid, job)
+        elif mode == "top":
+            job["start_id"] = min(job["end_id"], job["start_id"] + 10)
+            await _show_priority_menu(context, rid, job)
+        elif mode == "bot":
+            job["end_id"] = max(job["start_id"], job["end_id"] - 10)
+            await _show_priority_menu(context, rid, job)
+        elif mode == "custom":
+            await _edit_prompt(context, job, "Send <code>/index &lt;first_link&gt; &lt;last_link&gt;</code> for custom ranges.")
+        return
+
+    if action.startswith("pr_"):
+        mode = "direct" if action == "pr_dir" else "helpers"
+        job["priority_mode"] = mode
         if full:
-            await q.answer("Starting…")
-            await _edit_prompt(context, job, _status_text(job, {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}, "starting"), _cancel_markup(rid))
+            await q.answer("Starting index...")
+            await _edit_prompt(context, job, f"🚀 Starting index in {mode} mode...")
             _begin(context, rid, job)
-        else:
-            job["state"] = "approval"
-            if await _send_approval(context, rid, job):
-                await q.answer("Sent for approval")
-                await _edit_prompt(context, job, "⏳ <b>Sent to admins for approval.</b>\nYou'll see progress here once approved.")
+        elif partial:
+            sent = await _send_approval(context, rid, job)
+            if sent:
+                await q.answer("Submitted for approval.")
+                await _edit_prompt(context, job, "⌛ Index request submitted to Admins for approval.")
             else:
-                job["state"] = "prompt"
-                await q.answer("❌ Couldn't reach any admin. Try again later.", show_alert=True)
+                await q.answer("No admins available.", show_alert=True)
+        else:
+            await q.answer("Access denied.", show_alert=True)
+        return
 
-    elif action == "no":
-        if not (full or partial):
-            await q.answer("⛔ You don't have access to the Index command.", show_alert=True)
-            return
-        job["state"] = "done"
-        await q.answer("Cancelled")
-        await _edit_prompt(context, job, "❌ Indexing cancelled.")
-
-    elif action in ("apr", "rej"):
+    if action == "apr":
         if not full:
-            await q.answer("⛔ Only admins can approve.", show_alert=True)
+            await q.answer("Only Administrators can approve.", show_alert=True)
             return
-        if job["state"] != "approval":
-            await q.answer("Already handled.", show_alert=True)
-            return
-        who = html.escape(user.full_name)
-        if action == "apr":
-            await q.answer("Approved")
-            await _edit_approval(context, job, f"✅ <b>Approved</b> by {who}\n📂 {html.escape(job['title'])} — requested by {html.escape(job['requester_name'])}")
-            await _edit_prompt(context, job, _status_text(job, {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}, "starting"), _cancel_markup(rid))
-            _begin(context, rid, job)
-        else:
-            job["state"] = "done"
-            await q.answer("Rejected")
-            await _edit_approval(context, job, f"❌ <b>Rejected</b> by {who}\n📂 {html.escape(job['title'])} — requested by {html.escape(job['requester_name'])}")
-            await _edit_prompt(context, job, f"❌ Index request rejected by {who}.")
+        await q.answer("Approved!")
+        _begin(context, rid, job)
+        return
 
-    
-    elif action == "pub":
-        # Public channel selected
-        job["is_private"] = False
-        await q.answer("Public channel confirmed ✅")
-        await _show_skip_menu(context, rid, job)
-
-    elif action == "priv":
-        # Private channel selected - check helper bot admin rights
-        await q.answer("Checking helper bot permissions…")
-        tokens = helper_bot_tokens()
-        has_admin = False
-        for tok in tokens:
-            try:
-                async with Bot(tok) as hb:
-                    me = await hb.get_me()
-                    cm = await hb.get_chat_member(job["chat_id"], me.id)
-                    if cm.status in ("administrator", "creator"):
-                        has_admin = True
-                        break
-            except Exception:
-                pass
-
-        if has_admin:
-            job["is_private"] = True
-            await _show_skip_menu(context, rid, job)
-        else:
-            markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Re-check Permissions", callback_data=f"idx_priv_{rid}")],
-                [InlineKeyboardButton("❌ Cancel", callback_data=f"idx_cancel_{rid}")],
-            ])
-            await q.edit_message_text(
-                "❌ <b>Helper Bot is not an Administrator!</b>\n\n"
-                "Telegram strictly requires at least one Helper Bot to be an <b>Administrator</b> in private channels to forward files.\n\n"
-                "Please add a Helper Bot as Admin and tap 'Re-check Permissions'.",
-                parse_mode="HTML",
-                reply_markup=markup,
-            )
-
-    elif action.startswith("sk_"):
-        sk_type = action.replace("sk_", "")
-        if sk_type == "none":
-            job["skip_count"] = 0
-            await q.answer("No skip applied")
-            await _show_confirm_card(context, rid, job)
-        elif sk_type == "top":
-            job["awaiting_input"] = "top"
-            await q.answer("Send top skip count in reply")
-            await q.edit_message_text("🔢 <b>Skip Top Messages</b>\n\nPlease reply to this message with the number of top messages to skip (e.g. <code>50</code>):", parse_mode="HTML")
-        elif sk_type == "bot":
-            job["awaiting_input"] = "bot"
-            await q.answer("Send bottom skip count in reply")
-            await q.edit_message_text("🔢 <b>Skip Bottom Messages</b>\n\nPlease reply to this message with the number of bottom messages to skip (e.g. <code>100</code>):", parse_mode="HTML")
-        elif sk_type == "custom":
-            job["awaiting_input"] = "custom"
-            await q.answer("Send custom range in reply")
-            await q.edit_message_text("✂️ <b>Custom Range Selection</b>\n\nPlease reply to this message with your custom range (e.g. <code>200-250</code> or <code>200 250</code>):", parse_mode="HTML")
-
-    elif action == "cancel":
+    if action == "rej":
         if not full:
-            await q.answer("⛔ Only admins can cancel.", show_alert=True)
+            await q.answer("Only Administrators can reject.", show_alert=True)
             return
-        if job["state"] == "running":
-            job["cancel"] = True
-            await q.answer("Cancelling…")
-        else:
-            await q.answer("Not running.", show_alert=True)
+        job["cancel"] = True
+        await q.answer("Rejected.")
+        await _edit_prompt(context, job, f"❌ Index request for <b>{html.escape(job['title'])}</b> was rejected.")
+        return
