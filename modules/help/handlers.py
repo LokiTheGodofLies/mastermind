@@ -202,7 +202,7 @@ COMMAND_DETAILS = {
             "🤝 <b>Volunteer Operational Privileges</b>\n\n"
             "• <b>Daily Quota:</b> <mark>30 searches and 30 requests</mark> per day.\n"
             "• <b>Direct Indexing:</b> Send or forward supported ebooks, audiobooks, or archives (.zip, .rar, .7z) directly to any Helper Bot in private chat.\n"
-            "• <b>Automatic Approval &amp; Dual Logging:</b> Files uploaded by Volunteers are verified through the 3-Stage Self-Healing Pipeline and logged to both the Index Logs Channel and Logger Group Topic."
+            "• <b>Automatic Approval &amp; Dual Logging:</b> Files uploaded by Volunteers are verified through the 3-Stage Self-Healing Pipeline. The Index Logs Topic gets the full audit; the Index Logs Channel gets a clean card only after the caption is enriched."
         ),
     },
     "vol_indexing": {
@@ -256,7 +256,7 @@ COMMAND_DETAILS = {
         "text": (
             "🤖 <b>Moderator Direct Indexing Guide</b>\n\n"
             "Send or forward supported ebook, audiobook, and archive files directly to any Helper Bot in private chat.\n"
-            "Metadata is enriched automatically across 8 book &amp; audiobook databases and logged to both the Index Logs Channel and Logger Group Topic."
+            "Metadata is enriched automatically across 8 book &amp; audiobook databases and logged: audit card to the Index Logs Topic, a clean card to the Index Logs Channel once the caption is enriched."
         ),
     },
     "mod_notice": {
@@ -281,7 +281,7 @@ COMMAND_DETAILS = {
             "Audits <b>both the Main Bot and all configured Helper Bots</b> across all required channels and groups:\n"
             "• 📦 <b>Storage Group:</b> Verifies membership &amp; file access.\n"
             "• 📢 <b>Posting Channel:</b> Verifies Admin status with Post &amp; Delete Messages rights.\n"
-            "• 📥 <b>Index Logs Channel:</b> Verifies Admin status with Post Messages rights so whichever bot indexes files can post 3-Tick Index Logs.\n"
+            "• 📥 <b>Index Logs Channel:</b> Verifies Admin status with Post Messages rights so whichever bot indexes files can post the library cards.\n"
             "• 🪵 <b>Logger Group:</b> Verifies membership for Index &amp; Error log topics.\n\n"
             "💡 <b>Syntax:</b>\n"
             "• <code>/checkhelpers</code>\n"
@@ -297,7 +297,7 @@ COMMAND_DETAILS = {
             "Batch indexes ebooks, audiobooks, and archives (<code>.zip, .rar, .7z</code>) from channels or groups into the Storage Group with 3-Stage Ordered Self-Healing and 8-site metadata enrichment.\n"
             "• Works in channels where either the <b>Main Bot</b> or a <b>Helper Bot</b> is Admin!\n"
             "• Automatically deletes the <code>/index</code> command post in channels and auto-cleans the progress card after completion.\n"
-            "• Sends the 3-Tick Index Log to <b>both</b> <code>INDEX_CHANNEL_ID</code> and <code>INDEX_LOG_TOPIC_ID</code> from whichever bot is indexing.\n\n"
+            "• Sends the file audit card (and task started/cancelled/completed logs) to <code>INDEX_LOG_TOPIC_ID</code>, and the &quot;New file added to library&quot; card to <code>INDEX_CHANNEL_ID</code> only when caption enrichment succeeded, from whichever bot is indexing.\n\n"
             "💡 <b>Syntax:</b>\n"
             "• <code>/index</code> (directly inside a source channel)\n"
             "• <code>/index</code> &lt;first_link&gt; &lt;last_link&gt;\n"

@@ -1413,9 +1413,94 @@ def format_index_channel_caption(
     return "\n".join(lines)[:1020]
 
 
-def format_index_log_message(
+def _format_duration_hms(seconds) -> str:
+    """Full duration for log cards, e.g. `14h 22m 10s`. Empty string when unknown."""
+    try:
+        seconds = int(seconds or 0)
+    except (TypeError, ValueError):
+        return ""
+    if seconds <= 0:
+        return ""
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def duration_for_log(info: dict) -> str:
+    """Duration text for index logs: media files only (never ebooks/documents)."""
+    ext = (info.get("extension") or "").lower()
+    if ext in supported_ebook_extensions():
+        return ""
+    return _format_duration_hms(info.get("duration"))
+
+
+def user_link_html(user_id, title) -> str:
+    """User title with an embedded profile link (plain title when no user id)."""
+    esc = html.escape(str(title or "Unknown"), quote=False)
+    return f'<a href="tg://user?id={int(user_id)}">{esc}</a>' if user_id else esc
+
+
+def _chat_link_html(chat_obj, message_id=None) -> str:
+    """`Title (chat_id)` with the title linked to the chat (public username, else message/chat link)."""
+    title = html.escape(
+        str(getattr(chat_obj, "title", None) or getattr(chat_obj, "full_name", None)
+            or getattr(chat_obj, "username", None) or "Source Chat"),
+        quote=False,
+    )
+    cid = getattr(chat_obj, "id", None)
+    uname = getattr(chat_obj, "username", None)
+    url = ""
+    if uname:
+        url = f"https://t.me/{uname}"
+    elif str(cid or "").startswith("-100"):
+        tail = str(cid)[4:]
+        url = f"https://t.me/c/{tail}/{message_id}" if message_id else f"https://t.me/c/{tail}"
+    label = f'<a href="{html.escape(url, quote=True)}">{title}</a>' if url else title
+    return f"{label} (<code>{cid}</code>)" if cid else label
+
+
+def source_info_from_message(message) -> str | None:
+    """
+    Source chat info (HTML) for a directly uploaded file:
+    forwarded-from channel/group -> that chat + original message id; sent inside a group/channel ->
+    that chat + message id; otherwise a plain bot-DM upload.
+    """
+    if message is None:
+        return None
+    origin = getattr(message, "forward_origin", None)
+    if origin is not None:
+        o_chat = getattr(origin, "chat", None)
+        if o_chat is None:
+            o_chat = getattr(origin, "sender_chat", None)
+        if o_chat is not None:
+            mid = getattr(origin, "message_id", None)
+            tail = f" | Msg <code>#{mid}</code>" if mid else ""
+            return _chat_link_html(o_chat, mid) + tail
+    chat = getattr(message, "chat", None)
+    mid = getattr(message, "message_id", None)
+    tail = f" | Msg <code>#{mid}</code>" if mid else ""
+    if chat is not None and getattr(chat, "type", "private") != "private":
+        return _chat_link_html(chat, mid) + tail
+    return "Direct upload (bot DM)" + tail
+
+
+def _caption_without_file_lines(caption_html: str | None) -> str:
+    """Drops the trailing `📁 File:` / `📦 Size:` lines (the channel card already shows them)."""
+    keep = [
+        ln for ln in (caption_html or "").split("\n")
+        if not (ln.startswith("📁 <b>File:</b>") or ln.startswith("📦 <b>Size:</b>"))
+    ]
+    return "\n".join(keep).strip()
+
+
+def format_index_audit_card(
     file_name: str,
     file_size_str: str,
+    extension: str,
     file_unique_id: str,
     storage_link: str,
     user_id: int,
@@ -1423,103 +1508,182 @@ def format_index_log_message(
     db_badge: str,
     storage_badge: str,
     caption_badge: str,
+    is_enriched: bool,
+    duration_str: str = "",
     source_info: str | None = None,
     indexed_by_bot: str | None = None,
+    original_caption: str | None = None,
+    enriched_caption_html: str | None = None,
+    added_by_label: str = "Added By",
 ) -> str:
     """
-    Standardized 3-Stage Ordered Index Log format:
-    1. Database Presence
-    2. Storage Group Presence
-    3. Caption Enrichment
+    Per-file Index Audit Card for the Index Logs TOPIC (internal staff audit).
+    Always sent, whether caption enrichment succeeded or failed; the failure note appears only on failure.
     """
     e = lambda v: html.escape(str(v or ""), quote=False)
-    esc_user = e(user_title or "Unknown")
-    user_link = f'<a href="tg://user?id={user_id}">{esc_user}</a>' if user_id else esc_user
-    ts = _ist_now_str()
-    esc_slink = html.escape(storage_link or "", quote=True)
-
-    rows = [
-        ("📁 <i>File Name</i>", f"<code>{e(file_name)}</code>"),
-        ("📦 <i>File Size</i>", f"<code>{e(file_size_str)}</code>"),
-        ("🔑 <i>Unique ID</i>", f"<code>{e(file_unique_id)}</code>"),
-        ("👤 <i>Sent By</i>", user_link),
+    ext_disp = extension if (not extension or extension.startswith(".")) else f".{extension}"
+    lines = [
+        "📄 <b>FILE INDEXED AUDIT</b>",
+        f"• <b>{e(added_by_label)}</b>: {user_link_html(user_id, user_title)}"
+        + (f" (<code>{int(user_id)}</code>)" if user_id else ""),
     ]
-    if esc_slink:
-        rows.insert(3, ("🔗 <i>Storage Link</i>", f'<a href="{esc_slink}">Open message</a>'))
-    if indexed_by_bot:
-        rows.append(("🤖 <i>Indexed By</i>", e(indexed_by_bot)))
     if source_info:
-        rows.append(("🌐 <i>Source</i>", source_info))
-    rows += [
-        ("1. 🗄 <i>Database Presence</i>", e(db_badge)),
-        ("2. 📦 <i>Storage Group Presence</i>", e(storage_badge)),
-        ("3. 📝 <i>Caption Enrichment</i>", e(caption_badge)),
-        ("⏰ <i>Timestamp</i>", f"<code>{e(ts)}</code>"),
+        lines.append(f"• <b>Source</b>: {source_info}")
+    if storage_link:
+        lines.append(f'• <b>Storage</b>: <a href="{html.escape(storage_link, quote=True)}">View in Storage Group</a>')
+    lines.append(f"• <b>Timestamp</b>: {e(_ist_now_str())}")
+    if indexed_by_bot:
+        lines.append(f"• <b>Indexed By</b>: {e(indexed_by_bot)}")
+    lines += [
+        "",
+        "📂 <b>File Details</b>:",
+        f"• <b>File Name</b>: <code>{e(file_name)}</code>",
+        f"• <b>File Size</b>: {e(file_size_str)}",
+        f"• <b>Extension</b>: {e(ext_disp)}",
     ]
-    table = "<table striped><tr><th>Field</th><th>Value</th></tr>" + "".join(
-        f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows
-    ) + "</table>"
-
-    lines = ["📥 <b>File Index Log</b>", "", table]
-    if esc_slink:
-        lines.append("")
-        lines.append(
-            f'<tg-button-row align="center">'
-            f'<tg-button type="url" style="primary" url="{esc_slink}">📦 Open in Storage Group</tg-button>'
-            f'</tg-button-row>'
-        )
+    if duration_str:
+        lines.append(f"• <b>Duration</b>: {e(duration_str)}")
+    lines.append(f"• <b>File Unique ID</b>: <code>{e(file_unique_id)}</code>")
+    lines += [
+        "",
+        f"1. 🗄 <b>Database Presence</b>: {e(db_badge)}",
+        f"2. 📦 <b>Storage Group Presence</b>: {e(storage_badge)}",
+        f"3. 📝 <b>Caption Enrichment</b>: {e(caption_badge)}",
+    ]
+    orig = (original_caption or "").strip()
+    if orig:
+        if len(orig) > 500:
+            orig = orig[:497] + "..."
+        lines += ["", "📝 <b>Original Caption</b>:", f"<blockquote>{e(orig)}</blockquote>"]
+    if is_enriched and (enriched_caption_html or "").strip():
+        lines += ["", "✨ <b>Enriched Caption</b>:", f"<blockquote>{enriched_caption_html.strip()}</blockquote>"]
+    if not is_enriched:
+        lines += [
+            "",
+            "⚠️ <b>Note</b>: Caption enrichment failed for this item. "
+            "Please update the caption manually in the Storage Group.",
+        ]
     return "\n".join(lines)
 
 
-async def send_index_log_dual(bot, log_msg: str, fallback_bot=None) -> None:
-    """
-    Dispatches an Index Log message to BOTH:
-      1. `PUBLIC_/TESTING_INDEX_CHANNEL_ID` (Index Logs Channel)
-      2. `PUBLIC_/TESTING_LOGGER_GROUP_ID` (`INDEX_LOG_TOPIC_ID` topic)
-    using whichever bot (`bot`) is actively indexing the file, with optional `fallback_bot`.
-    """
-    idx_chan = index_channel_id()
+def format_index_channel_card(
+    file_name: str,
+    file_size_str: str,
+    extension: str,
+    file_unique_id: str,
+    enriched_caption_html: str | None,
+    duration_str: str = "",
+) -> str:
+    """Curated card for the Index Logs CHANNEL: only for files whose caption enrichment succeeded."""
+    e = lambda v: html.escape(str(v or ""), quote=False)
+    ext_disp = extension if (not extension or extension.startswith(".")) else f".{extension}"
+    lines = [
+        "📚 <b>New file added to library</b>",
+        "",
+        f"• <b>File Name:</b> <code>{e(file_name)}</code>",
+        f"• <b>File Size:</b> {e(file_size_str)}",
+        f"• <b>Extension:</b> {e(ext_disp)}",
+    ]
+    if duration_str:
+        lines.append(f"• <b>Duration:</b> {e(duration_str)}")
+    lines.append(f"• <b>File Unique ID:</b> <code>{e(file_unique_id)}</code>")
+    cap = _caption_without_file_lines(enriched_caption_html)
+    if cap:
+        lines += ["", cap]
+    return "\n".join(lines)
+
+
+async def _send_with_fallback(chat_id, text: str, bot, fallback_bot=None, thread_id=None, label: str = "log") -> bool:
+    for b in (bot, fallback_bot):
+        if b is None:
+            continue
+        try:
+            kwargs = {
+                "chat_id": int(chat_id),
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            if thread_id:
+                kwargs["message_thread_id"] = int(thread_id)
+            await b.send_message(**kwargs)
+            return True
+        except Exception as exc:
+            logger.warning("Index %s delivery to %s failed via %s: %s", label, chat_id, getattr(b, "username", "bot"), exc)
+    logger.error("Could not deliver index %s to %s on any bot.", label, chat_id)
+    return False
+
+
+async def send_index_topic_log(bot, text: str, fallback_bot=None) -> bool:
+    """Sends a log to the Logger Group -> INDEX_LOG_TOPIC_ID topic ONLY (never the Index Logs channel)."""
     log_gid = logger_group_id()
-    idx_topic = log_topic("INDEX")
+    if not log_gid:
+        return False
+    return await _send_with_fallback(log_gid, text, bot, fallback_bot, thread_id=log_topic("INDEX"), label="topic log")
 
-    # 1. Send to Index Logs Channel (if configured and distinct from logger group)
-    if idx_chan:
-        sent_chan = False
-        for b in (bot, fallback_bot):
-            if b is None:
-                continue
-            try:
-                await b.send_message(
-                    chat_id=int(idx_chan),
-                    text=log_msg,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
-                sent_chan = True
-                break
-            except Exception as exc:
-                logger.warning("Index log delivery to INDEX_CHANNEL_ID (%s) failed via %s: %s", idx_chan, getattr(b, "username", "bot"), exc)
-        if not sent_chan:
-            logger.error("Could not deliver index log to INDEX_CHANNEL_ID (%s) on any bot.", idx_chan)
 
-    # 2. Send to Logger Group -> INDEX_LOG_TOPIC_ID
-    if log_gid and str(log_gid) != str(idx_chan or ""):
-        for b in (bot, fallback_bot):
-            if b is None:
-                continue
-            try:
-                kwargs = {
-                    "chat_id": int(log_gid),
-                    "text": log_msg,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                }
-                if idx_topic:
-                    kwargs["message_thread_id"] = int(idx_topic)
-                await b.send_message(**kwargs)
-                break
-            except Exception as exc:
-                logger.warning("Index log delivery to LOGGER_GROUP_ID (%s) failed via %s: %s", log_gid, getattr(b, "username", "bot"), exc)
+async def send_index_channel_log(bot, text: str, fallback_bot=None) -> bool:
+    """Sends a card to the Index Logs CHANNEL (PUBLIC_/TESTING_INDEX_CHANNEL_ID) ONLY."""
+    idx_chan = index_channel_id()
+    if not idx_chan:
+        return False
+    return await _send_with_fallback(idx_chan, text, bot, fallback_bot, label="channel card")
+
+
+async def send_index_file_logs(
+    bot,
+    *,
+    info: dict,
+    res: dict,
+    user_id: int,
+    user_title: str,
+    source_info: str | None = None,
+    indexed_by_bot: str | None = None,
+    fallback_bot=None,
+    added_by_label: str = "Added By",
+    original_caption: str | None = None,
+) -> None:
+    """
+    Per-file index logging with strict destination isolation:
+      - Index Logs TOPIC (internal audit): ALWAYS gets the Index Audit Card (success or failure).
+      - Index Logs CHANNEL (curated feed): gets the "New file added to library" card ONLY when caption
+        enrichment succeeded and the file is new/healed (a fully verified duplicate is not "new").
+        Failed enrichment is held back until an admin edits the caption in the Storage Group.
+    """
+    duration_str = duration_for_log(info)
+    is_enriched = bool(res.get("is_success_enrichment"))
+    caption_html = res.get("caption_html") or ""
+    audit = format_index_audit_card(
+        file_name=info["file_name"],
+        file_size_str=res["file_size_str"],
+        extension=info.get("extension") or "",
+        file_unique_id=info["file_unique_id"],
+        storage_link=res.get("storage_link") or "",
+        user_id=user_id,
+        user_title=user_title,
+        db_badge=res["db_badge"],
+        storage_badge=res["storage_badge"],
+        caption_badge=res["caption_badge"],
+        is_enriched=is_enriched,
+        duration_str=duration_str,
+        source_info=source_info,
+        indexed_by_bot=indexed_by_bot,
+        original_caption=original_caption,
+        enriched_caption_html=caption_html,
+        added_by_label=added_by_label,
+    )
+    await send_index_topic_log(bot, audit, fallback_bot)
+
+    if is_enriched and res.get("status") != "duplicate":
+        card = format_index_channel_card(
+            file_name=info["file_name"],
+            file_size_str=res["file_size_str"],
+            extension=info.get("extension") or "",
+            file_unique_id=info["file_unique_id"],
+            enriched_caption_html=caption_html,
+            duration_str=duration_str,
+        )
+        await send_index_channel_log(bot, card, fallback_bot)
 
 
 # ---------------------------------------------------------------------------
@@ -1863,6 +2027,7 @@ async def verify_and_heal_indexed_file(
         "is_success_enrichment": is_success_enrichment,
         "db_ok": db_ok,
         "category": category,
+        "caption_html": caption_html,
     }
 
 
@@ -1947,7 +2112,7 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
             except Exception as e:
                 logger.error("Failed to send error log: %s", e)
 
-        # Post Standardized 3-Tick Index Log to BOTH Index Logs Channel and Logger Group Topic
+        # Index logs: audit card -> Index Logs TOPIC (always); curated card -> Index Logs CHANNEL (enriched only)
         try:
             bot_uname = getattr(context.bot, "username", None)
             if not bot_uname:
@@ -1957,19 +2122,16 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
                 except Exception:
                     bot_uname = None
             bot_label = f"@{bot_uname}" if bot_uname else "Helper Bot"
-            log_msg = format_index_log_message(
-                file_name=file_name,
-                file_size_str=res["file_size_str"],
-                file_unique_id=file_unique_id,
-                storage_link=storage_link,
+            await send_index_file_logs(
+                context.bot,
+                info=info,
+                res=res,
                 user_id=uid,
                 user_title=utitle,
-                db_badge=res["db_badge"],
-                storage_badge=res["storage_badge"],
-                caption_badge=res["caption_badge"],
+                source_info=source_info_from_message(message),
                 indexed_by_bot=bot_label,
+                original_caption=info.get("raw_caption") or "",
             )
-            await send_index_log_dual(context.bot, log_msg)
         except Exception as e:
             logger.error("Failed to send index log: %s", e)
 
@@ -2027,6 +2189,8 @@ async def handle_storage_caption_edit(update: Update, context: ContextTypes.DEFA
         return
 
     admin_user = update.effective_user
+    if admin_user is not None and getattr(admin_user, "is_bot", False):
+        return
     admin_id = admin_user.id if admin_user else 0
     admin_name = (admin_user.full_name or "Admin") if admin_user else "Admin"
 
@@ -2036,29 +2200,31 @@ async def handle_storage_caption_edit(update: Update, context: ContextTypes.DEFA
 
     update_file_caption_db(storage_message_id=storage_msg_id, new_caption=new_caption, is_enriched=1)
 
-    log_group_id = logger_group_id()
-    index_log_topic_id = log_topic("INDEX")
-
     try:
-        admin_link = f'<a href="tg://user?id={admin_id}">{html.escape(admin_name)}</a>'
-        caption_badge = f"✅ ✍️ Enriched by Admin ({admin_link})"
         size_mb = info["file_size"] / (1024 * 1024)
         file_size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{info['file_size'] / 1024:.2f} KB"
         bot_uname = getattr(context.bot, "username", None)
         bot_label = f"@{bot_uname}" if bot_uname else "Main Bot"
 
-        log_msg = format_index_log_message(
-            file_name=info["file_name"],
-            file_size_str=file_size_str,
-            file_unique_id=info["file_unique_id"],
-            storage_link=storage_link,
+        res = {
+            "status": "indexed",
+            "is_success_enrichment": True,
+            "file_size_str": file_size_str,
+            "storage_link": storage_link,
+            "db_badge": "✅ Updated in files.db",
+            "storage_badge": f"✅ Present in Storage Group (Msg #{storage_msg_id})",
+            "caption_badge": "✅ ✍️ Enriched manually by Admin",
+            "caption_html": new_caption,
+        }
+        # Delayed trigger: admin fixed the caption -> audit card to the topic AND curated card to the channel
+        await send_index_file_logs(
+            context.bot,
+            info=info,
+            res=res,
             user_id=admin_id,
             user_title=admin_name,
-            db_badge="✅ Updated in files.db",
-            storage_badge=f"✅ Present in Storage Group (Msg #{storage_msg_id})",
-            caption_badge=caption_badge,
             indexed_by_bot=bot_label,
+            added_by_label="Caption Updated By",
         )
-        await send_index_log_dual(context.bot, log_msg)
     except Exception as e:
         logger.error("Failed to send admin caption edit index log: %s", e)

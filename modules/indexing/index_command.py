@@ -57,14 +57,16 @@ from modules.database.user_db import get_user_role_db
 from modules.database.file_db import get_file_by_unique_id_db, save_indexed_file_db
 from modules.indexing.book_index import (
     _format_duration,
+    _ist_now_str,
     _make_storage_msg_link,
     enrich_book_metadata,
     extract_media_info,
     fetch_goodreads_metadata,
     format_index_channel_caption,
-    format_index_log_message,
-    send_index_log_dual,
+    send_index_file_logs,
+    send_index_topic_log,
     send_media_to_storage,
+    user_link_html,
     verify_and_heal_indexed_file,
 )
 from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
@@ -276,6 +278,8 @@ async def _run_index(context, rid, job):
     if job.get("priority_mode") == "helpers":
         helper_pool = await _build_helper_pool_bots()
 
+    await _log_lifecycle(context, job, "started", default_bot_label, source_info=source_info)
+
     try:
         for mid in range(job["start_id"], job["end_id"] + 1):
             if job["cancel"]:
@@ -356,22 +360,19 @@ async def _run_index(context, rid, job):
                             except Exception:
                                 pass
 
-                        # Post Standardized 3-Tick Index Log to BOTH Index Logs Channel and Logger Group Topic
+                        # Index Audit Card -> Index Logs TOPIC (always); curated card -> Index Logs CHANNEL (enriched only)
                         try:
-                            log_msg = format_index_log_message(
-                                file_name=info["file_name"],
-                                file_size_str=res["file_size_str"],
-                                file_unique_id=info["file_unique_id"],
-                                storage_link=storage_link,
+                            await send_index_file_logs(
+                                active_bot,
+                                info=info,
+                                res=res,
                                 user_id=job["requester_id"],
                                 user_title=job["requester_name"],
-                                db_badge=res["db_badge"],
-                                storage_badge=res["storage_badge"],
-                                caption_badge=res["caption_badge"],
-                                source_info=source_info,
+                                source_info=f"{source_info} | Msg <code>#{mid}</code>",
                                 indexed_by_bot=active_bot_label,
+                                fallback_bot=bot,
+                                original_caption=info.get("raw_caption") or "",
                             )
-                            await send_index_log_dual(active_bot, log_msg, fallback_bot=bot)
                         except Exception:
                             pass
 
@@ -400,21 +401,65 @@ async def _run_index(context, rid, job):
 
     job["state"] = "done"
     await _edit_prompt(context, job, _status_text(job, stats, final_state))
-    await _log_summary(context, job, stats, final_state, default_bot_label)
+    await _log_summary(context, job, stats, final_state, default_bot_label, source_info=source_info)
     if job.get("is_channel"):
         asyncio.create_task(_auto_delete_prompt(bot, job, 15))
 
 
-async def _log_summary(context, job, stats, final_state, bot_label: str = "Bot"):
-    text = (
-        f"📥 <b>Indexing {html.escape(final_state)}</b>\n\n"
-        f"📂 <b>Chat:</b> <b>{html.escape(job['title'])}</b>\n"
-        f"🤖 <b>Indexed By:</b> <mark>{html.escape(bot_label)}</mark>\n"
-        f"👤 <b>By:</b> {html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>)\n"
-        f"✅ Indexed / Healed: <code>{stats['ok']}</code> | ♻️ Verified Duplicates: <code>{stats['dup']}</code> | "
-        f"🚫 Filtered: <code>{stats['filtered']}</code> | 🗑 Deleted: <code>{stats['deleted']}</code> | ⚠️ Errors: <code>{stats['skipped']}</code>"
-    )
-    await send_index_log_dual(context.bot, text)
+_LIFECYCLE = {
+    "started": ("🟢", "Indexing Task Started"),
+    "paused": ("⏸", "Indexing Task Paused"),
+    "resumed": ("▶️", "Indexing Task Resumed"),
+    "cancelled": ("⛔", "Indexing Task Cancelled"),
+    "completed": ("✅", "Indexing Task Completed"),
+    "stopped": ("🛑", "Indexing Task Stopped (Error)"),
+}
+
+
+async def _log_lifecycle(context, job, kind: str, bot_label: str = "Bot", stats: dict | None = None,
+                         source_info: str | None = None, detail: str = ""):
+    """Task lifecycle event -> Index Logs TOPIC only (never the Index Logs channel)."""
+    emoji, title = _LIFECYCLE[kind]
+    chat_line = source_info or html.escape(job["title"])
+    lines = [
+        f"{emoji} <b>{title}</b>",
+        "",
+        f"📂 <b>Chat:</b> {chat_line}",
+        f"🔢 <b>Range:</b> <code>{job['start_id']} → {job['end_id']}</code>",
+        f"⚙️ <b>Mode:</b> <code>{html.escape(str(job.get('priority_mode') or 'direct'))}</code>",
+        f"👤 <b>Started By:</b> {user_link_html(job['requester_id'], job['requester_name'])}"
+        + (f" (<code>{job['requester_id']}</code>)" if job["requester_id"] else ""),
+        f"🤖 <b>Bot:</b> <code>{html.escape(bot_label)}</code>",
+        f"🕒 <b>Time:</b> {html.escape(_ist_now_str())}",
+    ]
+    if stats is not None:
+        total = max(1, job["end_id"] - job["start_id"] + 1)
+        lines += [
+            "",
+            f"📥 Fetched: <code>{stats['fetched']}/{total}</code>",
+            f"✅ Indexed / Healed: <code>{stats['ok']}</code>",
+            f"♻️ Verified Duplicates: <code>{stats['dup']}</code>",
+            f"🚫 Filtered: <code>{stats['filtered']}</code>",
+            f"🗑 Deleted: <code>{stats['deleted']}</code>",
+            f"⚠️ Errors: <code>{stats['skipped']}</code>",
+        ]
+    if detail:
+        lines += ["", f"<i>{html.escape(detail)}</i>"]
+    try:
+        await send_index_topic_log(context.bot, "\n".join(lines))
+    except Exception as exc:
+        logger.warning("Index lifecycle log failed: %s", exc)
+
+
+async def _log_summary(context, job, stats, final_state, bot_label: str = "Bot", source_info: str | None = None):
+    fs = str(final_state)
+    if fs.startswith("cancelled"):
+        kind, detail = "cancelled", ""
+    elif fs.startswith("stopped"):
+        kind, detail = "stopped", fs
+    else:
+        kind, detail = "completed", ""
+    await _log_lifecycle(context, job, kind, bot_label, stats=stats, source_info=source_info, detail=detail)
 
 
 async def _send_approval(context, rid, job):
