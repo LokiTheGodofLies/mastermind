@@ -1,5 +1,5 @@
 import html
-from config import bot_name, creator_id, creator_username, referral_bonus_label
+from config import bot_name, creator_dm_link, creator_id, creator_username, referral_bonus_label
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 
 from modules.database.user_db import add_or_update_user_db
 from modules.allowance.referral import process_referral_with_notification
+from modules.utility.rich_ui import styled_button
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42,13 +43,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             referrer_id = int(args[0].split("_")[1])
             success, _ = await process_referral_with_notification(context, referrer_id, user.id, user.full_name)
             if success:
-                referral_notice = f"\n\n🎉 <b>Referral Bonus Applied!</b> You and your referrer received {referral_bonus_label()}."
+                referral_notice = f"\n\n🎉 <b>Referral Bonus Applied!</b> You and your referrer received <mark>{html.escape(referral_bonus_label())}</mark>."
         except ValueError:
             pass
 
     message = (
-        f"Hi <b>{user_name}</b>, welcome to {bot_name()} Bot! 👋\n\n"
-        "I am your modular assistant. Tap the buttons below to see my help menu or reach out to the Creator."
+        f"Hi <b>{user_name}</b>, welcome to <mark>{html.escape(bot_name())} Bot</mark>! 👋\n\n"
+        "I am your modular community library assistant. Tap the colorful buttons below to search books, explore the help hub, or reach out to the Creator."
         f"{referral_notice}"
     )
 
@@ -58,11 +59,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
-            InlineKeyboardButton("📖 Help Menu", callback_data="help_button"),
-            InlineKeyboardButton("👑 Creator", callback_data="bot_owner"),
+            styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
+            styled_button("📖 Help Menu", callback_data="help_button", style="primary"),
         ],
         [
-            InlineKeyboardButton("📤 Refer & Earn Bonus", url=share_url),
+            styled_button("📊 My Quota", callback_data="quota", style="primary"),
+            styled_button("👑 Creator", callback_data="bot_owner", style="primary"),
+        ],
+        [
+            styled_button("📤 Refer & Earn Bonus", url=share_url, style="success"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -88,11 +93,20 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.answer()
         oid = creator_id()
         _un = creator_username()
-        _link = f"@{_un}" if _un else f"<a href=\"tg://user?id={oid}\">Creator</a>"
+        dm_url = creator_dm_link()
+        _label = f"@{html.escape(_un)}" if _un else "Creator"
+        rows = []
+        if dm_url:
+            rows.append([styled_button(f"💬 Message {_label}", url=dm_url, style="success")])
+        rows.append([styled_button("📋 Copy Creator ID", copy_text=str(oid), style="primary")])
+        rows.append([styled_button("« Back to Start", callback_data="start_menu", style="primary")])
         await query.message.edit_text(
-            f"👑 <b>Bot Creator:</b>\n\n• Creator: {_link}\n• Creator ID: <code>{oid}</code>\n• For support or inquiries, contact the Creator.",
+            f"👑 <b>Bot Creator</b>\n\n"
+            f"• <b>Creator:</b> <mark>{_label}</mark>\n"
+            f"• <b>Creator ID:</b> <code>{oid}</code>\n\n"
+            f"For support, inquiries, or partnership, tap the button below to contact the Creator directly.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]),
+            reply_markup=InlineKeyboardMarkup(rows),
         )
     elif data == "search_menu":
         from modules.search.handlers import search_command

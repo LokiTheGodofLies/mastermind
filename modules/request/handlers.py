@@ -8,12 +8,13 @@ from telegram.ext import ContextTypes, ApplicationHandlerStop
 import config
 from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_request, deduct_request_quota
+from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
 
 logger = logging.getLogger(__name__)
 
 
 REQUEST_GUIDE_TEXT = (
-    "📖 <b>How to Request Books & Audiobooks</b>\n\n"
+    "📖 <b>How to Request Books &amp; Audiobooks</b>\n\n"
     "<b>Option 1: Standalone Book</b>\n"
     "<code>/request\n"
     "Title: The Striker\n"
@@ -72,6 +73,12 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ <b>Daily request quota reached!</b>\n\n"
             "Use <code>/quota</code> to view your limits or <code>/refer</code> to invite friends and earn bonus requests.",
             parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    styled_button("📊 Check Quota", callback_data="quota", style="primary"),
+                    styled_button("🎁 Refer & Earn", callback_data="refer_more_callback", style="success"),
+                ]
+            ]),
         )
         return
 
@@ -87,26 +94,26 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     q_esc = html.escape(query)
-    status_msg = await message.reply_text(f"🔎 Searching local database for <i>\"{q_esc}\"</i>...", parse_mode="HTML")
+    status_msg = await message.reply_text(f"🔎 Searching local database for <mark>{q_esc}</mark>...", parse_mode="HTML")
 
     rows = search_files_db(query, limit=5)
     if rows:
         header = (
-            f"📁 <b>Local Database Matches Found!</b>\n\n"
-            f"Maybe <i>\"{q_esc}\"</i> is already in our library!\n"
-            f"Found matching files in database:\n"
+            f"📁 <b>Local Library Matches Found!</b>\n\n"
+            f"Maybe <mark>{q_esc}</mark> is already in our library:\n"
         )
         lines = [header]
         for row in rows:
             lines.append(f"• <code>{html.escape(row['file_name'] or 'Unknown')}</code>")
 
-        lines.append("\n<b>Do you want to search our library first before submitting a request?</b>")
+        lines.append("\n<b>Would you like to search our library first or submit a new request?</b>")
         text = "\n".join(lines)
 
         safe_q = query[:30]
         keyboard = [
-            [InlineKeyboardButton("🔍 Search in Library", callback_data=f"search_direct_{safe_q}")],
-            [InlineKeyboardButton("📤 Request Anyway", callback_data=f"req_sub_orig_{query[:40]}")],
+            [styled_button("🔍 Search in Library", callback_data=f"search_direct_{safe_q}", style="success")],
+            [styled_button("📤 Request Anyway", callback_data=f"req_sub_orig_{query[:40]}", style="primary")],
+            [styled_button("❌ Cancel", callback_data="req_join_no", style="danger")],
         ]
         await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -116,7 +123,7 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_goodreads_or_request(status_msg, query, context):
     q_esc = html.escape(query)
     await status_msg.edit_text(
-        f"🔎 Not found in local database. Fetching Goodreads metadata for <i>\"{q_esc}\"</i>...",
+        f"🔎 Not found in local database. Fetching Goodreads metadata for <mark>{q_esc}</mark>...",
         parse_mode="HTML",
     )
     matches = fetch_goodreads_metadata(query)
@@ -128,31 +135,44 @@ async def process_goodreads_or_request(status_msg, query, context):
         context.bot_data["goodreads_last_matches"] = matches
         context.bot_data["goodreads_last_query"] = query
 
-        header = f"📖 <b>Goodreads Book Matches Found for:</b> <i>\"{q_esc}\"</i>"
-        lines = [header, "", "Tap any book title below to select and request it:"]
+        header = f"📖 <b>Goodreads Matches Found for:</b> <mark>{q_esc}</mark>"
+        lines = [header, "", "Tap a button below any book to select and request it:\n"]
         for idx, book in enumerate(matches):
             title = html.escape(book["title"])
             author = html.escape(book["author"])
             url = book["url"]
             rating = html.escape(book.get("rating", ""))
             cmd_link = f"https://t.me/{bot_username}?start=req_pick_{idx}"
-            lines.append(f'{idx + 1}. <a href="{cmd_link}">📚 <b>{title}</b> ({author})</a> ⭐ {rating} [<a href="{url}">Goodreads</a>]')
+            lines.append(f"<b>{idx + 1}. 📚 {title}</b> — <code>{author}</code>")
+            if rating:
+                lines.append(f"⭐ <i>{rating}</i>")
+            lines.append(
+                tg_button_row_html(
+                    [
+                        tg_button_html(f"📥 Select #{idx + 1}", url=cmd_link, style="success"),
+                        tg_button_html("📖 Goodreads", url=url, style="primary"),
+                    ],
+                    align="left",
+                )
+            )
+            lines.append("")
 
         manual_link = f"https://t.me/{bot_username}?start=req_manual"
-        lines.append("")
-        lines.append(f'✍️ <a href="{manual_link}"><b>Request Manually (\"{html.escape(query[:35])}\")</b></a>')
-
-        text = "\n".join(lines)
-        await status_msg.edit_text(text, parse_mode="HTML", disable_web_page_preview=True)
+        kb = InlineKeyboardMarkup([
+            [styled_button(f"✍️ Request Manually (\"{query[:28]}\")", url=manual_link, style="primary")],
+            [styled_button("❌ Cancel", callback_data="req_join_no", style="danger")],
+        ])
+        text = "\n".join(lines).strip()
+        await status_msg.edit_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
     else:
         text = (
-            f"📖 <b>Book Request:</b> <i>\"{q_esc}\"</i>\n\n"
+            f"📖 <b>Book Request:</b> <mark>{q_esc}</mark>\n\n"
             "No Goodreads matches found. Would you like to submit this request directly to the Request Channel?"
         )
         keyboard = [
             [
-                InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{query[:40]}"),
-                InlineKeyboardButton("❌ Cancel", callback_data="req_join_no"),
+                styled_button("📤 Submit Request", callback_data=f"req_sub_orig_{query[:40]}", style="success"),
+                styled_button("❌ Cancel", callback_data="req_join_no", style="danger"),
             ]
         ]
         await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -186,13 +206,13 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
         req_text = (
             f"📥 <b>New Book Request</b>\n\n"
             f"👤 <b>Requested By:</b> {user_mention}\n"
-            f"📖 <b>Book / Query:</b> <i>\"{bq_esc}\"</i>"
+            f"📖 <b>Book / Query:</b> <mark>{bq_esc}</mark>"
         )
         status_markup = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("⏳ In Progress", callback_data=f"req_stat_prog_{user.id}"),
-                InlineKeyboardButton("✅ Completed", callback_data=f"req_stat_done_{user.id}"),
-                InlineKeyboardButton("❌ Rejected", callback_data=f"req_stat_rej_{user.id}"),
+                styled_button("⏳ In Progress", callback_data=f"req_stat_prog_{user.id}", style="primary"),
+                styled_button("✅ Completed", callback_data=f"req_stat_done_{user.id}", style="success"),
+                styled_button("❌ Rejected", callback_data=f"req_stat_rej_{user.id}", style="danger"),
             ]
         ])
         try:
@@ -216,7 +236,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
                     pass
 
             await query.edit_message_text(
-                f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <i>\"{bq_esc}\"</i> has been forwarded to the Request Channel.",
+                f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <mark>{bq_esc}</mark> has been forwarded to the Request Channel.",
                 parse_mode="HTML",
             )
         except Exception as e:
@@ -243,7 +263,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
 
         orig_text = query.message.text_html or query.message.text or ""
         clean_text = re.sub(r"\n\n<b>Status:</b>.*", "", orig_text, flags=re.DOTALL)
-        new_text = f"{clean_text}\n\n<b>Status:</b> {label} (by {actor_name})"
+        new_text = f"{clean_text}\n\n<b>Status:</b> <mark>{label}</mark> (by {actor_name})"
 
         try:
             await query.edit_message_text(new_text, parse_mode="HTML", reply_markup=query.message.reply_markup)
@@ -278,32 +298,33 @@ async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT
             url = book_data["url"]
             text = (
                 f"📖 <b>Goodreads Book Selected</b>\n\n"
-                f"📌 <b>Title:</b> <a href=\"{url}\">{title}</a>\n"
-                f"✍️ <b>Author:</b> {author}\n"
+                f"📌 <b>Title:</b> <mark>{title}</mark>\n"
+                f"✍️ <b>Author:</b> <code>{author}</code>\n"
                 f"⭐ <b>Rating:</b> {rating}\n\n"
                 f"Is this the book you are looking for?"
             )
             encoded_title = book_data["title"][:40]
             fallback_q = (orig_query or book_data["title"])[:40]
             keyboard = [
-                [InlineKeyboardButton("✅ Yes (Submit Goodreads)", callback_data=f"req_sub_gb_{encoded_title}")],
-                [InlineKeyboardButton("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}")],
+                [styled_button("📖 Open on Goodreads", url=url, style="primary")],
+                [styled_button("✅ Yes (Submit Goodreads)", callback_data=f"req_sub_gb_{encoded_title}", style="success")],
+                [styled_button("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}", style="danger")],
             ]
             await message.reply_text(
                 text,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
             raise ApplicationHandlerStop
     elif payload == "req_manual":
         orig_query = context.bot_data.get("goodreads_last_query", "Book Request")
         oq_esc = html.escape(orig_query)
-        text = f"📖 <b>Book Request:</b> <i>\"{oq_esc}\"</i>\n\nWould you like to submit this request directly to the Request Channel?"
+        text = f"📖 <b>Book Request:</b> <mark>{oq_esc}</mark>\n\nWould you like to submit this request directly to the Request Channel?"
         keyboard = [
             [
-                InlineKeyboardButton("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}"),
-                InlineKeyboardButton("❌ Cancel", callback_data="req_join_no"),
+                styled_button("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}", style="success"),
+                styled_button("❌ Cancel", callback_data="req_join_no", style="danger"),
             ]
         ]
         await message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))

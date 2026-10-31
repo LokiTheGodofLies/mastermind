@@ -45,6 +45,7 @@ from telegram.ext import ContextTypes
 from config import (
     admin_ids,
     anon_admin_id,
+    index_channel_id,
     index_sleep_seconds,
     log_topic,
     logger_group_id,
@@ -62,9 +63,11 @@ from modules.indexing.book_index import (
     fetch_goodreads_metadata,
     format_index_channel_caption,
     format_index_log_message,
+    send_index_log_dual,
     send_media_to_storage,
     verify_and_heal_indexed_file,
 )
+from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +75,15 @@ INDEX_COMMAND_ACCESS = {"Admin", "Administrator", "Creator", "Owner"}
 FULL_ACCESS = {"Admin", "Administrator", "Creator", "Owner"}
 APPROVAL_ACCESS = set()
 
+# Shared job store and channel command deduplication across Main Bot and Helper Bots
+_GLOBAL_INDEX_JOBS: dict[str, dict] = {}
+_SEEN_CHANNEL_CMDS: set[tuple[int, int]] = set()
+
 
 def _jobs(context: ContextTypes.DEFAULT_TYPE) -> dict:
-    if "index_jobs" not in context.bot_data:
-        context.bot_data["index_jobs"] = {}
-    return context.bot_data["index_jobs"]
+    if hasattr(context, "bot_data") and isinstance(context.bot_data, dict):
+        context.bot_data["index_jobs"] = _GLOBAL_INDEX_JOBS
+    return _GLOBAL_INDEX_JOBS
 
 
 def _seconds(val) -> float:
@@ -166,10 +173,10 @@ def _status_text(job: dict, stats: dict, phase: str = "running") -> str:
     bar = "█" * filled + "▒" * (bar_len - filled)
 
     return (
-        f"╭─────────❪ INDEXING ❫──〇\n"
+        f"╭─────────❪ <b>INDEXING</b> ❫──〇\n"
         f"│ 📂 <b>Chat:</b> {html.escape(job['title'])}\n"
-        f"│ 🔢 <b>Range:</b> <code>{job['start_id']} → {job['end_id']}</code>\n"
-        f"│ ⚙️ <b>Phase:</b> <code>{html.escape(phase)}</code>\n"
+        f"│ 🔢 <b>Range:</b> <mark>{job['start_id']} → {job['end_id']}</mark>\n"
+        f"│ ⚙️ <b>Phase:</b> <mark>{html.escape(phase)}</mark>\n"
         f"│ 📊 <b>Progress:</b> <code>[{bar}] {pct}%</code>\n"
         f"│\n"
         f"│ 📥 Fetched: <code>{stats['fetched']}/{total}</code>\n"
@@ -179,13 +186,13 @@ def _status_text(job: dict, stats: dict, phase: str = "running") -> str:
         f"│ 🗑 Deleted: <code>{stats['deleted']}</code>\n"
         f"│ ⚠️ Errors: <code>{stats['skipped']}</code>\n"
         f"│╰─────────────────────────➤\n"
-        f"╰─────────❪ PROGRESSING ❫──〇⚙️"
+        f"╰─────────❪ <b>PROGRESSING</b> ❫──〇⚙️"
     )
 
 
 def _cancel_markup(rid):
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("⛔ Cancel Indexing", callback_data=f"idx_cancel_{rid}")]]
+        [[styled_button("⛔ Cancel Indexing", callback_data=f"idx_cancel_{rid}", style="danger")]]
     )
 
 
@@ -204,8 +211,35 @@ async def _forward(bot, to_chat, from_chat, message_id):
 async def _safe_delete(msg):
     try:
         await msg.delete()
-    except TelegramError:
+    except Exception:
         pass
+
+
+async def _auto_delete_prompt(bot, job: dict, delay_s: int = 15):
+    """Deletes temporary progress card inside a source channel after indexing completes."""
+    await asyncio.sleep(max(1, delay_s))
+    cid = job.get("prompt_chat")
+    mid = job.get("prompt_msg_id")
+    if cid and mid:
+        try:
+            await bot.delete_message(chat_id=cid, message_id=mid)
+        except Exception:
+            pass
+
+
+async def _build_helper_pool_bots() -> list[tuple[Bot, str]]:
+    """Initializes reachable helper Bot instances for round-robin indexing."""
+    pool: list[tuple[Bot, str]] = []
+    for tok in helper_bot_tokens():
+        try:
+            hb = Bot(tok)
+            await hb.initialize()
+            me = await hb.get_me()
+            uname = f"@{me.username}" if me.username else (me.first_name or "Helper Bot")
+            pool.append((hb, uname))
+        except Exception as exc:
+            logger.debug("Could not initialize helper bot for indexing pool: %s", exc)
+    return pool
 
 
 async def _run_index(context, rid, job):
@@ -223,11 +257,24 @@ async def _run_index(context, rid, job):
         return
 
     log_group_id = logger_group_id()
-    index_log_topic_id = log_topic("INDEX")
     error_log_topic_id = log_topic("ERROR")
 
     # Resolve safe source link
     source_info = await _get_safe_source_link(bot, job["chat_id"], job["title"])
+
+    # Determine active bot label and optional Helper Bot Round-Robin Pool
+    default_bot_label = f"@{bot.username}" if getattr(bot, "username", None) else "Bot"
+    if default_bot_label == "Bot":
+        try:
+            me = await bot.get_me()
+            if me and me.username:
+                default_bot_label = f"@{me.username}"
+        except Exception:
+            pass
+
+    helper_pool: list[tuple[Bot, str]] = []
+    if job.get("priority_mode") == "helpers":
+        helper_pool = await _build_helper_pool_bots()
 
     try:
         for mid in range(job["start_id"], job["end_id"] + 1):
@@ -236,8 +283,18 @@ async def _run_index(context, rid, job):
                 break
 
             stats["fetched"] += 1
+            active_bot = bot
+            active_bot_label = default_bot_label
+            if helper_pool:
+                active_bot, active_bot_label = helper_pool[(stats["fetched"] - 1) % len(helper_pool)]
+
             try:
-                fwd = await _forward(bot, int(storage), job["chat_id"], mid)
+                fwd = await _forward(active_bot, int(storage), job["chat_id"], mid)
+                if fwd is None and active_bot is not bot:
+                    active_bot = bot
+                    active_bot_label = default_bot_label
+                    fwd = await _forward(bot, int(storage), job["chat_id"], mid)
+
                 if fwd is None:
                     stats["skipped"] += 1
                 else:
@@ -251,7 +308,7 @@ async def _run_index(context, rid, job):
 
                         # Run 3-Stage Ordered Verification & Self-Healing (1. DB -> 2. Storage -> 3. Caption)
                         res = await verify_and_heal_indexed_file(
-                            bot=bot,
+                            bot=active_bot,
                             info=info,
                             storage_id=int(storage),
                             user_id=job["requester_id"],
@@ -270,19 +327,27 @@ async def _run_index(context, rid, job):
                         # Post Error Log if any stage failed or enrichment failed (< 2 parameters)
                         if (not is_matched or not res["db_ok"]) and error_log_topic_id and log_group_id:
                             try:
+                                storage_btn_row = tg_button_row_html([
+                                    tg_button_html(
+                                        f"📦 Open Storage Message #{res['storage_message_id']}",
+                                        url=storage_link,
+                                        style="primary",
+                                    )
+                                ])
                                 err_text = (
                                     f"⚠️ <b>Caption Enrichment Failed (&lt;2 Parameters Matched)</b>\n\n"
                                     f"📁 <b>File:</b> <code>{html.escape(info['file_name'])}</code>\n"
-                                    f"🔗 <b>Storage Message:</b> <a href=\"{storage_link}\">Message #{res['storage_message_id']}</a>\n"
-                                    f"🔑 <b>Unique ID:</b> <code>{info['file_unique_id']}</code>\n"
+                                    f"🔑 <b>Unique ID:</b> <mark>{info['file_unique_id']}</mark>\n"
+                                    f"🤖 <b>Indexed By:</b> <code>{html.escape(active_bot_label)}</code>\n"
                                     f"🌐 <b>Source:</b> {source_info}\n\n"
                                     f"<b>3-Stage Check:</b>\n"
                                     f"1. 🗄 <b>Database:</b> {res['db_badge']}\n"
                                     f"2. 📦 <b>Storage:</b> {res['storage_badge']}\n"
                                     f"3. 📝 <b>Caption:</b> {res['caption_badge']}\n\n"
-                                    f"<i>Admins please edit the storage message caption manually. The bot will automatically capture your edit and update the database.</i>"
+                                    f"<i>Admins please edit the storage message caption manually. The bot will automatically capture your edit and update the database.</i>\n\n"
+                                    f"{storage_btn_row}"
                                 )
-                                await context.bot.send_message(
+                                await active_bot.send_message(
                                     chat_id=int(log_group_id),
                                     text=err_text,
                                     parse_mode="HTML",
@@ -291,31 +356,24 @@ async def _run_index(context, rid, job):
                             except Exception:
                                 pass
 
-                        # Post Standardized 3-Tick Index Log for this file
-                        if log_group_id:
-                            try:
-                                log_msg = format_index_log_message(
-                                    file_name=info["file_name"],
-                                    file_size_str=res["file_size_str"],
-                                    file_unique_id=info["file_unique_id"],
-                                    storage_link=storage_link,
-                                    user_id=job["requester_id"],
-                                    user_title=job["requester_name"],
-                                    db_badge=res["db_badge"],
-                                    storage_badge=res["storage_badge"],
-                                    caption_badge=res["caption_badge"],
-                                    source_info=source_info,
-                                )
-                                log_kwargs = {
-                                    "chat_id": int(log_group_id),
-                                    "text": log_msg,
-                                    "parse_mode": "HTML",
-                                }
-                                if index_log_topic_id:
-                                    log_kwargs["message_thread_id"] = int(index_log_topic_id)
-                                await context.bot.send_message(**log_kwargs)
-                            except Exception:
-                                pass
+                        # Post Standardized 3-Tick Index Log to BOTH Index Logs Channel and Logger Group Topic
+                        try:
+                            log_msg = format_index_log_message(
+                                file_name=info["file_name"],
+                                file_size_str=res["file_size_str"],
+                                file_unique_id=info["file_unique_id"],
+                                storage_link=storage_link,
+                                user_id=job["requester_id"],
+                                user_title=job["requester_name"],
+                                db_badge=res["db_badge"],
+                                storage_badge=res["storage_badge"],
+                                caption_badge=res["caption_badge"],
+                                source_info=source_info,
+                                indexed_by_bot=active_bot_label,
+                            )
+                            await send_index_log_dual(active_bot, log_msg, fallback_bot=bot)
+                        except Exception:
+                            pass
 
             except BadRequest:
                 stats["deleted"] += 1
@@ -333,31 +391,30 @@ async def _run_index(context, rid, job):
     except Exception as e:
         logger.exception("[INDEX] job crashed")
         final_state = f"stopped: {e}"
+    finally:
+        for hb, _ in helper_pool:
+            try:
+                await hb.shutdown()
+            except Exception:
+                pass
 
     job["state"] = "done"
     await _edit_prompt(context, job, _status_text(job, stats, final_state))
-    await _log_summary(context, job, stats, final_state)
+    await _log_summary(context, job, stats, final_state, default_bot_label)
+    if job.get("is_channel"):
+        asyncio.create_task(_auto_delete_prompt(bot, job, 15))
 
 
-async def _log_summary(context, job, stats, final_state):
-    logger_id = logger_group_id()
-    if not logger_id:
-        return
+async def _log_summary(context, job, stats, final_state, bot_label: str = "Bot"):
     text = (
         f"📥 <b>Indexing {html.escape(final_state)}</b>\n\n"
-        f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
-        f"👤 By: {html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>)\n"
-        f"✅ Indexed / Healed: {stats['ok']} | ♻️ Verified Duplicates: {stats['dup']} | "
-        f"🚫 Filtered: {stats['filtered']} | 🗑 Deleted: {stats['deleted']} | ⚠️ Errors: {stats['skipped']}"
+        f"📂 <b>Chat:</b> <b>{html.escape(job['title'])}</b>\n"
+        f"🤖 <b>Indexed By:</b> <mark>{html.escape(bot_label)}</mark>\n"
+        f"👤 <b>By:</b> {html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>)\n"
+        f"✅ Indexed / Healed: <code>{stats['ok']}</code> | ♻️ Verified Duplicates: <code>{stats['dup']}</code> | "
+        f"🚫 Filtered: <code>{stats['filtered']}</code> | 🗑 Deleted: <code>{stats['deleted']}</code> | ⚠️ Errors: <code>{stats['skipped']}</code>"
     )
-    kwargs = {"chat_id": int(logger_id), "text": text, "parse_mode": "HTML"}
-    topic = log_topic("INDEX")
-    if topic:
-        kwargs["message_thread_id"] = int(topic)
-    try:
-        await context.bot.send_message(**kwargs)
-    except Exception as e:
-        logger.warning(f"[INDEX] summary log failed: {e}")
+    await send_index_log_dual(context.bot, text)
 
 
 async def _send_approval(context, rid, job):
@@ -365,11 +422,11 @@ async def _send_approval(context, rid, job):
         "🔔 <b>Index approval request</b>\n\n"
         f"👤 By: {html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>) — {html.escape(job['requester_role'])}\n"
         f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
-        f"🔢 Messages: {job['start_id']} → {job['end_id']}"
+        f"🔢 Messages: <mark>{job['start_id']} → {job['end_id']}</mark>"
     )
     markup = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Approve", callback_data=f"idx_apr_{rid}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"idx_rej_{rid}"),
+        styled_button("✅ Approve", callback_data=f"idx_apr_{rid}", style="success"),
+        styled_button("❌ Reject", callback_data=f"idx_rej_{rid}", style="danger"),
     ]])
 
     logger_id = logger_group_id()
@@ -399,25 +456,25 @@ async def _send_approval(context, rid, job):
 
 async def _show_skip_menu(context, rid: str, job: dict):
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏩ No Skip", callback_data=f"idx_sk_none_{rid}")],
+        [styled_button("⏩ No Skip (Index All)", callback_data=f"idx_sk_none_{rid}", style="success")],
         [
-            InlineKeyboardButton("⏭ Skip Top N", callback_data=f"idx_sk_top_{rid}"),
-            InlineKeyboardButton("⏮ Skip Bottom N", callback_data=f"idx_sk_bot_{rid}"),
+            styled_button("⏭ Skip Top 10", callback_data=f"idx_sk_top_{rid}", style="primary"),
+            styled_button("⏮ Skip Bottom 10", callback_data=f"idx_sk_bot_{rid}", style="primary"),
         ],
-        [InlineKeyboardButton("✂️ Custom Range", callback_data=f"idx_sk_custom_{rid}")],
-        [InlineKeyboardButton("⛔ Cancel", callback_data=f"idx_cancel_{rid}")],
+        [styled_button("✂️ Custom Range", callback_data=f"idx_sk_custom_{rid}", style="primary")],
+        [styled_button("⛔ Cancel", callback_data=f"idx_cancel_{rid}", style="danger")],
     ])
     await _edit_prompt(
         context, job,
-        f"🔢 <b>Message Skip & Range Selection</b>\n\n"
-        f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
-        f"🔢 Range: <code>{job['start_id']} → {job['end_id']}</code>\n\n"
+        f"🔢 <b>Message Skip &amp; Range Selection</b>\n\n"
+        f"📂 <b>Chat:</b> <b>{html.escape(job['title'])}</b>\n"
+        f"🔢 <b>Range:</b> <mark>{job['start_id']} → {job['end_id']}</mark>\n\n"
         f"Select an option below to filter messages before starting:",
         markup,
     )
 
 
-async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, skip=None):
+async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, skip=None, is_channel: bool = False):
     try:
         source_chat = await context.bot.get_chat(chat_ref)
         title = source_chat.title or source_chat.username or str(chat_ref)
@@ -434,15 +491,16 @@ async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, s
         "rid": rid,
         "chat_id": cid,
         "title": title,
-        "start_id": start_id,
-        "end_id": end_id,
+        "start_id": max(1, start_id),
+        "end_id": max(1, end_id),
         "requester_id": user.id if user else 0,
-        "requester_name": user.full_name if user else "Anon Admin",
+        "requester_name": user.full_name if user else (f"{title} (Channel Admin)" if is_channel else "Anon Admin"),
         "requester_role": get_user_role_db(user.id) if user else "Admin",
         "prompt_chat": prompt_chat,
         "prompt_msg_id": None,
         "approval_chat": None,
         "approval_msg_id": None,
+        "is_channel": is_channel,
         "cancel": False,
         "state": "pending",
     }
@@ -458,16 +516,16 @@ async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, s
 
 async def _show_priority_menu(context, rid: str, job: dict):
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Priority Mode (Direct)", callback_data=f"idx_pr_dir_{rid}")],
-        [InlineKeyboardButton("🤝 Helper Pool (Round-Robin)", callback_data=f"idx_pr_hlp_{rid}")],
-        [InlineKeyboardButton("⛔ Cancel", callback_data=f"idx_cancel_{rid}")],
+        [styled_button("🚀 Priority Mode (Direct)", callback_data=f"idx_pr_dir_{rid}", style="success")],
+        [styled_button("🤝 Helper Pool (Round-Robin)", callback_data=f"idx_pr_hlp_{rid}", style="primary")],
+        [styled_button("⛔ Cancel", callback_data=f"idx_cancel_{rid}", style="danger")],
     ])
     await _edit_prompt(
         context, job,
-        f"⚡ <b>Delivery Priority Setup</b>\n\n"
-        f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
-        f"🔢 Range: <code>{job['start_id']} → {job['end_id']}</code>\n\n"
-        f"Select delivery mode:",
+        f"⚡ <b>Delivery &amp; Indexing Priority Setup</b>\n\n"
+        f"📂 <b>Chat:</b> <b>{html.escape(job['title'])}</b>\n"
+        f"🔢 <b>Range:</b> <mark>{job['start_id']} → {job['end_id']}</mark>\n\n"
+        f"Select indexing mode:",
         markup,
     )
 
@@ -494,6 +552,17 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg or not chat:
         return
 
+    is_channel = (chat.type == "channel")
+
+    # Deduplicate if both Main Bot and a Helper Bot are admins in the same channel/group
+    if chat.type != "private":
+        cmd_key = (int(chat.id), int(msg.message_id))
+        if cmd_key in _SEEN_CHANNEL_CMDS:
+            return
+        _SEEN_CHANNEL_CMDS.add(cmd_key)
+        if len(_SEEN_CHANNEL_CMDS) > 500:
+            _SEEN_CHANNEL_CMDS.clear()
+
     if user and user.id != anon_admin_id():
         role = get_user_role_db(user.id)
         if role not in INDEX_COMMAND_ACCESS:
@@ -507,25 +576,31 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await msg.reply_text("⛔ You don't have access to the Index command.")
             return
 
-    links, skip = _parse_args((msg.text or "").split()[1:])
+    raw_text = msg.text or msg.caption or ""
+    links, skip = _parse_args(raw_text.split()[1:])
     try:
         rng = _range_from_links(links)
     except ValueError:
         await msg.reply_text("❌ Both links must be from the same chat.")
         return
 
+    # Capture end_id before deleting the /index command message in channels/groups
+    cmd_end_id = max(1, (msg.message_id or 2) - 1)
+    if is_channel:
+        await _safe_delete(msg)
+
     if rng:
-        await _open_prompt(context, chat.id, user, rng[0], rng[1], rng[2], skip)
+        await _open_prompt(context, chat.id, user, rng[0], rng[1], rng[2], skip, is_channel=is_channel)
     elif chat.type != "private":
-        await _open_prompt(context, chat.id, user, chat.id, 1, msg.message_id - 1, skip)
+        await _open_prompt(context, chat.id, user, chat.id, 1, cmd_end_id, skip, is_channel=is_channel)
     else:
         context.user_data["idx_flow"] = {"step": "link", "skip": skip}
         await msg.reply_text(
-            "📚 <b>Index setup</b>\n\n"
+            "📚 <b>Index Setup Wizard</b>\n\n"
             "Send the <b>last message link</b> of the source chat, or forward its last message.\n"
             "To index a range, send <b>two links</b>: first message, then last message.\n\n"
-            "Example: <code>https://t.me/c/1234567890/150</code>\n"
-            "Send /index again to restart.",
+            "• Example: <mark>https://t.me/c/1234567890/150</mark>\n"
+            "• Send <code>/index</code> again to restart.",
             parse_mode="HTML",
         )
 
@@ -600,14 +675,16 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = q.from_user
-    role = get_user_role_db(user.id)
-    full = role in FULL_ACCESS
+    role = get_user_role_db(user.id) if user else "Admin"
+    full = (role in FULL_ACCESS) or (user and user.id == anon_admin_id())
     partial = role in APPROVAL_ACCESS
 
     if action == "cancel":
         job["cancel"] = True
         await q.answer("Indexing cancelled.")
         await _edit_prompt(context, job, f"⛔ Indexing of <b>{html.escape(job['title'])}</b> was cancelled.")
+        if job.get("is_channel"):
+            asyncio.create_task(_auto_delete_prompt(context.bot, job, 10))
         return
 
     if action.startswith("sk_"):
@@ -629,7 +706,7 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         job["priority_mode"] = mode
         if full:
             await q.answer("Starting index...")
-            await _edit_prompt(context, job, f"🚀 Starting index in {mode} mode...")
+            await _edit_prompt(context, job, f"🚀 Starting index in <mark>{mode}</mark> mode...")
             _begin(context, rid, job)
         elif partial:
             sent = await _send_approval(context, rid, job)

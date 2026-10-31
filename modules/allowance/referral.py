@@ -7,6 +7,7 @@ from modules.database.user_db import (
     add_quota_limits_db,
     get_referred_users_db,
 )
+from modules.utility.rich_ui import styled_button
 
 
 def process_referral(referrer_id: int, new_user_id: int):
@@ -64,11 +65,11 @@ async def process_referral_with_notification(*args, **kwargs):
         referrer_text = (
             f"👤 <b>New Referral Joined!</b>\n\n"
             f"🔗 <b>{html.escape(str(new_user_name))}</b> joined using your referral link.\n"
-            f"🎁 You have been awarded <b>+{referral_search_bonus()} Search</b> and <b>+{referral_request_bonus()} Request</b> allowance bonuses!"
+            f"🎁 You have been awarded <mark>+{referral_search_bonus()} Search</mark> and <mark>+{referral_request_bonus()} Request</mark> allowance bonuses!"
         )
         referrer_keyboard = [[
-            InlineKeyboardButton("📋 See my referrals", callback_data="my_referrals_callback"),
-            InlineKeyboardButton("🔗 Refer more", callback_data="refer_more_callback")
+            styled_button("📋 See my referrals", callback_data="my_referrals_callback", style="primary"),
+            styled_button("🔗 Refer more", callback_data="refer_more_callback", style="success"),
         ]]
         try:
             await context.bot.send_message(
@@ -82,9 +83,9 @@ async def process_referral_with_notification(*args, **kwargs):
 
         new_user_text = (
             "🎁 <b>Referral Bonus Claimed!</b>\n\n"
-            f"Since you joined from a referral link, you got <b>+{referral_search_bonus()} bonus search and +{referral_request_bonus()} bonus request</b> allowances!"
+            f"Since you joined from a referral link, you got <mark>+{referral_search_bonus()} bonus search and +{referral_request_bonus()} bonus request</mark> allowances!"
         )
-        new_user_keyboard = [[InlineKeyboardButton("🚀 Refer and earn more bonus", callback_data="refer_more_callback")]]
+        new_user_keyboard = [[styled_button("🚀 Refer and earn more bonus", callback_data="refer_more_callback", style="success")]]
         try:
             await context.bot.send_message(
                 chat_id=new_user_id,
@@ -111,11 +112,14 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🔗 <b>Your Referral Link</b>\n\n"
         "Share this link with your friends. Whenever someone starts the bot using your link, "
-        f"both you and your friend will receive <b>+{referral_search_bonus()} Search</b> and <b>+{referral_request_bonus()} Request</b> bonuses!\n\n"
+        f"both you and your friend will receive <mark>+{referral_search_bonus()} Search</mark> and <mark>+{referral_request_bonus()} Request</mark> bonuses!\n\n"
         f"📋 <code>{html.escape(referral_link)}</code>"
     )
 
-    keyboard = [[InlineKeyboardButton("📋 Copy Link", url=referral_link)]]
+    keyboard = [
+        [styled_button("📋 Copy Referral Link", copy_text=referral_link, style="success")],
+        [styled_button("🔗 Open Link", url=referral_link, style="primary")],
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
         await update.callback_query.answer()
@@ -133,10 +137,14 @@ async def my_referrals_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     text = (
         "📋 <b>Your Referral Statistics</b>\n\n"
-        f"• <b>Total Invites:</b> <code>{stats['total_invites']}</code> users\n"
-        f"• <b>Total Bonus Earned:</b> <code>{html.escape(str(referral_earned_label(stats['total_invites'])))}</code>\n\n"
+        f"• <b>Total Invites:</b> <mark>{stats['total_invites']}</mark> users\n"
+        f"• <b>Total Bonus Earned:</b> <mark>{html.escape(str(referral_earned_label(stats['total_invites'])))}</mark>\n\n"
         "Keep sharing your link using <code>/refer</code> to earn more allowances!"
     )
+    markup = InlineKeyboardMarkup([
+        [styled_button("📤 Refer More Friends", callback_data="refer_more_callback", style="success")],
+        [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
+    ])
     if update.callback_query:
         await update.callback_query.answer()
-    await msg.reply_text(text, parse_mode="HTML")
+    await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)

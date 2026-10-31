@@ -49,6 +49,10 @@ from telegram.ext import (  # noqa: E402
     filters,
 )
 
+# Install Telegram Bot API 10.3 Rich Formatting & Colorful Button patches globally
+from modules.utility.rich_ui import install_rich_ui_patches  # noqa: E402
+install_rich_ui_patches()
+
 from modules.start.start_handler import start_command, menu_callback_router  # noqa: E402
 from modules.help.handlers import help_command, help_callback_handler  # noqa: E402
 from modules.support.handlers import support_command, support_callback_handler  # noqa: E402
@@ -95,7 +99,6 @@ from modules.utility.check_helpers import (
     checkhelpers_command, publish_command, publish_callback_handler,
     sh_command, update_zip_command, handle_update_zip_doc
 )  # noqa: E402
-  # noqa: E402
 from modules.database.user_db import get_user_role_db  # noqa: E402
 import html  # noqa: E402
 from modules.log.startup_log import send_startup_notification, error_handler, report_fatal_sync  # noqa: E402
@@ -123,9 +126,9 @@ async def _helper_start_command(update, context):
     u_name = html.escape(user.first_name or "Friend")
     b_name = html.escape(bot_name())
     await msg.reply_text(
-        f"👋 Hi <b>{u_name}</b>! I am a <b>{b_name}</b> helper delivery bot.\n\n"
-        "✅ You have started me — now whenever you click a search result in the main bot, "
-        "I can send the files directly to your PM as well as the posting channel!",
+        f"👋 Hi <b>{u_name}</b>! I am a <mark>{b_name}</mark> helper delivery &amp; indexing bot.\n\n"
+        "✅ <b>Ready for Instant Delivery:</b> Whenever you tap a book in the main bot, "
+        "I will deliver the files directly to your PM as well as the posting channel!",
         parse_mode="HTML",
     )
 
@@ -211,7 +214,8 @@ async def _helper_error_handler(update, context):
 
 
 async def _start_helper_apps() -> list:
-    """Starts polling on configured helper bots for /start deep-links and direct DM file indexing."""
+    """Starts polling on configured helper bots for /start deep-links, direct DM file indexing,
+    and channel/group /index and /id commands."""
     if not helper_polling_enabled():
         logger.info("Helper bot polling skipped in %s mode (shared helper bots remain active for API delivery).", bot_mode())
         return []
@@ -220,7 +224,34 @@ async def _start_helper_apps() -> list:
         try:
             happ = ApplicationBuilder().token(tok).build()
             happ.add_handler(CommandHandler("start", _helper_start_command))
-            happ.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.Document.ALL | filters.AUDIO), _helper_file_indexing_handler))
+            happ.add_handler(CommandHandler("index", index_command))
+            happ.add_handler(CommandHandler("id", id_command))
+            happ.add_handler(
+                MessageHandler(
+                    filters.ChatType.CHANNEL & filters.Regex(r"^/index(?:@\w+)?(?:\s|$)"),
+                    index_command,
+                )
+            )
+            happ.add_handler(
+                MessageHandler(
+                    filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?(?:\s|$)"),
+                    id_command,
+                )
+            )
+            happ.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_"))
+            happ.add_handler(
+                MessageHandler(
+                    filters.ChatType.PRIVATE & (filters.Document.ALL | filters.AUDIO),
+                    _helper_file_indexing_handler,
+                )
+            )
+            happ.add_handler(
+                MessageHandler(
+                    filters.ChatType.PRIVATE & ~filters.COMMAND,
+                    index_flow_handler,
+                ),
+                group=1,
+            )
             happ.add_error_handler(_helper_error_handler)
             await happ.initialize()
             await happ.start()
@@ -346,7 +377,7 @@ def main():
     application.add_handler(CommandHandler(["volunteers", "vols", "volunteerlist"], volunteers_command))
     application.add_handler(CommandHandler(["promoters", "promos", "promoterlist"], promoters_command))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/index(?:@\w+)?(?:\s|$)"), index_command))
-    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?$"), id_command))
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.Regex(r"^/id(?:@\w+)?(?:\s|$)"), id_command))
 
     # Callback Query Routers
     application.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_"))
@@ -359,12 +390,12 @@ def main():
     )
     application.add_handler(CallbackQueryHandler(help_callback_handler, pattern=r"^(help_|help_button|help_menu)"))
     application.add_handler(CallbackQueryHandler(support_callback_handler, pattern=r"^(support_|quiz_ans_)"))
-    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|search_page_|search_direct_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
+    application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|sp_|sf_|sa_|search_page_|search_direct_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
     application.add_handler(CallbackQueryHandler(request_callback_handler, pattern=r"^req_"))
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^es_"))
     application.add_handler(CallbackQueryHandler(publish_callback_handler, pattern=r"^publish_"))
 
-        # Storage Group Live Caption Edit Sync (Admin manual edits)
+    # Storage Group Live Caption Edit Sync (Admin manual edits)
     application.add_handler(
         MessageHandler(
             filters.UpdateType.EDITED_MESSAGE & (filters.Document.ALL | filters.AUDIO),

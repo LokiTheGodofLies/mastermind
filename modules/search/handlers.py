@@ -1,15 +1,17 @@
 import asyncio
 import html
+import logging
 import re
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
     from telegram.ext import ContextTypes
 except ImportError:
     class InlineKeyboardButton:
-        def __init__(self, text, callback_data=None, url=None):
+        def __init__(self, text, callback_data=None, url=None, api_kwargs=None):
             self.text = text
             self.callback_data = callback_data
             self.url = url
+            self.api_kwargs = api_kwargs or {}
     class InlineKeyboardMarkup:
         def __init__(self, inline_keyboard):
             self.inline_keyboard = inline_keyboard
@@ -31,6 +33,9 @@ from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
 from modules.indexing.book_index import format_series_label, parse_title_and_series
 from modules.search.delivery import deliver_file_dual
+from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
+
+logger = logging.getLogger(__name__)
 
 
 def is_search_topic_message(msg) -> bool:
@@ -121,11 +126,12 @@ async def perform_search(
     filter_mode: str = "all",
 ):
     """
-    Renders search results in structured catalog format:
-    Title
-    Series name or standalone
-    Author name
-    File size | Extension — download (embedded deep-link)
+    Renders search results in Bot API 10.3 Rich Format with colorful in-text buttons:
+      Title
+      Series name or standalone
+      Author name
+      <mark>File size</mark> | <mark>.ext</mark>
+      <tg-button-row> [📥 Download #N] [⚡ Direct Link] </tg-button-row>
     """
     user = update.effective_user
     msg = update.effective_message
@@ -148,11 +154,17 @@ async def perform_search(
             "⚠️ <b>Daily search quota reached!</b>\n\n"
             "Use <code>/quota</code> to view your limits or <code>/refer</code> to invite friends and earn bonus searches."
         )
+        quota_kb = InlineKeyboardMarkup([
+            [
+                styled_button("📊 Check Quota", callback_data="quota", style="primary"),
+                styled_button("🎁 Refer & Earn", callback_data="refer_more_callback", style="success"),
+            ]
+        ])
         if update.callback_query:
             await update.callback_query.answer("Daily search quota reached!", show_alert=True)
-            await update.callback_query.message.edit_text(quota_msg, parse_mode="HTML")
+            await update.callback_query.message.edit_text(quota_msg, parse_mode="HTML", reply_markup=quota_kb)
         elif msg:
-            await msg.reply_text(quota_msg, parse_mode="HTML")
+            await msg.reply_text(quota_msg, parse_mode="HTML", reply_markup=quota_kb)
         return
 
     all_rows = search_files_db(search_term)
@@ -196,10 +208,10 @@ async def perform_search(
     bot_title = getattr(context.bot, "first_name", None) or bot_name()
     esc_term = html.escape(search_term)
 
-    # Build Header
+    # Build Rich Header
     lines = [
         f"🔍 <b>Search Results — {html.escape(bot_title)} Library Bot</b>",
-        f"🔎 <b>Query:</b> <code>{esc_term}</code> | <b>Filter:</b> {filter_label_str} ({total_matches} matches)\n",
+        f"🔎 <b>Query:</b> <mark>{esc_term}</mark> | <b>Filter:</b> <mark>{filter_label_str}</mark> (<b>{total_matches}</b> matches)\n",
     ]
 
     start_idx = (page - 1) * per_page
@@ -211,57 +223,58 @@ async def perform_search(
             row_id_val = str(row["id"])
             dl_url = f"https://t.me/{bot_uname}?start=dl_{row_id_val}"
 
-            lines.append(f"{idx}. <b>{html.escape(title)}</b>")
+            lines.append(f"<b>{idx}. {html.escape(title)}</b>")
             lines.append(f"📚 <i>{html.escape(series)}</i>")
             lines.append(f"✍️ <code>{html.escape(author)}</code>")
-            lines.append(f"📂 <code>{html.escape(size_str)}</code> | <code>.{html.escape(ext)}</code> — <a href=\"{dl_url}\">download</a>\n")
+            lines.append(f"📂 <mark>{html.escape(size_str)}</mark> | <mark>.{html.escape(ext)}</mark>")
+            lines.append(
+                tg_button_row_html(
+                    [
+                        tg_button_html(f"📥 Download #{idx}", callback_data=f"file_dl_{row_id_val}", style="success"),
+                        tg_button_html("⚡ Direct Link", url=dl_url, style="primary"),
+                    ],
+                    align="left",
+                )
+            )
+            lines.append("")
     else:
-        lines.append(f"• No files found matching <code>{esc_term}</code> in {filter_label_str}.\n")
+        lines.append(f"• No files found matching <mark>{esc_term}</mark> in <b>{filter_label_str}</b>.\n")
 
     text_body = "\n".join(lines).strip()
 
     # Short query clip to fit callback data inside 64 bytes
     clip_q = search_term[:20]
 
-    # Build Buttons
+    # Build Bottom Navigation & Filter Controls
     keyboard = []
 
-    # Row 0: Quick inline 1-tap download buttons for page items
-    if page_items:
-        dl_row = []
-        for idx, row in enumerate(page_items, start=start_idx + 1):
-            dl_row.append(InlineKeyboardButton(f"📥 {idx}", callback_data=f"file_dl_{row['id']}"))
-            if len(dl_row) == 5:
-                keyboard.append(dl_row)
-                dl_row = []
-        if dl_row:
-            keyboard.append(dl_row)
-
-    # Row 1: Pagination
+    # Row 1: Pagination with DisabledButton indicator
     if total_pages > 1:
         nav = []
         if page > 1:
-            nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"sp_{filter_mode}_{page - 1}_{clip_q}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+            nav.append(styled_button("◀️ Prev", callback_data=f"sp_{filter_mode}_{page - 1}_{clip_q}", style="primary"))
+        nav.append(styled_button(f"📄 {page}/{total_pages}", callback_data="noop", disabled=True))
         if page < total_pages:
-            nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"sp_{filter_mode}_{page + 1}_{clip_q}"))
+            nav.append(styled_button("Next ▶️", callback_data=f"sp_{filter_mode}_{page + 1}_{clip_q}", style="primary"))
         keyboard.append(nav)
     else:
-        keyboard.append([InlineKeyboardButton("1/1", callback_data="noop")])
+        keyboard.append([styled_button("📄 1/1", callback_data="noop", disabled=True)])
 
     # Row 2: Filters & Send All
     ebk_target = "all" if filter_mode == "ebook" else "ebook"
     aud_target = "all" if filter_mode == "audio" else "audio"
+    ebk_lbl = "📚 Ebooks ✅" if filter_mode == "ebook" else "📚 Ebooks"
+    aud_lbl = "🎧 Audio ✅" if filter_mode == "audio" else "🎧 Audio"
 
     action_row = [
-        InlineKeyboardButton("📚", callback_data=f"sf_{ebk_target}_1_{clip_q}"),
-        InlineKeyboardButton("📨 Send All", callback_data=f"sa_{filter_mode}_{page}_{clip_q}"),
-        InlineKeyboardButton("🎧", callback_data=f"sf_{aud_target}_1_{clip_q}"),
+        styled_button(ebk_lbl, callback_data=f"sf_{ebk_target}_1_{clip_q}", style="success" if filter_mode == "ebook" else "primary"),
+        styled_button("📨 Send All", callback_data=f"sa_{filter_mode}_{page}_{clip_q}", style="success"),
+        styled_button(aud_lbl, callback_data=f"sf_{aud_target}_1_{clip_q}", style="success" if filter_mode == "audio" else "primary"),
     ]
     keyboard.append(action_row)
 
     if not in_topic:
-        keyboard.append([InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")])
+        keyboard.append([styled_button("« Back to Search Menu", callback_data="search_menu", style="primary")])
 
     markup = InlineKeyboardMarkup(keyboard)
 
@@ -307,13 +320,13 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "search_script",
         default=(
             "🔍 <b>File Search Engine</b>\n\n"
-            "You can either join our Search topic and just type the book title there, or search right here in private chat "
-            "by providing a keyword after the search command or replying to a message with /search."
+            "You can either join our <b>Search Topic</b> and simply type the book title there, or search right here in private chat "
+            "by sending <code>/search &lt;book title or author&gt;</code>."
         ),
     )
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 Join Search Topic", callback_data="join_search_group_quiz")],
-        [InlineKeyboardButton("« Back to Start", callback_data="start_menu")],
+        [styled_button("👥 Join Search Topic", callback_data="join_search_group_quiz", style="success")],
+        [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
     ])
     if update.callback_query:
         await update.callback_query.message.edit_text(text=txt, reply_markup=kb, parse_mode="HTML")
@@ -330,11 +343,11 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
     if d == "join_search_group_quiz":
         await q.message.edit_text(
-            "📝 <b>Search Topic Invite</b>\n\nDo you want to join our group and use the Search topic?",
+            "📝 <b>Search Topic Invite</b>\n\nDo you want to join our community group and use the live Search topic?",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Yes, Generate Invite Link", callback_data="generate_group_invite")],
-                [InlineKeyboardButton("« Back", callback_data="search_menu")],
+                [styled_button("✅ Yes, Generate Invite Link", callback_data="generate_group_invite", style="success")],
+                [styled_button("« Back", callback_data="search_menu", style="primary")],
             ]),
         )
         await q.answer()
@@ -346,19 +359,19 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await q.message.edit_text(
                 "❌ <b>Search topic is not configured.</b>\n\nPlease contact the administrator.",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]),
+                reply_markup=InlineKeyboardMarkup([[styled_button("« Back to Search Menu", callback_data="search_menu", style="primary")]]),
             )
             return
         try:
             link = await context.bot.create_chat_invite_link(chat_id=gid, member_limit=1)
-            rows = []
+            rows = [[styled_button("🚀 Join Group (Single-Use Invite)", url=link.invite_link, style="success")]]
             t_url = _topic_link()
             if t_url:
-                rows.append([InlineKeyboardButton("📍 Open Search Topic (after joining)", url=t_url)])
-            rows.append([InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")])
+                rows.append([styled_button("📍 Open Search Topic (after joining)", url=t_url, style="primary")])
+            rows.append([styled_button("« Back to Search Menu", callback_data="search_menu", style="primary")])
             await q.message.edit_text(
-                f"🎉 <b>Here is your single-use invite link:</b>\n\n{link.invite_link}\n\n"
-                "After joining, open the <b>Search</b> topic and just type the book title or author.",
+                "🎉 <b>Your Single-Use Invite Link is Ready!</b>\n\n"
+                "Tap the green button below to join, then open the <mark>Search</mark> topic and type any book title or author.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(rows),
             )
@@ -366,11 +379,15 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await q.message.edit_text(
                 f"❌ <b>Could not generate invite link.</b>\n\nReason: <code>{html.escape(str(e))}</code>",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to Search Menu", callback_data="search_menu")]]),
+                reply_markup=InlineKeyboardMarkup([[styled_button("« Back to Search Menu", callback_data="search_menu", style="primary")]]),
             )
 
     elif d == "search_menu":
         await search_command(update, context)
+
+    elif d.startswith("search_direct_"):
+        query = d.replace("search_direct_", "", 1)
+        await perform_search(update, context, query, 1, filter_mode="all")
 
     elif d == "noop":
         await q.answer("Page indicator")
@@ -437,7 +454,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                     pass
 
             await q.message.reply_text(
-                f"✅ <b>Send All Complete:</b> Successfully queued <code>{delivered_count}</code> file(s) for dual delivery!",
+                f"✅ <b>Send All Complete:</b> Successfully queued <mark>{delivered_count}</mark> file(s) for dual delivery!",
                 parse_mode="HTML",
             )
 
@@ -462,7 +479,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             except Exception:
                 pass
             support_link = creator_dm_link()
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=support_link)]]) if support_link else None
+            markup = InlineKeyboardMarkup([[styled_button("💬 Contact Support", url=support_link, style="primary")]]) if support_link else None
             user_msg = (
                 "⚠️ <b>We encountered an error while sending your file.</b>\n\n"
                 "Our administrators have been notified and it will be resolved shortly.\n"

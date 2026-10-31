@@ -13,10 +13,11 @@ try:
     from telegram.ext import ContextTypes
 except ImportError:
     class InlineKeyboardButton:
-        def __init__(self, text, callback_data=None, url=None):
+        def __init__(self, text, callback_data=None, url=None, api_kwargs=None):
             self.text = text
             self.callback_data = callback_data
             self.url = url
+            self.api_kwargs = api_kwargs or {}
     class InlineKeyboardMarkup:
         def __init__(self, inline_keyboard):
             self.inline_keyboard = inline_keyboard
@@ -28,19 +29,116 @@ except ImportError:
 from config import (
     bot_name,
     helper_bot_tokens,
+    index_channel_id,
+    logger_group_id,
     posting_channel_id,
     storage_group_id,
 )
 from modules.database.user_db import is_admin_or_owner, is_creator
+from modules.utility.rich_ui import styled_button
 
 logger = logging.getLogger(__name__)
 
 
+async def _audit_single_bot_permissions(
+    bot_inst: Bot,
+    label_prefix: str,
+    storage_id: int | None,
+    chan_id: int | None,
+    idx_chan_id: int | None,
+    log_gid: int | None,
+) -> tuple[bool, list[str]]:
+    """Audits a single bot (Main Bot or Helper Bot) across Storage Group, Posting Channel,
+    Index Logs Channel, and Logger Group."""
+    bot_ok = True
+    lines: list[str] = []
+    me = await bot_inst.get_me()
+    username = me.username or label_prefix
+    lines.append(f"<b>{label_prefix} — @{html.escape(username)} (ID: <code>{me.id}</code>)</b>")
+
+    # 1. Storage Group
+    if storage_id:
+        try:
+            sm = await bot_inst.get_chat_member(int(storage_id), me.id)
+            if sm.status in ("member", "administrator", "creator"):
+                lines.append("• 📦 Storage Group: <mark>✅ Present</mark>")
+            else:
+                bot_ok = False
+                lines.append(f"• 📦 Storage Group: ❌ Not a member (status: <code>{sm.status}</code>)")
+        except Exception as exc:
+            bot_ok = False
+            lines.append(f"• 📦 Storage Group: ❌ Error (<code>{html.escape(str(exc))}</code>)")
+    else:
+        lines.append("• 📦 Storage Group: ⚠️ Not configured")
+
+    # 2. Posting Channel
+    if chan_id:
+        try:
+            pm = await bot_inst.get_chat_member(int(chan_id), me.id)
+            if pm.status in ("administrator", "creator"):
+                can_post = getattr(pm, "can_post_messages", True)
+                can_delete = getattr(pm, "can_delete_messages", True)
+                perms_detail = [
+                    "Post: ✅" if can_post else "Post: ❌",
+                    "Delete: ✅" if can_delete else "Delete: ❌",
+                ]
+                if not (can_post and can_delete):
+                    bot_ok = False
+                lines.append(f"• 📢 Posting Channel: <mark>✅ Admin</mark> ({', '.join(perms_detail)})")
+            else:
+                bot_ok = False
+                lines.append(f"• 📢 Posting Channel: ❌ Not admin (status: <code>{pm.status}</code>) — must be Admin with Post &amp; Delete rights")
+        except Exception as exc:
+            bot_ok = False
+            lines.append(f"• 📢 Posting Channel: ❌ Not accessible (<code>{html.escape(str(exc))}</code>)")
+    else:
+        lines.append("• 📢 Posting Channel: ⚠️ Not configured")
+
+    # 3. Index Logs Channel (must be present & Admin with Post Messages rights)
+    if idx_chan_id:
+        try:
+            im = await bot_inst.get_chat_member(int(idx_chan_id), me.id)
+            if im.status in ("administrator", "creator"):
+                can_post = getattr(im, "can_post_messages", True)
+                if can_post:
+                    lines.append("• 📥 Index Logs Channel: <mark>✅ Admin (Post: ✅)</mark>")
+                else:
+                    bot_ok = False
+                    lines.append("• 📥 Index Logs Channel: ❌ Admin but missing Post Messages permission")
+            elif im.status == "member":
+                bot_ok = False
+                lines.append("• 📥 Index Logs Channel: ⚠️ Member only — promote to Admin with Post Messages rights")
+            else:
+                bot_ok = False
+                lines.append(f"• 📥 Index Logs Channel: ❌ Not present (status: <code>{im.status}</code>) — add as Admin")
+        except Exception as exc:
+            bot_ok = False
+            lines.append(f"• 📥 Index Logs Channel: ❌ Not accessible (<code>{html.escape(str(exc))}</code>) — add bot as Admin")
+    else:
+        lines.append("• 📥 Index Logs Channel: ⚠️ PUBLIC_/TESTING_INDEX_CHANNEL_ID not configured")
+
+    # 4. Logger Supergroup (for Index Topic 590/12 & Error Topic 595/17)
+    if log_gid:
+        try:
+            lm = await bot_inst.get_chat_member(int(log_gid), me.id)
+            if lm.status in ("member", "administrator", "creator"):
+                lines.append("• 🪵 Logger Group: <mark>✅ Present</mark>")
+            else:
+                bot_ok = False
+                lines.append(f"• 🪵 Logger Group: ❌ Not a member (status: <code>{lm.status}</code>)")
+        except Exception as exc:
+            bot_ok = False
+            lines.append(f"• 🪵 Logger Group: ❌ Not accessible (<code>{html.escape(str(exc))}</code>)")
+
+    return bot_ok, lines
+
+
 # ---------------------------------------------------------------------------
-# Helper Bot Audit Command (/checkhelpers)
+# Helper & Main Bot Audit Command (/checkhelpers)
 # ---------------------------------------------------------------------------
 async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command (/checkhelpers) to audit helper bot presence and permissions."""
+    """Admin command (/checkhelpers) to audit Main Bot and Helper Bots across Storage Group,
+    Posting Channel, Index Logs Channel, and Logger Group."""
     msg = update.effective_message
     user = update.effective_user
     if not msg or not user or not is_admin_or_owner(user.id):
@@ -49,75 +147,69 @@ async def checkhelpers_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     tokens = helper_bot_tokens()
-    if not tokens:
-        await msg.reply_text("⚠️ No helper bot tokens configured in PUBLIC_/TESTING_HELPER_BOT_TOKENS.")
-        return
-
     storage_id = storage_group_id()
     chan_id = posting_channel_id()
+    idx_chan_id = index_channel_id()
+    log_gid = logger_group_id()
 
-    status_msg = await msg.reply_text("🔍 Auditing configured helper bots...")
-    lines = [f"🤖 <b>Helper Bots Permission Audit ({len(tokens)} configured)</b>\n"]
+    status_msg = await msg.reply_text("🔍 Auditing Main Bot and configured Helper Bots across all channels...")
+    lines = [
+        f"🤖 <b>Bot Fleet &amp; Channel Permission Audit</b>",
+        f"• Helper Bots Configured: <mark>{len(tokens)}</mark>\n",
+    ]
 
     all_ok = True
-    for i, token in enumerate(tokens, 1):
-        try:
-            hbot = Bot(token)
-            me = await hbot.get_me()
-            username = me.username or f"Helper #{i}"
-            lines.append(f"<b>{i}. @{username} (ID: <code>{me.id}</code>)</b>")
 
-            if storage_id:
-                try:
-                    sm = await hbot.get_chat_member(int(storage_id), me.id)
-                    if sm.status in ("member", "administrator", "creator"):
-                        lines.append("• Storage Group: ✅ Present")
-                    else:
-                        all_ok = False
-                        lines.append(f"• Storage Group: ❌ Not a member (status: {sm.status})")
-                except Exception as exc:
-                    all_ok = False
-                    lines.append(f"• Storage Group: ❌ Error ({html.escape(str(exc))})")
-            else:
-                lines.append("• Storage Group: ⚠️ PUBLIC_/TESTING_STORAGE_GROUP_ID not configured")
-
-            if chan_id:
-                try:
-                    pm = await hbot.get_chat_member(int(chan_id), me.id)
-                    if pm.status in ("administrator", "creator"):
-                        can_post = getattr(pm, "can_post_messages", True)
-                        can_delete = getattr(pm, "can_delete_messages", True)
-                        perms_detail = []
-                        if can_post:
-                            perms_detail.append("Post: ✅")
-                        else:
-                            perms_detail.append("Post: ❌")
-                            all_ok = False
-                        if can_delete:
-                            perms_detail.append("Delete: ✅")
-                        else:
-                            perms_detail.append("Delete: ❌")
-                            all_ok = False
-                        lines.append(f"• Posting Channel: ✅ Admin ({', '.join(perms_detail)})")
-                    else:
-                        all_ok = False
-                        lines.append(f"• Posting Channel: ❌ Not admin (status: {pm.status}) — must be Admin with Post & Delete rights")
-                except Exception as exc:
-                    all_ok = False
-                    lines.append(f"• Posting Channel: ❌ Not accessible ({html.escape(str(exc))})")
-            else:
-                lines.append("• Posting Channel: ⚠️ PUBLIC_/TESTING_POSTING_CHANNEL_ID not configured")
-
-        except Exception as exc:
+    # 1. Audit Main Bot first
+    try:
+        m_ok, m_lines = await _audit_single_bot_permissions(
+            context.bot,
+            "👑 Main Bot",
+            storage_id,
+            chan_id,
+            idx_chan_id,
+            log_gid,
+        )
+        if not m_ok:
             all_ok = False
-            lines.append(f"• Token (…{token[-4:]}): ❌ Unreachable ({html.escape(str(exc))})")
-
+        lines.extend(m_lines)
         lines.append("")
+    except Exception as exc:
+        all_ok = False
+        lines.append(f"<b>👑 Main Bot:</b> ❌ Audit Error (<code>{html.escape(str(exc))}</code>)\n")
+
+    # 2. Audit every configured Helper Bot
+    if not tokens:
+        all_ok = False
+        lines.append("⚠️ No helper bot tokens configured in <code>PUBLIC_/TESTING_HELPER_BOT_TOKENS</code>.\n")
+    else:
+        for i, token in enumerate(tokens, 1):
+            try:
+                async with Bot(token) as hbot:
+                    h_ok, h_lines = await _audit_single_bot_permissions(
+                        hbot,
+                        f"🤝 Helper #{i}",
+                        storage_id,
+                        chan_id,
+                        idx_chan_id,
+                        log_gid,
+                    )
+                if not h_ok:
+                    all_ok = False
+                lines.extend(h_lines)
+            except Exception as exc:
+                all_ok = False
+                lines.append(f"• 🤝 Helper #{i} (token …{token[-4:]}): ❌ Unreachable (<code>{html.escape(str(exc))}</code>)")
+            lines.append("")
 
     if all_ok:
-        lines.append("🎉 <b>All helper bots are correctly configured and have required permissions!</b>")
+        lines.append("🎉 <b>All bots (Main Bot + Helper Bots) are present and have full permissions in Storage Group, Posting Channel, Index Logs Channel, and Logger Group!</b>")
     else:
-        lines.append("⚠️ <b>Issues detected!</b> Please ensure helper bots are added to the storage group and made Administrators with <b>Post Messages</b> and <b>Delete Messages</b> rights in the posting channel.")
+        lines.append(
+            "⚠️ <b>Action Required:</b> Ensure the Main Bot and every Helper Bot are added to the "
+            "<b>Storage Group</b>, <b>Logger Group</b>, and promoted to <b>Administrators</b> with "
+            "<b>Post Messages</b> &amp; <b>Delete Messages</b> rights in both the <b>Posting Channel</b> and <b>Index Logs Channel</b>."
+        )
 
     await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
 
@@ -166,14 +258,14 @@ async def publish_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         f"🚀 <b>Publish to Production — {bot_name()} Main Bot</b>\n\n"
-        "This will merge the tested & verified <code>test</code> branch into <code>main</code> "
+        "This will merge the tested &amp; verified <mark>test</mark> branch into <mark>main</mark> "
         "and push to both <code>loki main</code> and <code>origin main</code>, triggering "
         "automatic deployment on Render's Public Books Bot service.\n\n"
         "⚠️ <i>Please confirm to proceed with production deployment:</i>"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Confirm Publish to Main", callback_data="publish_confirm")],
-        [InlineKeyboardButton("⛔ Cancel", callback_data="publish_cancel")],
+        [styled_button("🚀 Confirm Publish to Main", callback_data="publish_confirm", style="success")],
+        [styled_button("⛔ Cancel", callback_data="publish_cancel", style="danger")],
     ])
     await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
 
@@ -268,11 +360,11 @@ async def publish_callback_handler(update: Update, context: ContextTypes.DEFAULT
             card = (
                 "🎉 <b>Successfully Published to Production!</b>\n\n"
                 "📦 <b>Repository:</b> <code>LokiTheGodofLies/mastermind</code>\n"
-                "🌿 <b>Branch:</b> <code>main</code> (Production)\n"
+                "🌿 <b>Branch:</b> <mark>main</mark> (Production)\n"
                 f"📝 <b>Commit:</b> <code>{html.escape(commit_info)}</code>\n"
                 f"⏰ <b>Timestamp:</b> <code>{now_ist}</code>\n\n"
                 "⚡ Render Public Books Bot deployment triggered automatically!\n"
-                f"<pre>{html.escape(full_log[-500:]) if full_log else 'Pushed test:main successfully.'}</pre>"
+                f"<blockquote expandable>{html.escape(full_log[-800:]) if full_log else 'Pushed test:main successfully.'}</blockquote>"
             )
             await q.edit_message_text(card, parse_mode="HTML")
         else:
@@ -517,11 +609,11 @@ async def _process_update_zip(update: Update, context: ContextTypes.DEFAULT_TYPE
             card = (
                 "🎉 <b>Bot Updated Successfully!</b>\n\n"
                 "📦 <b>Repository:</b> <code>LokiTheGodofLies/mastermind</code>\n"
-                f"🌿 <b>Branch:</b> <code>{html.escape(current_branch)}</code>\n"
+                f"🌿 <b>Branch:</b> <mark>{html.escape(current_branch)}</mark>\n"
                 f"📝 <b>Commit:</b> <code>{html.escape(commit_info)}</code>\n"
                 f"⏰ <b>Timestamp:</b> <code>{now_ist}</code>\n\n"
                 f"• {gh_token_status}\n\n"
-                f"<pre>{html.escape(log[-600:]) if log else 'All files compiled successfully with 0 errors.'}</pre>"
+                f"<blockquote expandable>{html.escape(log[-800:]) if log else 'All files compiled successfully with 0 errors.'}</blockquote>"
             )
             await status_msg.edit_text(card, parse_mode="HTML")
         else:

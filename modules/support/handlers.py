@@ -3,6 +3,7 @@ from configs import bot_name
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from modules.ban.ban import get_support_chat_id
+from modules.utility.rich_ui import styled_button
 
 # The 10 questions and their correct answers (True = Yes, False = No)
 QUIZ_QUESTIONS = [
@@ -18,6 +19,7 @@ QUIZ_QUESTIONS = [
     ("10. Can you submit complaints here?", True),
 ]
 
+
 async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Triggered when a user clicks 'Contact Support & Appeal' or runs /support.
@@ -29,14 +31,15 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "support chat safe and protected from unnecessary/irrelevant questions, "
         "spam, chats, and attacks, you must pass a quick verification quiz first."
     )
-    
-    keyboard = [[InlineKeyboardButton("🚀 Start Verification Quiz", callback_data="support_start_quiz")]]
+
+    keyboard = [[styled_button("🚀 Start Verification Quiz", callback_data="support_start_quiz", style="success")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     if update.message:
         await update.message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
     elif update.callback_query:
         await update.callback_query.message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
+
 
 async def support_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles all callback queries related to the support quiz flow."""
@@ -53,14 +56,14 @@ async def support_callback_handler(update: Update, context: ContextTypes.DEFAULT
     elif data.startswith("quiz_ans_"):
         user_step = context.user_data.get("quiz_step", 0)
         user_choice = True if data == "quiz_ans_yes" else False
-        
+
         expected_ans = QUIZ_QUESTIONS[user_step][1]
-        
+
         if user_choice == expected_ans:
             # Correct answer! Advance step
             user_step += 1
             context.user_data["quiz_step"] = user_step
-            
+
             if user_step < len(QUIZ_QUESTIONS):
                 await send_quiz_question(query, context, step=user_step)
             else:
@@ -75,28 +78,30 @@ async def support_callback_handler(update: Update, context: ContextTypes.DEFAULT
                 "the quiz has been reset from the beginning.\n\n"
                 "Let's try again."
             )
-            keyboard = [[InlineKeyboardButton("🔄 Restart Quiz", callback_data="support_start_quiz")]]
+            keyboard = [[styled_button("🔄 Restart Quiz", callback_data="support_start_quiz", style="primary")]]
             await query.message.edit_text(fail_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
+
 async def send_quiz_question(query, context, step: int):
-    """Sends the current question with Yes/No inline buttons."""
+    """Sends the current question with colorful Yes/No inline buttons."""
     question_text, _ = QUIZ_QUESTIONS[step]
     text = (
-        f"📝 <b>Support Verification Quiz ({step + 1}/10)</b>\n\n"
+        f"📝 <b>Support Verification Quiz (<mark>{step + 1}/10</mark>)</b>\n\n"
         f"{question_text}"
     )
     keyboard = [
         [
-            InlineKeyboardButton("✅ Yes", callback_data="quiz_ans_yes"),
-            InlineKeyboardButton("❌ No", callback_data="quiz_ans_no")
+            styled_button("✅ Yes", callback_data="quiz_ans_yes", style="success"),
+            styled_button("❌ No", callback_data="quiz_ans_no", style="danger"),
         ]
     ]
     await query.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
+
 async def finalize_quiz_success(query, context):
     """Generates a single-use invite link for the support chat upon passing the quiz."""
     support_chat_id = get_support_chat_id()
-    
+
     if not support_chat_id:
         await query.message.edit_text(
             "✅ <b>Quiz Passed Successfully!</b>\n\n"
@@ -112,15 +117,14 @@ async def finalize_quiz_success(query, context):
             member_limit=1,
             creates_join_request=False
         )
-        
+
         success_text = (
             "🎉 <b>Congratulations! You passed the verification quiz.</b>\n\n"
-            "Here is your secure, single-use invite link to join the support chat. "
-            "Note that this link can only be used once."
+            "Tap the green button below to join the support chat using your single-use invite link."
         )
-        keyboard = [[InlineKeyboardButton("🔗 Join Support Chat", url=invite_link.invite_link)]]
+        keyboard = [[styled_button("🔗 Join Support Chat", url=invite_link.invite_link, style="success")]]
         await query.message.edit_text(success_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-        
+
     except Exception as e:
         await query.message.edit_text(
             f"✅ <b>Quiz Passed Successfully!</b>\n\n"

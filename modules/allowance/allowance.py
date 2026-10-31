@@ -3,8 +3,6 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-
-
 from configs import bot_name, referral_bonus_label, referral_earned_label
 from modules.database.user_db import (
     get_user_role_db,
@@ -15,6 +13,7 @@ from modules.database.user_db import (
     add_quota_limits_db,
 )
 from modules.allowance.referral import get_user_referral_stats
+from modules.utility.rich_ui import styled_button
 
 
 def check_and_reset_quota(user_id):
@@ -114,7 +113,7 @@ def gift_quota(admin_user_id, target_user_id, search_bonus=0, request_bonus=0):
         return False, "❌ You do not have permission to use the gift command."
 
     add_quota_limits_db(target_user_id, search_bonus, request_bonus)
-    return True, f"🎁 Successfully added <b>+{search_bonus}</b> search limit and <b>+{request_bonus}</b> request limit to user <code>{target_user_id}</code>."
+    return True, f"🎁 Successfully added <mark>+{search_bonus}</mark> search limit and <mark>+{request_bonus}</mark> request limit to user <code>{target_user_id}</code>."
 
 
 async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,20 +128,30 @@ async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "⚠️ Could not retrieve your quota record."
     elif summary["unlimited"]:
         text = (
-            f"👤 <b>Your Role:</b> {html.escape(str(summary['role']))}\n"
-            f"♾️ <b>Status:</b> Unlimited searches and requests."
+            f"📊 <b>Daily Allowance Dashboard</b>\n\n"
+            f"👤 <b>Your Role:</b> <mark>{html.escape(str(summary['role']))}</mark>\n"
+            f"♾️ <b>Status:</b> <mark>Unlimited</mark> searches and requests."
         )
     else:
         text = (
-            f"👤 <b>Your Role:</b> {html.escape(str(summary['role']))}\n\n"
-            f"🔍 <b>Searches Remaining:</b> <code>{summary['searches_left']} / {summary['searches_limit']}</code>\n"
-            f"📥 <b>Requests Remaining:</b> <code>{summary['requests_left']} / {summary['requests_limit']}</code>\n\n"
-            f"<i>(Quotas reset automatically every day)</i>"
+            f"📊 <b>Daily Allowance Dashboard</b>\n\n"
+            f"👤 <b>Your Role:</b> <mark>{html.escape(str(summary['role']))}</mark>\n\n"
+            f"🔍 <b>Searches Remaining:</b> <mark>{summary['searches_left']} / {summary['searches_limit']}</mark>\n"
+            f"📥 <b>Requests Remaining:</b> <mark>{summary['requests_left']} / {summary['requests_limit']}</mark>\n\n"
+            f"<i>(Quotas reset automatically every day at midnight IST)</i>"
         )
+
+    markup = InlineKeyboardMarkup([
+        [
+            styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
+            styled_button("🎁 Refer & Earn", callback_data="refer_more_callback", style="primary"),
+        ],
+        [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
+    ])
 
     if update.callback_query:
         await update.callback_query.answer()
-    await msg.reply_text(text, parse_mode="HTML")
+    await msg.reply_text(text, parse_mode="HTML", reply_markup=markup)
 
 
 async def gift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -189,8 +198,8 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         f"🔗 <b>Your Referral Dashboard</b>\n\n"
         f"📌 <b>Your Link:</b>\n<code>{html.escape(referral_link)}</code>\n\n"
-        f"📊 <b>Total Friends Invited:</b> <code>{total_invites}</code>\n"
-        f"🎁 <b>Bonus Earned:</b> <code>{html.escape(str(referral_earned_label(total_invites)))}</code>\n\n"
+        f"📊 <b>Total Friends Invited:</b> <mark>{total_invites}</mark>\n"
+        f"🎁 <b>Bonus Earned:</b> <mark>{html.escape(str(referral_earned_label(total_invites)))}</mark>\n\n"
     )
 
     if referred_list:
@@ -209,7 +218,9 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     share_url = f"https://t.me/share/url?url={referral_link}&text={share_text}"
 
     keyboard = [
-        [InlineKeyboardButton("📤 Refer More & Share Link", url=share_url)]
+        [styled_button("📤 Refer More & Share Link", url=share_url, style="success")],
+        [styled_button("📋 Copy Invite Link", copy_text=referral_link, style="primary")],
+        [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 

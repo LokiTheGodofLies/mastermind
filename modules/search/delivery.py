@@ -17,6 +17,7 @@ from config import (
 )
 from modules.database.file_db import get_file_by_id_db, update_storage_message_id_db
 from modules.log.startup_log import report_error
+from modules.utility.rich_ui import styled_button
 
 logger = logging.getLogger(__name__)
 
@@ -178,11 +179,9 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
       1. Selects ONE helper bot (resolving its @username dynamically from PUBLIC_/TESTING_HELPER_BOT_TOKENS).
       2. Sends the file via that helper bot to PUBLIC_/TESTING_POSTING_CHANNEL_ID with 5-minute auto-delete.
       3. Sends the file via that SAME helper bot to the user's PM (if they have started that helper bot).
-      4. Replies via the main bot with instructions to start that helper bot (@username) or
-         click the link to get the file from the posting channel, reminding them to forward
-         the file to Saved Messages before it is auto-deleted in 5 minutes.
+      4. Replies via the main bot with colorful Bot API 10.3 in-text buttons to open the helper bot PM
+         or view the file in the posting channel, reminding them to forward the file to Saved Messages.
     """
-    query = update.callback_query
     user = update.effective_user
     msg = update.effective_message
     if not msg or not user:
@@ -245,7 +244,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                         f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
                         f"• Posting Channel: <code>{post_chan_id}</code>\n"
                         f"• Status: <code>{pm.status}</code> (Post: {can_post}, Delete: {can_delete})\n\n"
-                        f"<i>Helper bot must be an Administrator with Post & Delete rights in the Posting Channel!</i>"
+                        f"<i>Helper bot must be an Administrator with Post &amp; Delete rights in the Posting Channel!</i>"
                     )
                     await report_error(context.application, err_details, title="Helper Bot Posting Channel Permission Error")
         except Exception as exc:
@@ -287,7 +286,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
                 f"• Helper Bot: @{helper_username or 'unknown'}\n"
                 f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
-                f"<i>Ensure @{helper_username or 'helper_bot'} is added as an Administrator in both the Storage Group and Posting Channel with Post & Delete rights!</i>"
+                f"<i>Ensure @{helper_username or 'helper_bot'} is added as an Administrator in both the Storage Group and Posting Channel with Post &amp; Delete rights!</i>"
             )
             try:
                 await report_error(context.application, err_details, title="Posting Channel Delivery Error")
@@ -331,7 +330,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 except Exception:
                     pass
 
-    # 3. Send Main Bot notification message with helper bot @username & posting channel link
+    # 3. Send Main Bot notification card with Bot API 10.3 colorful in-text buttons
     file_name_esc = html.escape(row["file_name"] or f"File #{row_id}")
     helper_start_url = (
         f"https://t.me/{helper_username}?start=dl_{row_id}"
@@ -339,49 +338,39 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         else None
     )
 
-    pm_status_line = (
-        f"✅ <b>Sent to your PM via @{html.escape(helper_username)}!</b>\n\n"
-        if (pm_delivered and helper_username)
-        else ""
-    )
-
     if helper_username and posting_link:
         if pm_delivered:
             text = (
-                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-                f"✅ <b>File sent directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
-                f"📢 You can also <a href=\"{posting_link}\"><b>click here</b></a> and view it in the posting channel.\n\n"
-                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
-                f"both PM and posting channel copies auto-delete in {delete_mins} mins!</b>"
+                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n"
+                f"📢 A backup copy is also ready in the Posting Channel.\n\n"
+                f"⚠️ <b>Forward the file to your Saved Messages — both copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
-                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-                f"🤖 Start <a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a> below "
-                f"to receive your file in PM, or <a href=\"{posting_link}\"><b>click here</b></a> to get it from the posting channel.\n\n"
-                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
-                f"it will be automatically deleted in {delete_mins} mins!</b>"
+                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive the file in PM, "
+                f"or open it directly in the Posting Channel.\n\n"
+                f"⚠️ <b>Forward the file to your Saved Messages — copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
             )
     elif helper_username:
         if pm_delivered:
             text = (
-                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-                f"✅ <b>File sent directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
-                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — PM copy auto-deletes in {delete_mins} mins!</b>"
+                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
+                f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
-                f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-                f"🤖 Start <a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a> below "
-                f"to receive your file in PM.\n\n"
-                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — PM copy auto-deletes in {delete_mins} mins!</b>"
+                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive your file in PM.\n\n"
+                f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
     elif posting_link:
         text = (
-            f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
-            f"📢 You can <a href=\"{posting_link}\"><b>click here</b></a> and get the file from the posting channel.\n\n"
-            f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
-            f"it will be automatically deleted in {delete_mins} mins!</b>"
+            f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+            f"📢 Tap the button below to get your file from the Posting Channel.\n\n"
+            f"⚠️ <b>Forward the file to your Saved Messages — it auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
         )
     else:
         text = (
@@ -392,15 +381,13 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     buttons = []
     if helper_username and helper_start_url:
         if pm_delivered:
-            buttons.append([InlineKeyboardButton(f"🤖 Open in @{helper_username} PM ↗️", url=helper_start_url)])
+            buttons.append([styled_button(f"🤖 Open in @{helper_username} PM ↗️", url=helper_start_url, style="success")])
         else:
-            buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username} (Receive in PM) ↗️", url=helper_start_url)])
+            buttons.append([styled_button(f"🤖 Start @{helper_username} (Receive in PM) ↗️", url=helper_start_url, style="success")])
     if posting_link:
-        buttons.append([InlineKeyboardButton("📢 View in Posting Channel ↗️", url=posting_link)])
+        buttons.append([styled_button("📢 View in Posting Channel ↗️", url=posting_link, style="primary")])
 
-    # If the interaction originated inside a Helper Bot (e.g. deep-link /start),
-    # the file is already delivered directly into this chat with auto-delete.
-    # Do NOT send the redundant delivery confirmation card inside the helper bot.
+    # Do NOT send the redundant delivery confirmation card inside the helper bot itself
     main_bot_id = None
     if context.application and context.application.bot:
         main_bot_id = context.application.bot.id
@@ -425,7 +412,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, payload: str):
     """
-    Handles `/start dl_<row_id|file_unique_id>` triggered by download text hyperlinks or deep-links.
+    Handles `/start dl_<row_id|file_unique_id>` triggered by download buttons or deep-links.
     Uses the exact same deliver_file_dual pipeline as inline keyboard buttons.
     """
     msg = update.effective_message
@@ -463,7 +450,7 @@ async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DE
             logger.error("Failed to report delivery error: %s", rep_err)
 
         support_link = creator_dm_link()
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=support_link)]]) if support_link else None
+        markup = InlineKeyboardMarkup([[styled_button("💬 Contact Support", url=support_link, style="primary")]]) if support_link else None
         user_msg = (
             "⚠️ <b>We encountered an error while sending your file.</b>\n\n"
             "Our administrators have been notified and it will be resolved shortly.\n"

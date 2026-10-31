@@ -5,6 +5,7 @@ or env.txt) with fallback to config.db or safe sample defaults.
 No real secrets, tokens, or personal Telegram IDs are hardcoded here.
 """
 import os
+from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------------
 # Sample placeholder variables (replace via env.txt or Render Environment)
@@ -456,9 +457,43 @@ def users_db_path():
     return _clean("USERS_DB_PATH") or "mastermind_users.db"
 
 
-def backup_filename():
-    default = "mastermind_test_backup.zip" if is_testing_mode() else "mastermind_backup.zip"
-    return _clean(f"{_pfx()}_BACKUP_FILENAME") or default
+def backup_filename_prefix() -> str:
+    """Base prefix for timestamped database backups ('test_backup' or 'public_backup')."""
+    custom = _clean(f"{_pfx()}_BACKUP_FILENAME")
+    if custom:
+        base = os.path.splitext(custom)[0]
+        # Strip any trailing _YYYYMMDD-HHMM timestamp if present
+        return base
+    return "test_backup" if is_testing_mode() else "public_backup"
+
+
+def backup_filename(with_timestamp: bool = True) -> str:
+    """Returns a timestamped backup filename in IST (e.g. `test_backup_20261031-1545.zip`)."""
+    prefix = backup_filename_prefix()
+    if not with_timestamp:
+        return f"{prefix}.zip"
+    ist = timezone(timedelta(hours=5, minutes=30))
+    ts = datetime.now(ist).strftime("%Y%m%d-%H%M")
+    return f"{prefix}_{ts}.zip"
+
+
+def is_valid_backup_filename(fname: str | None) -> bool:
+    """Returns True if `fname` matches a backup archive for the active environment."""
+    if not fname:
+        return False
+    low = str(fname).strip().lower()
+    if not low.endswith(".zip"):
+        return False
+    prefix = backup_filename_prefix().lower()
+    if low == f"{prefix}.zip" or low.startswith(f"{prefix}_"):
+        return True
+    if is_testing_mode():
+        return low.startswith("test_backup") or low.startswith("mastermind_test_backup")
+    return (
+        low.startswith("public_backup")
+        or low.startswith("mastermind_backup")
+        or low.startswith("mastermind_public_backup")
+    )
 
 
 def max_upload_bytes():

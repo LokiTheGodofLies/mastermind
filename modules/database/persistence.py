@@ -1,11 +1,17 @@
 """Persistent storage for Render's ephemeral disk using Telegram.
 
   * BACKUP  - periodically (when any DB file changes) and on shutdown, a
-              consistent SQLite snapshot of all three databases is zipped and
-              uploaded to the Backup Logs topic of the logger group, edited in place, and kept pinned.
-  * RESTORE - on a fresh container (no local marker file) the pinned backup is
-              downloaded before the bot starts, verified with PRAGMA
-              integrity_check, and placed on disk.
+              consistent SQLite snapshot of all three databases is zipped with an
+              IST timestamp (`test_backup_YYYYMMDD-HHMM.zip` or `public_backup_YYYYMMDD-HHMM.zip`),
+              uploaded/edited in the Backup Logs topic of the logger group, kept pinned,
+              and its message_id is recorded in the Logger Group description tag
+              `[MM_BACKUP:msg_id=<id>:file=<fname>]`.
+  * RESTORE - on a fresh container (no local marker file) the latest backup is
+              located (either from the latest pinned message OR from the Logger Group
+              description tag `[MM_BACKUP:msg_id=<id>:file=<fname>]` so other pinned
+              messages in the logger group never need to be unpinned), verified with
+              `PRAGMA integrity_check`, and placed on disk. If the previous backup was
+              deleted before deployment, the bot starts fresh with `backup_allowed=True`.
 """
 import asyncio
 import io
@@ -29,6 +35,7 @@ from config import (
     backup_topic_id,
     backup_interval_seconds,
     backup_filename,
+    is_valid_backup_filename,
     db_dir,
     config_db_path,
     files_db_path,
@@ -40,6 +47,8 @@ from config import (
 logger = logging.getLogger(__name__)
 
 PROJECT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+_BACKUP_TAG_RE = re.compile(r"\[MM_BACKUP:msg_id=(\d+)(?::file=([^\]]+))?\]")
 
 
 def _db_files() -> dict:
@@ -158,6 +167,50 @@ def _fingerprint():
     return tuple(parts)
 
 
+def _save_backup_pointer_in_chat_description(chat: str, msg_id: int, fname: str) -> None:
+    """Stores `[MM_BACKUP:msg_id=<id>:file=<fname>]` in the Logger Group description so
+    future deploys can locate the latest timestamped backup even if other messages are pinned."""
+    try:
+        info = _api("getChat", data={"chat_id": chat}, timeout=15)
+        old_desc = ((info.get("result") or {}).get("description") or "").strip()
+        cleaned_desc = _BACKUP_TAG_RE.sub("", old_desc).strip()
+        tag = f"[MM_BACKUP:msg_id={msg_id}:file={fname}]"
+        new_desc = f"{cleaned_desc}\n{tag}".strip() if cleaned_desc else tag
+        if len(new_desc) > 255:
+            new_desc = tag[:255]
+        _api("setChatDescription", data={"chat_id": chat, "description": new_desc}, timeout=15)
+    except Exception as exc:
+        logger.debug("Could not update logger group backup pointer tag: %s", _redact(str(exc)))
+
+
+def _probe_backup_message_by_id(chat: str, msg_id: int) -> dict | None:
+    """Probes `msg_id` in `chat` by forwarding it silently into the backup topic and immediately
+    deleting the temporary forward, returning `(doc_dict, msg_id)` if `msg_id` exists and is a valid backup."""
+    try:
+        fwd_data = {
+            "chat_id": chat,
+            "from_chat_id": chat,
+            "message_id": int(msg_id),
+            "disable_notification": "true",
+        }
+        topic = _backup_topic()
+        if topic:
+            fwd_data["message_thread_id"] = topic
+        res = _api("forwardMessage", data=fwd_data, timeout=20)
+        if not res.get("ok"):
+            return None
+        msg_obj = res.get("result") or {}
+        temp_mid = msg_obj.get("message_id")
+        if temp_mid:
+            _api("deleteMessage", data={"chat_id": chat, "message_id": temp_mid}, timeout=10)
+        doc = msg_obj.get("document") or {}
+        if doc and is_valid_backup_filename(doc.get("file_name")):
+            return doc
+    except Exception as exc:
+        logger.debug("Probe of backup message %s failed: %s", msg_id, _redact(str(exc)))
+    return None
+
+
 def sync_startup_log():
     """Updates modules.log.startup_log.DB_STATUS and DB_STATUS_OK from _state."""
     try:
@@ -165,7 +218,7 @@ def sync_startup_log():
         r = _state["restore"]
         d = _state["restore_detail"]
         if r == "restored":
-            startup_log.DB_STATUS = "restored from Telegram backup"
+            startup_log.DB_STATUS = f"restored from Telegram backup ({d})" if d else "restored from Telegram backup"
             startup_log.DB_STATUS_OK = True
         elif r == "skipped":
             startup_log.DB_STATUS = "local databases in use"
@@ -174,7 +227,7 @@ def sync_startup_log():
             startup_log.DB_STATUS = "initialized (no backup found — auto-backup active)"
             startup_log.DB_STATUS_OK = True
         elif r == "failed":
-            startup_log.DB_STATUS = f"restore FAILED (auto-backup paused): {d}"
+            startup_log.DB_STATUS = f"restore FAILED: {d}"
             startup_log.DB_STATUS_OK = False
         elif r == "disabled":
             startup_log.DB_STATUS = f"backup disabled ({d})"
@@ -184,7 +237,8 @@ def sync_startup_log():
 
 
 def restore_if_fresh() -> dict:
-    """Restores databases from the pinned message in the backup chat on a fresh container."""
+    """Restores databases from the latest timestamped backup in the logger group on a fresh container.
+    Never requires unpinning other messages in the logger group."""
     with _lock:
         os.makedirs(db_dir(), exist_ok=True)
         marker = _marker_path()
@@ -210,19 +264,33 @@ def restore_if_fresh() -> dict:
             if not info.get("ok"):
                 raise RuntimeError(f"getChat failed: {info.get('description')}")
 
-            pinned = (info.get("result") or {}).get("pinned_message") or {}
+            chat_res = info.get("result") or {}
+            pinned = chat_res.get("pinned_message") or {}
             doc = pinned.get("document") or {}
-            if pinned and (not doc or doc.get("file_name") != backup_filename()):
-                # Something else is pinned (the logger group is shared). Starting empty here would later
-                # overwrite the real backup, so stop and pause backups instead of guessing.
-                raise RuntimeError(
-                    "the latest pinned message in the logger group is not the database backup - "
-                    "unpin it (or re-pin the backup in the Backup Logs topic) and restart"
-                )
+            resolved_msg_id = pinned.get("message_id")
+
+            # 1. Check if the latest pinned message is a valid backup zip (timestamped or legacy)
+            if not (doc and is_valid_backup_filename(doc.get("file_name"))):
+                doc = {}
+                resolved_msg_id = None
+
+                # 2. Check the Logger Group description for `[MM_BACKUP:msg_id=<id>:file=<fname>]`
+                desc = chat_res.get("description") or ""
+                m_tag = _BACKUP_TAG_RE.search(desc)
+                if m_tag:
+                    tagged_mid = int(m_tag.group(1))
+                    probed_doc = _probe_backup_message_by_id(chat, tagged_mid)
+                    if probed_doc:
+                        doc = probed_doc
+                        resolved_msg_id = tagged_mid
+
+            # 3. If no valid backup exists (e.g. previous backup was deleted or another message is pinned),
+            # start fresh with auto-backup ACTIVE (never require unpinning other messages in the logger group).
             if not doc:
                 _state.update(
                     restore="no_backup",
-                    restore_detail="no pinned backup found in logger group - starting with fresh databases",
+                    restore_detail="no active backup found in logger group - starting with fresh databases (auto-backup active)",
+                    backup_allowed=True,
                 )
                 with open(marker, "w", encoding="utf-8") as mf:
                     mf.write(str(time.time()))
@@ -270,18 +338,20 @@ def restore_if_fresh() -> dict:
 
             with open(marker, "w", encoding="utf-8") as mf:
                 mf.write(str(time.time()))
+            restored_fname = doc.get("file_name") or "backup.zip"
             _state.update(
                 restore="restored",
-                restore_detail=_stats_line(st),
-                backup_msg_id=pinned.get("message_id"),
+                restore_detail=f"{restored_fname} — {_stats_line(st)}",
+                backup_msg_id=resolved_msg_id,
+                backup_allowed=True,
                 fingerprint=_fingerprint(),
             )
-            logger.info("Databases restored from Telegram backup: %s", _stats_line(st))
+            logger.info("Databases restored from Telegram backup (%s): %s", restored_fname, _stats_line(st))
         except Exception as exc:
             _state.update(
                 restore="failed",
                 restore_detail=_redact(str(exc))[:200],
-                backup_allowed=False,
+                backup_allowed=True,
                 last_error=_redact(str(exc))[:200],
             )
             logger.error("Database restore FAILED: %s", _redact(str(exc)))
@@ -317,7 +387,7 @@ def _build_archive() -> tuple:
 
 
 def backup_now(reason: str = "periodic") -> tuple:
-    """Upload a fresh backup. Blocking - call with asyncio.to_thread() from async code."""
+    """Upload a fresh timestamped backup. Blocking - call with asyncio.to_thread() from async code."""
     with _lock:
         if not _state["backup_allowed"]:
             return False, f"backups are paused ({_state['restore_detail'] or 'restore did not complete'})"
@@ -331,13 +401,14 @@ def backup_now(reason: str = "periodic") -> tuple:
             blob, st = _build_archive()
             if len(blob) > min(max_upload_bytes(), max_download_bytes()):
                 raise RuntimeError(f"backup is {len(blob)/1048576:.1f} MB (exceeds upload limit)")
+            fname = backup_filename(with_timestamp=True)
             caption = (
                 "💾 Mastermind database backup\n"
+                f"📦 {fname}\n"
                 f"🕒 {_ist_now()} ({reason})\n"
                 f"{_stats_line(st)}\n"
-                "⚠️ Do not delete or unpin - used for automatic restore after redeploy."
+                "⚠️ Latest timestamped backup — used automatically on redeploy."
             )
-            fname = backup_filename()
 
             if _state["backup_msg_id"]:
                 media = json.dumps({"type": "document", "media": "attach://backup", "caption": caption})
@@ -348,9 +419,10 @@ def backup_now(reason: str = "periodic") -> tuple:
                     timeout=90,
                 )
                 if res.get("ok") or "not modified" in str(res.get("description", "")).lower():
+                    _save_backup_pointer_in_chat_description(chat, int(_state["backup_msg_id"]), fname)
                     _state.update(
                         last_backup_ts=time.time(),
-                        last_backup_detail=f"{_stats_line(st)} ({len(blob)/1024:.0f} KB)",
+                        last_backup_detail=f"{fname} | {_stats_line(st)} ({len(blob)/1024:.0f} KB)",
                         fingerprint=_fingerprint(),
                     )
                     return True, _state["last_backup_detail"]
@@ -367,6 +439,7 @@ def backup_now(reason: str = "periodic") -> tuple:
                 raise RuntimeError(f"sendDocument failed: {res.get('description')}")
             mid = res["result"]["message_id"]
             _state["backup_msg_id"] = mid
+            _save_backup_pointer_in_chat_description(chat, int(mid), fname)
 
             pin = _api("pinChatMessage", data={"chat_id": chat, "message_id": mid, "disable_notification": "true"}, timeout=20)
             _state["pin_ok"] = bool(pin.get("ok"))
@@ -376,7 +449,7 @@ def backup_now(reason: str = "periodic") -> tuple:
 
             _state.update(
                 last_backup_ts=time.time(),
-                last_backup_detail=f"{_stats_line(st)} ({len(blob)/1024:.0f} KB)",
+                last_backup_detail=f"{fname} | {_stats_line(st)} ({len(blob)/1024:.0f} KB)",
                 fingerprint=_fingerprint(),
             )
             if not _state["pin_ok"]:

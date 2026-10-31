@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from modules.database.config_db import get_config
 from modules.database.user_db import is_admin_or_creator, get_user_role_db, is_creator, get_db_stats_counts
 from modules.database.file_db import get_file_stats_counts_db
+from modules.utility.rich_ui import styled_button
 
 
 def _get_ram_usage() -> str:
@@ -45,9 +46,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     role = get_user_role_db(user.id)
     is_admin = is_admin_or_creator(user.id)
-    is_creator_user = is_creator(user.id)
 
-    default_header = f"📊 <b>{bot_name()} Bot Statistics & Status</b>"
+    default_header = f"📊 <b>{bot_name()} Bot Statistics &amp; Status</b>"
     header_text = get_config("stats_header_script", default=default_header)
 
     f_stats = get_file_stats_counts_db()
@@ -56,11 +56,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
         f"{header_text}\n",
         "📚 <b>Library Catalog:</b>",
-        f"• Total Files: <code>{f_stats['total']}</code>",
+        f"• Total Files: <mark>{f_stats['total']}</mark>",
         f"• Ebooks: <code>{f_stats['ebooks']}</code>",
         f"• Audiobooks: <code>{f_stats['audiobooks']}</code>\n",
         "👥 <b>Community Reach:</b>",
-        f"• Unique Users: <code>{u_stats['users']}</code>",
+        f"• Unique Users: <mark>{u_stats['users']}</mark>",
         f"• Connected Groups: <code>{u_stats['groups']}</code>",
         f"• Connected Channels: <code>{u_stats['channels']}</code>",
     ]
@@ -68,7 +68,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin:
         lines.append("")
         lines.append(f"👑 <b>{role} System Diagnostic:</b>")
-        lines.append(f"• Active Access Role: <code>{role}</code>")
+        lines.append(f"• Active Access Role: <mark>{role}</mark>")
         lines.append(f"• Database Storage: <code>{_get_db_sizes()}</code>")
         lines.append(f"• Server RAM Usage: <code>{_get_ram_usage()}</code>")
 
@@ -77,7 +77,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.get_me()
             ping_ms = round((time.time() - t0) * 1000)
-            lines.append(f"• Telegram API Ping: <code>{ping_ms} ms</code>")
+            lines.append(f"• Telegram API Ping: <mark>{ping_ms} ms</mark>")
         except Exception:
             lines.append("• Telegram API Ping: <code>Error</code>")
 
@@ -86,7 +86,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     media_type = get_config("stats_media_type", default="none")
     media_url = get_config("stats_media_url", default="")
 
-    keyboard = [[InlineKeyboardButton("« Back to Start", callback_data="start_menu")]]
+    keyboard = [
+        [
+            styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
+            styled_button("« Back to Start", callback_data="start_menu", style="primary"),
+        ]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if media_type == "photo" and media_url:

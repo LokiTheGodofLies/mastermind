@@ -13,6 +13,7 @@ from modules.database.user_db import (
 )
 from modules.database.config_db import get_config_bool
 from modules.log.startup_log import report_error, _report_user_block
+from modules.utility.rich_ui import styled_button
 
 logger = logging.getLogger(__name__)
 
@@ -30,44 +31,47 @@ TARGET_OPTIONS = [
 
 
 def _build_broadcast_keyboard(target: str, is_pin: bool, has_message: bool) -> InlineKeyboardMarkup:
-    """Builds clean interactive toggle menu for broadcast dashboard."""
+    """Builds colorful Bot API 10.3 toggle menu for broadcast dashboard."""
     kb = []
 
     r1 = []
     for t_id, t_lbl in TARGET_OPTIONS[:3]:
         active = " ✅" if t_id == target else ""
-        r1.append(InlineKeyboardButton(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}"))
+        b_style = "success" if t_id == target else "primary"
+        r1.append(styled_button(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}", style=b_style))
     kb.append(r1)
 
     r2 = []
     for t_id, t_lbl in TARGET_OPTIONS[3:]:
         active = " ✅" if t_id == target else ""
-        r2.append(InlineKeyboardButton(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}"))
+        b_style = "success" if t_id == target else "primary"
+        r2.append(styled_button(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}", style=b_style))
     kb.append(r2)
 
     pin_status = "✅ ON" if is_pin else "❌ OFF"
-    kb.append([InlineKeyboardButton(f"📌 Pin in Chats: {pin_status}", callback_data="bc_toggle_pin")])
+    pin_style = "success" if is_pin else "primary"
+    kb.append([styled_button(f"📌 Pin in Chats: {pin_status}", callback_data="bc_toggle_pin", style=pin_style)])
 
     if has_message:
         kb.append([
-            InlineKeyboardButton("🚀 Send Broadcast", callback_data="bc_confirm"),
-            InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel"),
+            styled_button("🚀 Send Broadcast", callback_data="bc_confirm", style="success"),
+            styled_button("❌ Cancel", callback_data="bc_cancel", style="danger"),
         ])
     else:
-        kb.append([InlineKeyboardButton("❌ Close Menu", callback_data="bc_cancel")])
+        kb.append([styled_button("❌ Close Menu", callback_data="bc_cancel", style="danger")])
 
     return InlineKeyboardMarkup(kb)
 
 
 def _build_running_keyboard(is_paused: bool) -> InlineKeyboardMarkup:
-    """Builds inline control buttons for an active broadcast loop."""
+    """Builds colorful inline control buttons for an active broadcast loop."""
     pause_btn = (
-        InlineKeyboardButton("▶️ Resume", callback_data="bc_resume")
+        styled_button("▶️ Resume", callback_data="bc_resume", style="success")
         if is_paused
-        else InlineKeyboardButton("⏸ Pause", callback_data="bc_pause")
+        else styled_button("⏸ Pause", callback_data="bc_pause", style="primary")
     )
     return InlineKeyboardMarkup([
-        [pause_btn, InlineKeyboardButton("🛑 Cancel Broadcast", callback_data="bc_stop_active")]
+        [pause_btn, styled_button("🛑 Cancel Broadcast", callback_data="bc_stop_active", style="danger")]
     ])
 
 
@@ -85,15 +89,15 @@ def _build_broadcast_text(target: str, is_pin: bool, msg_text: str | None) -> st
 
     header = (
         "📢 <b>Broadcast Control Panel</b>\n\n"
-        f"🎯 <b>Target Audience:</b> <code>{html.escape(t_name)}</code>\n"
-        f"📌 <b>Auto-Pin:</b> <code>{pin_str}</code>\n"
+        f"🎯 <b>Target Audience:</b> <mark>{html.escape(t_name)}</mark>\n"
+        f"📌 <b>Auto-Pin:</b> <mark>{pin_str}</mark>\n"
     )
 
     if msg_text:
         preview = (
             f"\n💬 <b>Message Preview:</b>\n"
-            f"<blockquote>{html.escape(msg_text)}</blockquote>\n\n"
-            f"<i>Configure options using the toggle buttons below, then press <b>Send Broadcast</b>.</i>"
+            f"<blockquote expandable>{html.escape(msg_text)}</blockquote>\n\n"
+            f"<i>Configure options using the colorful toggle buttons below, then press <b>Send Broadcast</b>.</i>"
         )
     else:
         preview = (
@@ -168,7 +172,7 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
             if _active_broadcast_cancelled:
                 await status_msg.edit_text(
                     f"🛑 <b>Broadcast Cancelled by Admin</b>\n\n"
-                    f"🎯 <b>Target:</b> <code>{html.escape(target)}</code>\n"
+                    f"🎯 <b>Target:</b> <mark>{html.escape(target)}</mark>\n"
                     f"👥 <b>Processed:</b> <code>{idx - 1}/{total}</code>\n"
                     f"✅ <b>Delivered:</b> <code>{sent}</code>\n"
                     f"❌ <b>Failed:</b> <code>{failed}</code>\n"
@@ -207,7 +211,7 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
                 try:
                     await status_msg.edit_text(
                         f"{state_lbl}\n\n"
-                        f"🎯 <b>Target:</b> <code>{html.escape(target)}</code>\n"
+                        f"🎯 <b>Target:</b> <mark>{html.escape(target)}</mark>\n"
                         f"⏳ <b>Progress:</b> <code>{idx}/{total}</code> ({(idx / total) * 100:.1f}%)\n"
                         f"✅ <b>Sent:</b> <code>{sent}</code> | ❌ <b>Failed:</b> <code>{failed}</code>"
                         + (f" | 📌 <b>Pinned:</b> <code>{pinned}</code>" if should_pin else ""),
@@ -227,7 +231,7 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
 
     summary = (
         f"📢 <b>Broadcast Completed</b>\n\n"
-        f"🎯 <b>Target:</b> <code>{html.escape(target)}</code>\n"
+        f"🎯 <b>Target:</b> <mark>{html.escape(target)}</mark>\n"
         f"👥 <b>Total Recipients:</b> <code>{total}</code>\n"
         f"✅ <b>Delivered:</b> <code>{sent}</code>\n"
         f"❌ <b>Failed:</b> <code>{failed}</code>\n"

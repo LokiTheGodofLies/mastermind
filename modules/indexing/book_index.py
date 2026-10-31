@@ -35,6 +35,7 @@ from config import (
     creator_id,
     goodreads_base_url,
     goodreads_cache_max,
+    index_channel_id,
     log_topic,
     logger_group_id,
     max_download_bytes,
@@ -1421,6 +1422,7 @@ def format_index_log_message(
     storage_badge: str,
     caption_badge: str,
     source_info: str | None = None,
+    indexed_by_bot: str | None = None,
 ) -> str:
     """
     Standardized 3-Stage Ordered Index Log format:
@@ -1432,15 +1434,18 @@ def format_index_log_message(
     esc_user = html.escape(user_title or "Unknown")
     user_link = f'<a href="tg://user?id={user_id}">{esc_user}</a>' if user_id else esc_user
     ts = _ist_now_str()
+    esc_slink = html.escape(storage_link or "", quote=True)
 
     lines = [
         "📥 <b>File Index Log</b>\n",
         f"📁 <b>File Name:</b> <code>{esc_fn}</code>",
-        f"📦 <b>File Size:</b> <code>{html.escape(file_size_str)}</code>",
+        f"📦 <b>File Size:</b> <mark>{html.escape(file_size_str)}</mark>",
         f"🔑 <b>Unique ID:</b> <code>{html.escape(file_unique_id)}</code>",
-        f"🔗 <b>Storage Link:</b> <a href=\"{storage_link}\">{storage_link}</a>",
+        f"🔗 <b>Storage Link:</b> <a href=\"{esc_slink}\">{esc_slink}</a>",
         f"👤 <b>Sent By:</b> {user_link}",
     ]
+    if indexed_by_bot:
+        lines.append(f"🤖 <b>Indexed By:</b> <mark>{html.escape(indexed_by_bot)}</mark>")
     if source_info:
         lines.append(f"🌐 <b>Source:</b> {source_info}")
 
@@ -1452,7 +1457,65 @@ def format_index_log_message(
         f"3. 📝 <b>Caption Enrichment:</b> {caption_badge}",
         f"⏰ <b>Timestamp:</b> <code>{ts}</code>",
     ])
+    if esc_slink:
+        lines.append("")
+        lines.append(
+            f'<tg-button-row align="center">'
+            f'<tg-button type="url" style="primary" url="{esc_slink}">📦 Open in Storage Group</tg-button>'
+            f'</tg-button-row>'
+        )
     return "\n".join(lines)
+
+
+async def send_index_log_dual(bot, log_msg: str, fallback_bot=None) -> None:
+    """
+    Dispatches an Index Log message to BOTH:
+      1. `PUBLIC_/TESTING_INDEX_CHANNEL_ID` (Index Logs Channel)
+      2. `PUBLIC_/TESTING_LOGGER_GROUP_ID` (`INDEX_LOG_TOPIC_ID` topic)
+    using whichever bot (`bot`) is actively indexing the file, with optional `fallback_bot`.
+    """
+    idx_chan = index_channel_id()
+    log_gid = logger_group_id()
+    idx_topic = log_topic("INDEX")
+
+    # 1. Send to Index Logs Channel (if configured and distinct from logger group)
+    if idx_chan:
+        sent_chan = False
+        for b in (bot, fallback_bot):
+            if b is None:
+                continue
+            try:
+                await b.send_message(
+                    chat_id=int(idx_chan),
+                    text=log_msg,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+                sent_chan = True
+                break
+            except Exception as exc:
+                logger.warning("Index log delivery to INDEX_CHANNEL_ID (%s) failed via %s: %s", idx_chan, getattr(b, "username", "bot"), exc)
+        if not sent_chan:
+            logger.error("Could not deliver index log to INDEX_CHANNEL_ID (%s) on any bot.", idx_chan)
+
+    # 2. Send to Logger Group -> INDEX_LOG_TOPIC_ID
+    if log_gid and str(log_gid) != str(idx_chan or ""):
+        for b in (bot, fallback_bot):
+            if b is None:
+                continue
+            try:
+                kwargs = {
+                    "chat_id": int(log_gid),
+                    "text": log_msg,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                }
+                if idx_topic:
+                    kwargs["message_thread_id"] = int(idx_topic)
+                await b.send_message(**kwargs)
+                break
+            except Exception as exc:
+                logger.warning("Index log delivery to LOGGER_GROUP_ID (%s) failed via %s: %s", log_gid, getattr(b, "username", "bot"), exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1880,30 +1943,31 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
             except Exception as e:
                 logger.error("Failed to send error log: %s", e)
 
-        # Post Standardized 3-Tick Index Log
-        if log_group_id:
-            try:
-                log_msg = format_index_log_message(
-                    file_name=file_name,
-                    file_size_str=res["file_size_str"],
-                    file_unique_id=file_unique_id,
-                    storage_link=storage_link,
-                    user_id=uid,
-                    user_title=utitle,
-                    db_badge=res["db_badge"],
-                    storage_badge=res["storage_badge"],
-                    caption_badge=res["caption_badge"],
-                )
-                log_kwargs = {
-                    "chat_id": int(log_group_id),
-                    "text": log_msg,
-                    "parse_mode": "HTML",
-                }
-                if index_log_topic_id:
-                    log_kwargs["message_thread_id"] = int(index_log_topic_id)
-                await context.bot.send_message(**log_kwargs)
-            except Exception as e:
-                logger.error("Failed to send index log: %s", e)
+        # Post Standardized 3-Tick Index Log to BOTH Index Logs Channel and Logger Group Topic
+        try:
+            bot_uname = getattr(context.bot, "username", None)
+            if not bot_uname:
+                try:
+                    me = await context.bot.get_me()
+                    bot_uname = me.username
+                except Exception:
+                    bot_uname = None
+            bot_label = f"@{bot_uname}" if bot_uname else "Helper Bot"
+            log_msg = format_index_log_message(
+                file_name=file_name,
+                file_size_str=res["file_size_str"],
+                file_unique_id=file_unique_id,
+                storage_link=storage_link,
+                user_id=uid,
+                user_title=utitle,
+                db_badge=res["db_badge"],
+                storage_badge=res["storage_badge"],
+                caption_badge=res["caption_badge"],
+                indexed_by_bot=bot_label,
+            )
+            await send_index_log_dual(context.bot, log_msg)
+        except Exception as e:
+            logger.error("Failed to send index log: %s", e)
 
         if update.message and update.message.chat.type == "private":
             label = "Audiobook" if res["category"] == "audiobook" else "Book"
@@ -1973,31 +2037,26 @@ async def handle_storage_caption_edit(update: Update, context: ContextTypes.DEFA
     log_group_id = logger_group_id()
     index_log_topic_id = log_topic("INDEX")
 
-    if log_group_id:
-        try:
-            admin_link = f'<a href="tg://user?id={admin_id}">{html.escape(admin_name)}</a>'
-            caption_badge = f"✅ ✍️ Enriched by Admin ({admin_link})"
-            size_mb = info["file_size"] / (1024 * 1024)
-            file_size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{info['file_size'] / 1024:.2f} KB"
+    try:
+        admin_link = f'<a href="tg://user?id={admin_id}">{html.escape(admin_name)}</a>'
+        caption_badge = f"✅ ✍️ Enriched by Admin ({admin_link})"
+        size_mb = info["file_size"] / (1024 * 1024)
+        file_size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{info['file_size'] / 1024:.2f} KB"
+        bot_uname = getattr(context.bot, "username", None)
+        bot_label = f"@{bot_uname}" if bot_uname else "Main Bot"
 
-            log_msg = format_index_log_message(
-                file_name=info["file_name"],
-                file_size_str=file_size_str,
-                file_unique_id=info["file_unique_id"],
-                storage_link=storage_link,
-                user_id=admin_id,
-                user_title=admin_name,
-                db_badge="✅ Updated in files.db",
-                storage_badge=f"✅ Present in Storage Group (Msg #{storage_msg_id})",
-                caption_badge=caption_badge,
-            )
-            log_kwargs = {
-                "chat_id": int(log_group_id),
-                "text": log_msg,
-                "parse_mode": "HTML",
-            }
-            if index_log_topic_id:
-                log_kwargs["message_thread_id"] = int(index_log_topic_id)
-            await context.bot.send_message(**log_kwargs)
-        except Exception as e:
-            logger.error("Failed to send admin caption edit index log: %s", e)
+        log_msg = format_index_log_message(
+            file_name=info["file_name"],
+            file_size_str=file_size_str,
+            file_unique_id=info["file_unique_id"],
+            storage_link=storage_link,
+            user_id=admin_id,
+            user_title=admin_name,
+            db_badge="✅ Updated in files.db",
+            storage_badge=f"✅ Present in Storage Group (Msg #{storage_msg_id})",
+            caption_badge=caption_badge,
+            indexed_by_bot=bot_label,
+        )
+        await send_index_log_dual(context.bot, log_msg)
+    except Exception as e:
+        logger.error("Failed to send admin caption edit index log: %s", e)
