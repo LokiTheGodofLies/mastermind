@@ -41,7 +41,43 @@ except ImportError:  # pragma: no cover
         def __init__(self, inline_keyboard):
             self.inline_keyboard = inline_keyboard
 
+from modules.utility.small_caps import (
+    convert as sc_convert,
+    convert_markup as sc_markup,
+    from_small_caps,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _sc_allowed(chat_id: Any = None) -> bool:
+    """Small caps is applied to every outgoing message except those posted into the Storage
+    Group. Storage captions are machine-read (re-indexing, caption edits, `copy_message`
+    deliveries), so they must stay as plain data."""
+    if chat_id is None:
+        return True
+    try:
+        from config import storage_group_id
+
+        sid = storage_group_id()
+        return not (sid and str(chat_id) == str(sid))
+    except Exception:  # pragma: no cover - config unavailable
+        return True
+
+
+def _sc_text_call(args: tuple, kwargs: dict, text_pos: int, text_key: str, chat_id: Any):
+    """Last step before a text/caption call leaves the bot: small-caps the text and buttons."""
+    if not _sc_allowed(chat_id):
+        return args, kwargs
+    pm = kwargs.get("parse_mode")
+    if text_key in kwargs:
+        kwargs[text_key] = sc_convert(kwargs[text_key], pm)
+    elif len(args) > text_pos:
+        args = args[:text_pos] + (sc_convert(args[text_pos], pm),) + args[text_pos + 1:]
+    if kwargs.get("reply_markup") is not None:
+        kwargs["reply_markup"] = sc_markup(kwargs["reply_markup"])
+    return args, kwargs
+
 
 _PAGE_INDICATOR_RE = re.compile(r"^(?:📄\s*)?\d+\s*/\s*\d+$")
 
@@ -137,7 +173,9 @@ def infer_button_style(
     if explicit_style in ("primary", "success", "danger", "link"):
         return explicit_style
 
-    t_low = (text or "").strip().lower()
+    # Labels that were already converted to small caps are mapped back first so the
+    # keyword rules below ("cancel", "confirm", ...) keep working.
+    t_low = from_small_caps(text or "").strip().lower()
     cb_low = (callback_data or "").strip().lower()
     url_low = (url or "").strip().lower()
 
@@ -334,6 +372,7 @@ _RE_ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 def extract_buttons_and_clean_html_for_fallback(
     rich_text: str,
     existing_markup: InlineKeyboardMarkup | None = None,
+    small_caps: bool = True,
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     """
     Converts Bot API 10.3 Rich HTML (`<tg-button-row>`, `<tg-button>`, `<mark>`, `<h3>`)
@@ -384,6 +423,10 @@ def extract_buttons_and_clean_html_for_fallback(
         return f"<b>{inner}</b>"
 
     cleaned = _RE_TG_BUTTON.sub(_replace_inline_btn, cleaned)
+    if small_caps:
+        # Must happen before `<mark>` becomes `<code>`: code spans are deliberately left
+        # untouched by the small-caps engine, but badge text should be converted.
+        cleaned = sc_convert(cleaned, "HTML")
     cleaned = re.sub(r"<mark>(.*?)</mark>", r"<code>\1</code>", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"<h3>(.*?)</h3>", r"<b>\1</b>", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
@@ -410,6 +453,8 @@ async def send_rich_message(
 ) -> Message:
     """Calls Bot API 10.3 `sendRichMessage` directly via `bot._post`."""
     rich_html = build_rich_html(html_text, reply_markup)
+    if _sc_allowed(chat_id):
+        rich_html = sc_convert(rich_html, "HTML")  # after button styles were inferred
     rich_payload: dict[str, Any] = {"html": rich_html}
     if prefer_small_media:
         rich_payload["prefer_small_media"] = True
@@ -439,6 +484,8 @@ async def edit_rich_message(
 ) -> Message | bool:
     """Calls Bot API 10.3 `editMessageText` with `rich_message` directly via `bot._post`."""
     rich_html = build_rich_html(html_text, reply_markup)
+    if _sc_allowed(chat_id):
+        rich_html = sc_convert(rich_html, "HTML")  # after button styles were inferred
     rich_payload: dict[str, Any] = {"html": rich_html}
     if prefer_small_media:
         rich_payload["prefer_small_media"] = True
@@ -504,7 +551,9 @@ def install_rich_ui_patches() -> None:
                 logger.debug("sendRichMessage fallback to styled sendMessage: %s", rich_exc)
 
         if text and has_rich_tags:
-            clean_text, merged_markup = extract_buttons_and_clean_html_for_fallback(text, reply_markup)
+            clean_text, merged_markup = extract_buttons_and_clean_html_for_fallback(
+                text, reply_markup, small_caps=_sc_allowed(chat_id)
+            )
             if "text" in kwargs or len(args) < 2:
                 kwargs["text"] = clean_text
             else:
@@ -514,6 +563,7 @@ def install_rich_ui_patches() -> None:
         elif reply_markup is not None:
             kwargs["reply_markup"] = style_inline_keyboard(reply_markup, include_disabled=False)
 
+        args, kwargs = _sc_text_call(args, kwargs, 1, "text", chat_id)
         return await orig_send_message(self, *args, **kwargs)
 
     async def _patched_edit_message_text(self: Bot, *args: Any, **kwargs: Any):
@@ -544,7 +594,9 @@ def install_rich_ui_patches() -> None:
                 logger.debug("editRichMessage fallback to styled editMessageText: %s", rich_exc)
 
         if text and has_rich_tags:
-            clean_text, merged_markup = extract_buttons_and_clean_html_for_fallback(text, reply_markup)
+            clean_text, merged_markup = extract_buttons_and_clean_html_for_fallback(
+                text, reply_markup, small_caps=_sc_allowed(chat_id)
+            )
             if "text" in kwargs or len(args) < 1:
                 kwargs["text"] = clean_text
             else:
@@ -554,17 +606,32 @@ def install_rich_ui_patches() -> None:
         elif reply_markup is not None:
             kwargs["reply_markup"] = style_inline_keyboard(reply_markup, include_disabled=False)
 
+        args, kwargs = _sc_text_call(args, kwargs, 0, "text", chat_id)
         return await orig_edit_message_text(self, *args, **kwargs)
 
     async def _patched_edit_reply_markup(self: Bot, *args: Any, **kwargs: Any):
         if kwargs.get("reply_markup") is not None:
             kwargs["reply_markup"] = style_inline_keyboard(kwargs["reply_markup"], include_disabled=False)
+            if _sc_allowed(kwargs.get("chat_id")):
+                kwargs["reply_markup"] = sc_markup(kwargs["reply_markup"])
         return await orig_edit_reply_markup(self, *args, **kwargs)
 
     def _wrap_media_method(orig_fn):
         async def _wrapped(self: Bot, *args: Any, **kwargs: Any):
             if kwargs.get("reply_markup") is not None:
                 kwargs["reply_markup"] = style_inline_keyboard(kwargs["reply_markup"], include_disabled=False)
+            chat_id = kwargs.get("chat_id", args[0] if args else None)
+            args, kwargs = _sc_text_call(args, kwargs, 99, "caption", chat_id)
+            return await orig_fn(self, *args, **kwargs)
+        return _wrapped
+
+    def _wrap_callback_answer(orig_fn):
+        async def _wrapped(self: Bot, *args: Any, **kwargs: Any):
+            # Toast / alert text of `query.answer("...")` (plain text, no parse mode).
+            if kwargs.get("text") is not None:
+                kwargs["text"] = sc_convert(kwargs["text"])
+            elif len(args) > 1:
+                args = args[:1] + (sc_convert(args[1]),) + args[2:]
             return await orig_fn(self, *args, **kwargs)
         return _wrapped
 
@@ -578,5 +645,13 @@ def install_rich_ui_patches() -> None:
         Bot.send_video = _wrap_media_method(orig_send_video)  # type: ignore[assignment]
     if orig_send_animation is not None:
         Bot.send_animation = _wrap_media_method(orig_send_animation)  # type: ignore[assignment]
+    # Captions on documents / audio (e.g. `/log` export) and caption edits.
+    for _name in ("send_document", "send_audio", "send_voice", "edit_message_caption"):
+        _orig = getattr(Bot, _name, None)
+        if _orig is not None:
+            setattr(Bot, _name, _wrap_media_method(_orig))
+    _orig_answer = getattr(Bot, "answer_callback_query", None)
+    if _orig_answer is not None:
+        Bot.answer_callback_query = _wrap_callback_answer(_orig_answer)  # type: ignore[assignment]
 
     _PATCHED = True

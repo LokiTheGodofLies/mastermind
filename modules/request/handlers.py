@@ -9,6 +9,7 @@ import config
 from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_request, deduct_request_quota
 from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
+from modules.utility.small_caps import from_small_caps, to_small_caps
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = re.sub(r"^/(?:request|req)(?:@\w+)?\s*", "", raw_text, count=1, flags=re.IGNORECASE | re.DOTALL).strip()
     if not query and context.args:
         query = " ".join(context.args).strip()
+    query = from_small_caps(query)  # titles pasted from the bot's own small-caps text
     if not query:
         await message.reply_text(
             REQUEST_GUIDE_TEXT,
@@ -262,7 +264,9 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
         actor_name = f"@{user.username}" if user.username else html.escape(user.first_name)
 
         orig_text = query.message.text_html or query.message.text or ""
-        clean_text = re.sub(r"\n\n<b>Status:</b>.*", "", orig_text, flags=re.DOTALL)
+        # The card was sent in small caps, so the old "Status" line is matched in both spellings.
+        status_word = f"(?:Status|{re.escape(to_small_caps('Status'))})"
+        clean_text = re.sub(rf"\n\n<b>{status_word}:</b>.*", "", orig_text, flags=re.DOTALL)
         new_text = f"{clean_text}\n\n<b>Status:</b> <mark>{label}</mark> (by {actor_name})"
 
         try:

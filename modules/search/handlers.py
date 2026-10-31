@@ -34,6 +34,7 @@ from modules.allowance.allowance import can_user_search, deduct_search_quota
 from modules.indexing.book_index import format_series_label, parse_title_and_series
 from modules.search.delivery import deliver_file_dual
 from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
+from modules.utility.small_caps import from_small_caps
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,7 @@ async def perform_search(
     """
     user = update.effective_user
     msg = update.effective_message
+    search_term = from_small_caps(search_term or "")  # accept text copied from the bot's small-caps messages
 
     if not _search_allowed_here(update):
         note = "Search works only in the Search topic or in private chat with the bot."

@@ -18,6 +18,19 @@ A high-performance, modular Telegram bot built using Python and `python-telegram
 
 ---
 
+## 🔠 Small Caps Text Engine (`modules/utility/small_caps.py`)
+
+Every message, caption, button label and callback toast the bot sends is converted to small caps automatically, at the last step before it reaches Telegram. **Bot strings stay written in normal text in the source code**; no small-caps glyphs are typed anywhere.
+
+* **Where it hooks in**: `install_rich_ui_patches()` in `rich_ui.py` (`send_message`, `edit_message_text`, `edit_message_reply_markup`, photo/video/animation/document/audio/voice captions, `edit_message_caption`, `answer_callback_query`, and the Bot API 10.3 `sendRichMessage` / `editMessageText` paths). New handlers get it for free.
+* **What stays untouched**: HTML tags and attributes, entities, `<code>`/`<pre>` content (IDs, commands, errors), URLs, `@usernames`, `/commands`, `#hashtags`, button `callback_data` / URLs / `copy_text`, and Storage Group captions (they are machine-read and re-indexed).
+* **Input side**: `from_small_caps()` maps text copied from the bot back to plain letters, so `/search` and `/request` still match the database.
+* **Device support**: the default glyph set renders on iOS and Android phones from 2010 onward using the system font fallback. `q` uses a lookalike glyph, and `s` / `x` stay plain letters because they have no widely supported small-cap form.
+* **Switches (`.env`)**: `SMALL_CAPS=0` disables the feature; `SMALL_CAPS_EXTENDED=1` also uses the true small-cap `s` (newer fonts only).
+* **Tests**: `python tests/test_small_caps.py`
+
+---
+
 ## 🚀 Features, Roles & Commands
 
 ### 👥 Community Roles & Permission Matrix
