@@ -57,7 +57,7 @@ COMMAND_DETAILS = {
             "• <code>/search</code> Percy Jackson\n"
             "• <code>/search</code> Fifty-Fifty\n"
             "• <code>/search</code> Colleen Hoover\n\n"
-            "✨ <i>Tip: Search results come as one wide table (swipe sideways): tap a green Download button under the table, use the format filters (📚 Ebooks / 🎧 Audio) and the green <mark>📨 Send All</mark> button!</i>"
+            "✨ <i>Tip: Search results come as one wide table (swipe sideways): tap the green Download button in the first column, use the format filters (📚 Ebooks / 🎧 Audio) and the green <mark>📨 Send All</mark> button!</i>"
         ),
     },
     "request": {

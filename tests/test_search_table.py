@@ -34,7 +34,7 @@ check("header row", re.findall(r"<th>(.*?)</th>", head) == ["No.", "Title", "Aut
 check("header + 1 body row", tbl.count("<tr>") == 2)
 check("values escaped", "Dragon &lt;Rider&gt; &amp; \"Co\"" in tbl and "<Rider>" not in tbl, tbl)
 check("ext dot", "<td>.epub</td>" in tbl)
-check("first column = plain serial number", "<td>3</td>" in tbl and "<a " not in tbl, tbl)
+check("first column = Download button", '<td><tg-button type="callback_data" style="success" data="file_dl_103">Download 3</tg-button></td>' in tbl, tbl)
 check("no ext -> dash", "<td>-</td>" in sh.build_results_table_html([item(1, ext="")]))
 two = sh.build_results_table_html([item(1), item(2)])
 check("many books = one table, one row each", two.count("<table") == 1 and two.count("<tr>") == 3)
@@ -49,14 +49,15 @@ check("long cell cut", ("T" * 44) not in rich_ui.tables_to_pre(long_tbl) and "â€
 check("3-col table joined", "a | b | c" in rich_ui.tables_to_pre("<table><tr><td>a</td><td>b</td><td>c</td></tr></table>"))
 check("empty table gone", rich_ui.tables_to_pre("x<table></table>y") == "xy")
 
-rich_two = two + "\n" + rich_ui.tg_button_row_html([rich_ui.tg_button_html("Download 1", callback_data="file_dl_101", style="success"), rich_ui.tg_button_html("Download 2", callback_data="file_dl_102", style="success")])
-clean, markup = rich_ui.extract_buttons_and_clean_html_for_fallback(rich_two, None)
+clean, markup = rich_ui.extract_buttons_and_clean_html_for_fallback(two, None)
 check("fallback: no table tag left", "<table" not in clean and "<pre>" in clean, clean)
 check("fallback: monospace shows plain letters", sc.to_small_caps("Dragon") not in clean, clean)
 cbs = [b.callback_data for row in markup.inline_keyboard for b in row]
-check("fallback: Download buttons -> file_dl_<id>", cbs == ["file_dl_101", "file_dl_102"], str(cbs))
-
+check("fallback: cell buttons -> keyboard file_dl_<id>", cbs == ["file_dl_101", "file_dl_102"], str(cbs))
 many_items = [item(i, "Title " * 12, "Author " * 8, "Series " * 8, "9 MB") for i in range(1, 12)]
+_, mk = rich_ui.extract_buttons_and_clean_html_for_fallback(sh.build_results_table_html(many_items), None)
+check("fallback: 5 buttons per row", [len(r) for r in mk.inline_keyboard] == [5, 5, 1], str([len(r) for r in mk.inline_keyboard]))
+
 # message too long -> cells shortened until it fits
 clean_long, _ = rich_ui.extract_buttons_and_clean_html_for_fallback(sh.build_results_table_html(many_items[:10]), None)
 check("fallback length fits Telegram", len(re.sub(r"<[^>]+>", "", clean_long)) <= 4096, str(len(clean_long)))
@@ -104,19 +105,16 @@ async def run():
     text, kw = msg.sent[0]
     check("ONE table on page 1", text.count("<table") == 1, str(text.count("<table")))
     check("header + 10 rows", text.count("<tr>") == 11, str(text.count("<tr>")))
-    rows_btn = re.findall(r"<tg-button-row[^>]*>.*?</tg-button-row>", text, re.DOTALL)
-    check("5 button rows, 2 Download buttons each", len(rows_btn) == 5 and all(r.count("<tg-button ") == 2 for r in rows_btn), str(len(rows_btn)))
+    check("no button rows under the table", "<tg-button-row" not in text)
     for n in range(1, 11):
-        rid = 100 + n
-        check(f"Download {n} -> file_dl_{rid}", f'data="file_dl_{rid}"' in text and f">Download {n}</tg-button>" in text)
-    check("serial in first column", all(f"<td>{n}</td>" in text for n in range(1, 11)))
+        check(f"row {n}: Download button in first column", f'<td><tg-button type="callback_data" style="success" data="file_dl_{100 + n}">Download {n}</tg-button></td>' in text)
     check("audiobook labelled", "<td>Audiobook</td>" in text and text.count("<td>Ebook</td>") == 9)
     check("size shown", "<td>2.61 MB</td>" in text)
     check("series shown", "<td>Standalone</td>" in text)
     check("pagination/filter callbacks kept", all(x in kw["reply_markup"].to_json() for x in ("sp_all_2_dragon", "sf_ebook_1_dragon", "sa_all_1_dragon", "sf_audio_1_dragon")))
     await sh.perform_search(upd, ctx, "dragon", 2, "all")
     t2 = msg.sent[1][0]
-    check("page 2: one table, 2 rows, numbering continues", t2.count("<table") == 1 and t2.count("<tr>") == 3 and "<td>11</td>" in t2 and "<td>12</td>" in t2)
+    check("page 2: one table, 2 rows, numbering continues", t2.count("<table") == 1 and t2.count("<tr>") == 3 and ">Download 11<" in t2 and ">Download 12<" in t2)
     check("page 2 download ids", "file_dl_111" in t2 and "file_dl_112" in t2)
 
 

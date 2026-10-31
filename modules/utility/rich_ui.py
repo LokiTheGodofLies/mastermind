@@ -480,10 +480,12 @@ def extract_buttons_and_clean_html_for_fallback(
             return f'<a href="{attrs["url"]}">{inner}</a>'
         btn = _parse_button_attrs(match.group(1), inner)
         if btn is not None:
-            extracted_rows.append([btn])
+            inline_btns.append(btn)  # grouped 5 per row below (e.g. the buttons inside table cells)
         return f"<b>{inner}</b>"
 
+    inline_btns: list[InlineKeyboardButton] = []
     cleaned = _RE_TG_BUTTON.sub(_replace_inline_btn, cleaned)
+    extracted_rows.extend(inline_btns[i : i + 5] for i in range(0, len(inline_btns), 5))
     # Rich `<table>` blocks do not exist in plain HTML: show them as monospace blocks, and
     # shorten the cells step by step if the whole message would be too long for one message.
     if _RE_TABLE.search(cleaned):

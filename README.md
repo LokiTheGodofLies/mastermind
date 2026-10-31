@@ -20,7 +20,7 @@ A high-performance, modular Telegram bot built using Python and `python-telegram
 
 ## 📋 Search Result Tables (`modules/search/handlers.py`, `modules/utility/rich_ui.py`)
 * Each search page is **ONE wide rich `<table>`** (`build_results_table_html()`, header row + one row per book, scrolls sideways on a phone like Mira's tables): **No. / Title / Author / Series / Size / Format / Ext**.
-* **Download buttons:** column 1 is the plain serial number. Telegram table cells take inline formatting only (no buttons), so every book gets a green in-text `Download N` button right under the table (2 per row, `file_dl_<id>` callback, same dual delivery).
+* **Download buttons:** column 1 of every row holds a green in-text `<tg-button>` (`Download N`, `file_dl_<id>` callback, same dual delivery). The Bot API spec lists `<tg-button>` as an inline element, so it should be allowed in a cell, but this is UNVERIFIED live: if Telegram rejects it, the bot falls back to the plain table + keyboard buttons.
 * **Fallback** (Telegram rejects the rich message): `tables_to_pre()` turns the table into a monospace block (plain letters) and the in-text Download buttons move to the keyboard under the message; long cells are shortened step by step so the message stays under 4096 characters.
 * Bottom keyboard unchanged: Prev / Next, Ebooks / Send All / Audio, Back.
 * In-text button URLs are percent-encoded (`_safe_url()`), because a raw space or apostrophe in a link (e.g. the `/start` share link) can make Telegram reject the whole rich message and force the solid keyboard-button fallback.
