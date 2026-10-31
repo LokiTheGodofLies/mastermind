@@ -46,6 +46,21 @@ o = sc.convert(md, "Markdown"); print("md:", o)
 check("md code/url kept", "`/unban <target_id|@username>`" in o and "(https://a.b/Cc)" in o)
 check("none/empty passthrough", sc.convert(None) is None and sc.convert("") == "" and sc.convert(5) == 5)
 
+
+# ---- monospace safety: code spans always show plain letters ----
+pre_sc = sc.to_small_caps("Loki - The God Of Lies")
+o = sc.convert(f"✍️ <code>{pre_sc}</code> and <pre>{pre_sc}</pre> Normal Text", "HTML")
+print("code safe:", o)
+check("code span plain letters", "<code>loki - the god of lies</code>" in o, o)
+check("pre block plain letters", "<pre>loki - the god of lies</pre>" in o, o)
+check("text outside code still small caps", "Normal" not in o and "ɴᴏʀᴍᴀʟ" in o, o)
+o = sc.convert("<code>Keep Case 123</code>", "HTML")
+check("never-converted code keeps original case", o == "<code>Keep Case 123</code>", o)
+o = sc.convert(f"Use `{pre_sc}` now", "Markdown")
+check("markdown backticks plain letters", "`loki - the god of lies`" in o, o)
+o = sc.convert('<a href="https://x.y/Ab">Link Text</a>', "HTML")
+check("links still converted, url intact", 'href="https://x.y/Ab"' in o and "Link" not in o, o)
+
 os.environ["SMALL_CAPS"] = "0"
 check("kill switch", sc.convert("Hello", None) == "Hello")
 del os.environ["SMALL_CAPS"]

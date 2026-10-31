@@ -10,7 +10,11 @@ Design
 * The converter is *markup aware*. It never touches:
     - HTML tags and attributes (`<b>`, `<a href="...">`, `<tg-button data="...">`)
     - HTML entities (`&amp;`, `&#39;`)
-    - `<code>` / `<pre>` content (IDs, commands, errors, file names - things people copy)
+    - `<code>` / `<pre>` content (IDs, commands, errors, file names - things people copy).
+      Telegram draws these with its own monospace font, which has NO small-cap glyphs and
+      no font fallback (empty boxes). So code spans always show plain letters: text that is
+      already small caps inside them (for example a name stored in the database) is turned
+      back into normal letters.
     - URLs, `t.me/...` links, `tg://` links
     - `@usernames`, `/commands` and `#hashtags` (so they stay tappable and searchable)
 * It is idempotent: converting already-converted text changes nothing.
@@ -109,6 +113,16 @@ _HTML_PROTECT = re.compile(
 _MD_PROTECT = re.compile(r"```.*?```|`[^`\n]*`|\]\([^)\n]*\)", re.DOTALL)
 
 
+def _monospace_safe(span: str) -> str:
+    """Protected spans are copied as they are, except code/pre blocks (HTML) and backtick
+    spans (Markdown), where small-cap glyphs are turned back into plain letters because the
+    monospace font cannot draw them. Tags, URLs and other spans pass through unchanged."""
+    low = span[:6].lower()
+    if low.startswith(("<code", "<pre", "`")):
+        return from_small_caps(span)
+    return span
+
+
 def _convert_plain_segment(text: str) -> str:
     out: list[str] = []
     pos = 0
@@ -125,7 +139,7 @@ def _convert_with(pattern: re.Pattern, text: str) -> str:
     pos = 0
     for m in pattern.finditer(text):
         out.append(_convert_plain_segment(text[pos:m.start()]))
-        out.append(m.group(0))
+        out.append(_monospace_safe(m.group(0)))
         pos = m.end()
     out.append(_convert_plain_segment(text[pos:]))
     return "".join(out)
