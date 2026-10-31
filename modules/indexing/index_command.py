@@ -1,6 +1,7 @@
 import sqlite3
 from config import users_db_path
 
+
 def _init_index_persistence():
     try:
         conn = sqlite3.connect(users_db_path())
@@ -25,6 +26,7 @@ def _init_index_persistence():
         conn.close()
     except Exception:
         pass
+
 
 _init_index_persistence()
 
@@ -61,6 +63,7 @@ from modules.indexing.book_index import (
     format_index_channel_caption,
     format_index_log_message,
     send_media_to_storage,
+    verify_and_heal_indexed_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,8 +173,8 @@ def _status_text(job: dict, stats: dict, phase: str = "running") -> str:
         f"│ 📊 <b>Progress:</b> <code>[{bar}] {pct}%</code>\n"
         f"│\n"
         f"│ 📥 Fetched: <code>{stats['fetched']}/{total}</code>\n"
-        f"│ ✅ Indexed: <code>{stats['ok']}</code>\n"
-        f"│ ♻️ Duplicates: <code>{stats['dup']}</code>\n"
+        f"│ ✅ Indexed / Healed: <code>{stats['ok']}</code>\n"
+        f"│ ♻️ Verified Duplicates: <code>{stats['dup']}</code>\n"
         f"│ 🚫 Filtered: <code>{stats['filtered']}</code>\n"
         f"│ 🗑 Deleted: <code>{stats['deleted']}</code>\n"
         f"│ ⚠️ Errors: <code>{stats['skipped']}</code>\n"
@@ -242,69 +245,41 @@ async def _run_index(context, rid, job):
                     if not info or not info["is_supported"]:
                         stats["filtered"] += 1
                         await _safe_delete(fwd)
-                    elif get_file_by_unique_id_db(info["file_unique_id"]):
-                        stats["dup"] += 1
-                        await _safe_delete(fwd)
                     else:
-                        meta = await enrich_book_metadata(info["file_name"], category=info["category"])
-                        is_matched = meta.get("is_matched", False)
-
-                        for k, v in (info.get("caption_meta") or {}).items():
-                            if v and k in ("book_title", "book_author", "narrator", "length", "book_published"):
-                                meta[k] = v
-
-                        if info["category"] == "audiobook" and (not meta.get("length")) and info["duration"] > 0:
-                            meta["length"] = _format_duration(info["duration"])
-
-                        size = info["file_size"]
-                        size_mb = size / (1024 * 1024)
-                        size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else f"{size / 1024:.2f} KB"
-
-                        caption = format_index_channel_caption(
-                            file_name=info["file_name"],
-                            file_size_str=size_str,
-                            extension=info["extension"].lstrip("."),
-                            file_type=info["mime_type"],
-                            book_meta=meta,
-                            category=info["category"],
-                        )
-
-                        sent = await send_media_to_storage(bot, int(storage), info, caption)
+                        # Remove temporary forward immediately after extracting media info
                         await _safe_delete(fwd)
 
-                        storage_link = _make_storage_msg_link(int(storage), sent.message_id)
-
-                        save_indexed_file_db(
-                            file_unique_id=info["file_unique_id"],
-                            file_id=info["file_id"],
-                            storage_message_id=sent.message_id,
-                            file_name=info["file_name"],
-                            file_size=size,
-                            duration=info["duration"],
+                        # Run 3-Stage Ordered Verification & Self-Healing (1. DB -> 2. Storage -> 3. Caption)
+                        res = await verify_and_heal_indexed_file(
+                            bot=bot,
+                            info=info,
+                            storage_id=int(storage),
                             user_id=job["requester_id"],
                             user_title=job["requester_name"],
-                            caption=(
-                                f"{caption} {info['file_name']} {meta.get('title', '')} "
-                                f"{meta.get('author', '')} {meta.get('series', '')}"
-                            ).strip(),
-                            extension=info["extension"],
-                            file_type=info["mime_type"],
-                            category=info["category"],
-                            is_enriched=1 if is_matched else 0,
+                            source_info=source_info,
                         )
-                        stats["ok"] += 1
 
-                        caption_badge = "📝 caption enriched" if is_matched else "🚧 info not found reported to error logs"
+                        if res["status"] == "duplicate":
+                            stats["dup"] += 1
+                        else:
+                            stats["ok"] += 1
 
-                        # Post Error Log if enrichment failed (< 2 parameters)
-                        if not is_matched and error_log_topic_id and log_group_id:
+                        storage_link = res["storage_link"]
+                        is_matched = res["is_success_enrichment"]
+
+                        # Post Error Log if any stage failed or enrichment failed (< 2 parameters)
+                        if (not is_matched or not res["db_ok"]) and error_log_topic_id and log_group_id:
                             try:
                                 err_text = (
                                     f"⚠️ <b>Caption Enrichment Failed (&lt;2 Parameters Matched)</b>\n\n"
                                     f"📁 <b>File:</b> <code>{html.escape(info['file_name'])}</code>\n"
-                                    f"🔗 <b>Storage Message:</b> <a href=\"{storage_link}\">Message #{sent.message_id}</a>\n"
+                                    f"🔗 <b>Storage Message:</b> <a href=\"{storage_link}\">Message #{res['storage_message_id']}</a>\n"
                                     f"🔑 <b>Unique ID:</b> <code>{info['file_unique_id']}</code>\n"
                                     f"🌐 <b>Source:</b> {source_info}\n\n"
+                                    f"<b>3-Stage Check:</b>\n"
+                                    f"1. 🗄 <b>Database:</b> {res['db_badge']}\n"
+                                    f"2. 📦 <b>Storage:</b> {res['storage_badge']}\n"
+                                    f"3. 📝 <b>Caption:</b> {res['caption_badge']}\n\n"
                                     f"<i>Admins please edit the storage message caption manually. The bot will automatically capture your edit and update the database.</i>"
                                 )
                                 await context.bot.send_message(
@@ -316,19 +291,19 @@ async def _run_index(context, rid, job):
                             except Exception:
                                 pass
 
-                        # Post Standardized Index Log for this file
+                        # Post Standardized 3-Tick Index Log for this file
                         if log_group_id:
                             try:
                                 log_msg = format_index_log_message(
                                     file_name=info["file_name"],
-                                    file_size_str=size_str,
+                                    file_size_str=res["file_size_str"],
                                     file_unique_id=info["file_unique_id"],
                                     storage_link=storage_link,
                                     user_id=job["requester_id"],
                                     user_title=job["requester_name"],
-                                    db_badge="✅ updated",
-                                    storage_badge="🗃️ added to storage group",
-                                    caption_badge=caption_badge,
+                                    db_badge=res["db_badge"],
+                                    storage_badge=res["storage_badge"],
+                                    caption_badge=res["caption_badge"],
                                     source_info=source_info,
                                 )
                                 log_kwargs = {
@@ -372,7 +347,7 @@ async def _log_summary(context, job, stats, final_state):
         f"📥 <b>Indexing {html.escape(final_state)}</b>\n\n"
         f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
         f"👤 By: {html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>)\n"
-        f"✅ Indexed: {stats['ok']} | ♻️ Duplicates: {stats['dup']} | "
+        f"✅ Indexed / Healed: {stats['ok']} | ♻️ Verified Duplicates: {stats['dup']} | "
         f"🚫 Filtered: {stats['filtered']} | 🗑 Deleted: {stats['deleted']} | ⚠️ Errors: {stats['skipped']}"
     )
     kwargs = {"chat_id": int(logger_id), "text": text, "parse_mode": "HTML"}

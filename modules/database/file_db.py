@@ -1,5 +1,4 @@
 import os
-import re
 import sqlite3
 from config import files_db_path
 
@@ -175,10 +174,11 @@ def search_files_db(search_term: str, limit: int = 200):
                 tok_patterns.append(f"%{tok[:-1]}'s%")
                 tok_patterns.append(f"%{tok[:-1]}%")
 
-        # Support number prefixes (e.g. #8 vs 8 vs Book 8)
+        # Support number prefixes (e.g. #8 vs 8 vs Book 8 vs Book #8)
         if tok.isdigit():
             tok_patterns.append(f"%#{tok}%")
             tok_patterns.append(f"%Book {tok}%")
+            tok_patterns.append(f"%Book #{tok}%")
 
         sub_clauses = []
         for pat in tok_patterns:
@@ -221,24 +221,44 @@ def save_indexed_file_db(
     file_type,
     category,
     is_enriched=0,
-):
+) -> bool:
+    """
+    Saves or updates an indexed file record in files.db using ON CONFLICT(file_unique_id) DO UPDATE
+    so that existing primary key `id` (and deep-link `dl_<id>`) is preserved during self-healing.
+    Returns True on success, False on failure.
+    """
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO indexed_files (
-                file_unique_id, file_id, storage_message_id, file_name, file_size, 
+            INSERT INTO indexed_files (
+                file_unique_id, file_id, storage_message_id, file_name, file_size,
                 duration, user_id, user_title, caption, extension, file_type, category, is_enriched
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(file_unique_id) DO UPDATE SET
+                file_id = excluded.file_id,
+                storage_message_id = excluded.storage_message_id,
+                file_name = excluded.file_name,
+                file_size = excluded.file_size,
+                duration = excluded.duration,
+                user_id = CASE WHEN excluded.user_id != 0 THEN excluded.user_id ELSE indexed_files.user_id END,
+                user_title = CASE WHEN excluded.user_title != '' AND excluded.user_title != 'Unknown' THEN excluded.user_title ELSE indexed_files.user_title END,
+                caption = excluded.caption,
+                extension = excluded.extension,
+                file_type = excluded.file_type,
+                category = excluded.category,
+                is_enriched = excluded.is_enriched
         """, (
             file_unique_id, file_id, storage_message_id, file_name, file_size,
             duration, user_id, user_title, caption, extension, file_type, category, int(is_enriched)
         ))
         conn.commit()
         conn.close()
-        print("✅ [DB SUCCESS] Record saved to database.")
+        print("✅ [DB SUCCESS] Record saved/updated in database.")
+        return True
     except Exception as e:
         print(f"❌ [DB ERROR] save_indexed_file_db failed: {e}")
+        return False
 
 
 def get_file_stats_counts_db() -> dict:
@@ -248,7 +268,7 @@ def get_file_stats_counts_db() -> dict:
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM indexed_files")
         total = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM indexed_files WHERE category = 'ebook'")
+        c.execute("SELECT COUNT(*) FROM indexed_files WHERE category IN ('ebook', 'book', 'archive')")
         ebooks = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM indexed_files WHERE category = 'audiobook'")
         audiobooks = c.fetchone()[0]

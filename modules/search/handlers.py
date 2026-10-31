@@ -22,13 +22,14 @@ from config import (
     items_per_page,
     search_chat_id,
     search_topic_id,
+    supported_archive_extensions,
     supported_audiobook_extensions,
     supported_ebook_extensions,
 )
 from modules.database.config_db import get_config
 from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
-from modules.indexing.book_index import parse_title_and_series
+from modules.indexing.book_index import format_series_label, parse_title_and_series
 from modules.search.delivery import deliver_file_dual
 
 
@@ -67,7 +68,7 @@ def _format_size(size_bytes: int) -> str:
 def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
     """
     Extracts Title, Series, Author, Size, and Extension from DB record.
-    Parses caption if present; falls back to filename/metadata.
+    Parses Option B caption (`📖 Title:`, `📚 Series:`, `✍️ Author:`) if present; falls back to filename/metadata.
     """
     caption = row["caption"] or ""
     file_name = row["file_name"] or f"File #{row['id']}"
@@ -76,24 +77,24 @@ def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
 
     # 1. Title
     title = ""
-    m_t = re.search(r"(?:Book|Audiobook):\s*([^\n]+)", caption, re.IGNORECASE)
+    m_t = re.search(r"(?:Title|Book|Audiobook|Archive):\s*([^\n]+)", caption, re.IGNORECASE)
     if m_t:
         clean_t = re.sub(r"<[^>]+>", "", m_t.group(1)).strip()
         if clean_t:
-            title = clean_t
+            title, _ = parse_title_and_series(clean_t)
     if not title:
         raw_t, _ = parse_title_and_series(file_name)
         if " - " in raw_t:
             raw_t = raw_t.split(" - ")[0].strip()
         title = re.sub(r"\.[a-zA-Z0-9]{2,5}$", "", raw_t).strip()
 
-    # 2. Series
+    # 2. Series (Option B format)
     series = ""
     m_s = re.search(r"Series:\s*([^\n]+)", caption, re.IGNORECASE)
     if m_s:
         clean_s = re.sub(r"<[^>]+>", "", m_s.group(1)).strip()
         if clean_s:
-            series = clean_s
+            series = format_series_label(clean_s)
     if not series:
         _, series = parse_title_and_series(file_name)
     if not series:
@@ -157,6 +158,7 @@ async def perform_search(
     all_rows = search_files_db(search_term)
     audio_exts = supported_audiobook_extensions()
     ebook_exts = supported_ebook_extensions()
+    arch_exts = supported_archive_extensions()
 
     # Apply format filters
     filtered_rows = []
@@ -164,10 +166,10 @@ async def perform_search(
         cat = (r["category"] or "").lower()
         ext = f".{(r['extension'] or '').lstrip('.').lower()}"
         is_audio = (cat == "audiobook" or ext in audio_exts)
-        is_ebook = (cat == "ebook" or ext in ebook_exts)
+        is_ebook = (cat in ("ebook", "archive") or ext in ebook_exts or ext in arch_exts)
 
         if filter_mode == "audio":
-            if is_audio:
+            if is_audio or ext in arch_exts:
                 filtered_rows.append(r)
         elif filter_mode == "ebook":
             if is_ebook:
@@ -248,7 +250,6 @@ async def perform_search(
         keyboard.append([InlineKeyboardButton("1/1", callback_data="noop")])
 
     # Row 2: Filters & Send All
-    # Toggle behavior: if already on ebook, tapping 📚 resets to all; same for audio 🎧
     ebk_target = "all" if filter_mode == "ebook" else "ebook"
     aud_target = "all" if filter_mode == "audio" else "audio"
 
@@ -400,16 +401,16 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             all_rows = search_files_db(query)
             audio_exts = supported_audiobook_extensions()
             ebook_exts = supported_ebook_extensions()
+            arch_exts = supported_archive_extensions()
 
-            # Filter rows
             target_rows = []
             for r in all_rows:
                 cat = (r["category"] or "").lower()
                 ext = f".{(r['extension'] or '').lstrip('.').lower()}"
                 is_audio = (cat == "audiobook" or ext in audio_exts)
-                is_ebook = (cat == "ebook" or ext in ebook_exts)
+                is_ebook = (cat in ("ebook", "archive") or ext in ebook_exts or ext in arch_exts)
 
-                if f_mode == "audio" and is_audio:
+                if f_mode == "audio" and (is_audio or ext in arch_exts):
                     target_rows.append(r)
                 elif f_mode == "ebook" and is_ebook:
                     target_rows.append(r)
@@ -432,7 +433,7 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                     await deliver_file_dual(update, context, int(row["id"]))
                     delivered_count += 1
                     await asyncio.sleep(0.4)
-                except Exception as e:
+                except Exception:
                     pass
 
             await q.message.reply_text(

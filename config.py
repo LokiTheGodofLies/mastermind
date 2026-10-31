@@ -31,7 +31,7 @@ SAMPLE_ERROR_LOG_TOPIC_ID = 7
 
 SAMPLE_COMMUNITY_LINK = "https://t.me/sample_mastermind_community"
 
-# Default supported formats
+# Default supported formats (Ebooks, Audiobooks, and Book/Audiobook Archives)
 DEFAULT_EBOOK_EXTENSIONS = (
     ".epub",
     ".pdf",
@@ -40,15 +40,28 @@ DEFAULT_EBOOK_EXTENSIONS = (
     ".mobi",
     ".cbz",
     ".cbr",
+    ".djvu",
+    ".fb2",
+    ".txt",
+    ".rtf",
 )
 
 DEFAULT_AUDIOBOOK_EXTENSIONS = (
     ".mp3",
     ".m4b",
+    ".m4a",
     ".aax",
     ".aa",
     ".flac",
     ".wav",
+    ".ogg",
+    ".opus",
+)
+
+DEFAULT_ARCHIVE_EXTENSIONS = (
+    ".zip",
+    ".rar",
+    ".7z",
 )
 
 DEFAULT_SCRAPER_USER_AGENT = (
@@ -181,7 +194,7 @@ def creator_dm_link() -> str:
             return f"tg://user?id={cid}"
     except Exception:
         pass
-    return "https://t.me/heyucutie" 
+    return "https://t.me/heyucutie"
 
 
 def admin_ids():
@@ -303,7 +316,7 @@ def auto_delete_seconds():
 
 
 # ---------------------------------------------------------------------------
-# Supported File Formats (Ebooks & Audiobooks)
+# Supported File Formats (Ebooks, Audiobooks & Archives)
 # ---------------------------------------------------------------------------
 def _parse_ext_set(env_name, defaults):
     raw = _clean(env_name)
@@ -321,18 +334,27 @@ def _parse_ext_set(env_name, defaults):
 
 
 def supported_ebook_extensions():
-    """Supported ebook extensions: .epub, .pdf, .azw, .azw3, .mobi, .cbz, .cbr."""
+    """Supported ebook extensions: .epub, .pdf, .azw, .azw3, .mobi, .cbz, .cbr, .djvu, .fb2, .txt, .rtf."""
     return _parse_ext_set("SUPPORTED_EBOOK_EXTENSIONS", DEFAULT_EBOOK_EXTENSIONS)
 
 
 def supported_audiobook_extensions():
-    """Supported audiobook extensions: .mp3, .m4b, .aax, .aa, .flac, .wav."""
+    """Supported audiobook extensions: .mp3, .m4b, .m4a, .aax, .aa, .flac, .wav, .ogg, .opus."""
     return _parse_ext_set("SUPPORTED_AUDIOBOOK_EXTENSIONS", DEFAULT_AUDIOBOOK_EXTENSIONS)
 
 
+def supported_archive_extensions():
+    """Supported archive extensions for packed books/audiobooks: .zip, .rar, .7z."""
+    return _parse_ext_set("SUPPORTED_ARCHIVE_EXTENSIONS", DEFAULT_ARCHIVE_EXTENSIONS)
+
+
 def supported_extensions():
-    """Union of all supported ebook and audiobook extensions."""
-    return supported_ebook_extensions() | supported_audiobook_extensions()
+    """Union of all supported ebook, audiobook, and archive extensions."""
+    return (
+        supported_ebook_extensions()
+        | supported_audiobook_extensions()
+        | supported_archive_extensions()
+    )
 
 
 # ---------------------------------------------------------------------------
