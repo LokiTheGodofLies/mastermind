@@ -292,17 +292,27 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             except Exception as report_err:
                 logger.error("Failed to report delivery error to logger group: %s", report_err)
 
-    # 2. Send file to User's Bot PM using the SAME selected helper bot ONLY
+    # 2. Send file to User's Bot PM using the SAME selected helper bot ONLY (with auto-delete)
     pm_delivered = False
     if helper_token:
         try:
-            await _copy_with_bot(
+            pm_copy = await _copy_with_bot(
                 helper_token,
                 int(user.id),
                 int(storage_id),
                 int(storage_msg_id),
             )
             pm_delivered = True
+            if pm_copy and delete_secs > 0:
+                asyncio.create_task(
+                    _auto_delete_message(
+                        helper_token,
+                        context.bot,
+                        int(user.id),
+                        pm_copy.message_id,
+                        delete_secs,
+                    )
+                )
         except Exception as exc:
             exc_str = str(exc)
             logger.info("Helper bot PM delivery pending user /start for %s: %s", user.id, exc_str)
@@ -340,7 +350,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 f"✅ <b>File sent directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
                 f"📢 You can also <a href=\"{posting_link}\"><b>click here</b></a> and view it in the posting channel.\n\n"
                 f"⚠️ <b>Don't forget to forward the files to your Saved Messages — "
-                f"posting channel copies auto-delete in {delete_mins} mins!</b>"
+                f"both PM and posting channel copies auto-delete in {delete_mins} mins!</b>"
             )
         else:
             text = (
@@ -355,14 +365,14 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             text = (
                 f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
                 f"✅ <b>File sent directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
-                f"⚠️ <b>Don't forget to forward the files to your Saved Messages!</b>"
+                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — PM copy auto-deletes in {delete_mins} mins!</b>"
             )
         else:
             text = (
                 f"📁 <b>File:</b> <code>{file_name_esc}</code>\n\n"
                 f"🤖 Start <a href=\"{helper_start_url}\">@{html.escape(helper_username)}</a> below "
                 f"to receive your file in PM.\n\n"
-                f"⚠️ <b>Don't forget to forward the files to your Saved Messages!</b>"
+                f"⚠️ <b>Don't forget to forward the files to your Saved Messages — PM copy auto-deletes in {delete_mins} mins!</b>"
             )
     elif posting_link:
         text = (
@@ -385,6 +395,14 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             buttons.append([InlineKeyboardButton(f"🤖 Start @{helper_username} (Receive in PM) ↗️", url=helper_start_url)])
     if posting_link:
         buttons.append([InlineKeyboardButton("📢 View in Posting Channel ↗️", url=posting_link)])
+
+    # If the interaction originated inside a Helper Bot (e.g. deep-link /start),
+    # the file is already delivered directly into this chat with auto-delete.
+    # Do NOT send the redundant delivery confirmation card inside the helper bot.
+    main_token = bot_token()
+    main_bot_id = int(main_token.split(":")[0]) if main_token else 0
+    if context.bot and context.bot.id and main_bot_id and (context.bot.id != main_bot_id):
+        return
 
     markup = InlineKeyboardMarkup(buttons) if buttons else None
     await msg.reply_text(

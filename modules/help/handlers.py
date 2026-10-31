@@ -20,6 +20,7 @@ from modules.database.user_db import get_user_role_db, is_admin_or_creator, is_c
 
 # ---------------------------------------------------------------------------
 # Individual Command & Feature Documentation Cards (with Emojis)
+# Touch-to-copy format applied ONLY to command names, not arguments/queries.
 # ---------------------------------------------------------------------------
 COMMAND_DETAILS = {
     # =======================================================================
@@ -31,11 +32,14 @@ COMMAND_DETAILS = {
         "text": (
             "🚀 <b>Command:</b> <code>/start</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Launches the bot, initializes your daily quota, displays the interactive main navigation hub, "
-            "and supports direct file downloading via helper deep-links.\n\n"
-            "💡 <b>Usage:</b>\n"
+            "Launches the bot, initializes your daily search and request allowances, "
+            "displays the interactive main menu, and handles one-tap book download links.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/start</code>\n"
+            "• <code>/start</code> dl_&lt;file_id&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
             "• Send <code>/start</code> in private chat to open the main menu.\n"
-            "• Click any download button in search results to trigger deep-link delivery via <code>/start dl_...</code>."
+            "• Click any download button in search results to receive files instantly via <code>/start</code> dl_6."
         ),
     },
     "search": {
@@ -44,10 +48,14 @@ COMMAND_DETAILS = {
         "text": (
             "🔍 <b>Command:</b> <code>/search</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Searches the indexed community book and audiobook library across filenames, titles, authors, series, and captions.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• <code>/search &lt;keywords&gt;</code> (in private chat or in the official Search topic).\n"
-            "• Features structured results, format filters (📚 / 🎧), Send All button, and deep-link downloads."
+            "Searches our community library across book titles, authors, series, and descriptions.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/search</code> &lt;book title or author&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/search</code> Percy Jackson\n"
+            "• <code>/search</code> Haunting Adeline\n"
+            "• <code>/search</code> Colleen Hoover\n\n"
+            "✨ <i>Tip: Results feature format filters (📚 Ebooks / 🎧 Audiobooks) and deep-link downloads!</i>"
         ),
     },
     "request": {
@@ -56,10 +64,13 @@ COMMAND_DETAILS = {
         "text": (
             "📥 <b>Command:</b> <code>/request</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Submits a request for a missing book or audiobook directly to the community Request Channel.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• <code>/request &lt;Book Title and Author&gt;</code>\n"
-            "• The request is forwarded with interactive status buttons (Pending, Processing, Completed, Rejected) for Moderators."
+            "Submits a request for any missing book or audiobook directly to our community Request Channel.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/request</code> &lt;book title and author&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/request</code> Fourth Wing by Rebecca Yarros\n"
+            "• <code>/request</code> A Court of Thorns and Roses by Sarah J. Maas\n\n"
+            "✨ <i>Tip: Moderators review requests and update status buttons live!</i>"
         ),
     },
     "quota": {
@@ -68,10 +79,17 @@ COMMAND_DETAILS = {
         "text": (
             "📊 <b>Command:</b> <code>/quota</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Displays your live daily search and request allowances, remaining balance, and midnight IST reset timer.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• Send <code>/quota</code> to view your quota card.\n"
-            "• Daily Limits: User (10/10), Promoter (20/20), Volunteer (30/30), Moderator (40/40), Admin (Unlimited)."
+            "Displays your live daily search and request balance, your account tier, and midnight IST reset timer.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/quota</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/quota</code> in any chat to view your remaining daily quota card.\n\n"
+            "🏆 <b>Daily Allowances by Tier:</b>\n"
+            "• 👤 User: 10 searches & 10 requests\n"
+            "• 📣 Promoter: 20 searches & 20 requests\n"
+            "• 🤝 Volunteer: 30 searches & 30 requests\n"
+            "• 🛡️ Moderator: 40 searches & 40 requests\n"
+            "• ⚔️ Administrator: Unlimited"
         ),
     },
     "refer": {
@@ -80,21 +98,27 @@ COMMAND_DETAILS = {
         "text": (
             "🔗 <b>Commands:</b> <code>/refer</code> & <code>/myreferrals</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Generates your personal referral link. Share it with friends to earn bonus search and request allowances!\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• <code>/refer</code>: View your referral link and reward milestones (+10 searches & requests per referral).\n"
-            "• <code>/myreferrals</code>: Check your successful invite count and earned bonuses."
+            "Generates your personal invite link. Invite friends to join our library and earn bonus searches & requests!\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/refer</code> (generates your unique invite link)\n"
+            "• <code>/myreferrals</code> (checks your invite stats and bonus balance)\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• Send <code>/refer</code> to copy your invite link.\n"
+            "• Send <code>/myreferrals</code> to check how many friends joined through your link.\n\n"
+            "🎁 <b>Reward:</b> +10 searches & +10 requests per successful invite!"
         ),
     },
     "support": {
-        "title": "🛡️ support",
+        "title": "💬 support",
         "category": "user",
         "text": (
-            "🛡️ <b>Command:</b> <code>/support</code>\n\n"
+            "💬 <b>Command:</b> <code>/support</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Connects you to the official Support Community Chat for inquiries, book discussions, and community assistance.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• Send <code>/support</code> to receive the official community join link."
+            "Provides the direct invite link to our official community support group for reading discussions, help, and feedback.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/support</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/support</code> to receive the official community join button."
         ),
     },
     "stats": {
@@ -103,9 +127,11 @@ COMMAND_DETAILS = {
         "text": (
             "📈 <b>Command:</b> <code>/stats</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Displays live library metrics, total indexed files, ebook and audiobook counts, and bot uptime.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• Send <code>/stats</code> to view system statistics."
+            "Displays live library metrics, including total indexed books, separate ebook and audiobook counts, active users, and system uptime.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/stats</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/stats</code> to inspect current library and system metrics."
         ),
     },
     "id": {
@@ -114,11 +140,15 @@ COMMAND_DETAILS = {
         "text": (
             "🆔 <b>Command:</b> <code>/id</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Retrieves full identification details for users, chats, groups, channels, and forum topics.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• <code>/id</code> in any chat to view your User ID, Chat ID, and Topic ID.\n"
-            "• Reply to any message with <code>/id</code> to inspect that sender's name and ID.\n"
-            "• <code>/id @username</code>: Look up user details."
+            "Retrieves unique Telegram IDs for users, groups, channels, or forum topics.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/id</code>\n"
+            "• <code>/id</code> @username\n"
+            "• Reply to any message with <code>/id</code>\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• Send <code>/id</code> to view your own User ID and Chat ID.\n"
+            "• <code>/id</code> @HDCarltonbot\n"
+            "• Reply to any message with <code>/id</code> to inspect that user\'s info."
         ),
     },
     "rosters": {
@@ -127,10 +157,11 @@ COMMAND_DETAILS = {
         "text": (
             "👥 <b>Community Roster Commands</b>\n\n"
             "View official lists of community team members with direct profile links:\n\n"
-            "• <code>/admins</code>: Lists all Administrators and the Creator.\n"
-            "• <code>/moderators</code>: Lists all active Moderators (alias: <code>/mods</code>).\n"
-            "• <code>/volunteers</code>: Lists all active Volunteers (alias: <code>/vols</code>).\n"
-            "• <code>/promoters</code>: Lists all active Promoters (alias: <code>/promos</code>)."
+            "💡 <b>Commands & Examples:</b>\n"
+            "• <code>/admins</code> — Lists all Administrators and the Creator.\n"
+            "• <code>/moderators</code> (or <code>/mods</code>) — Lists all active Moderators.\n"
+            "• <code>/volunteers</code> (or <code>/vols</code>) — Lists all active Volunteers.\n"
+            "• <code>/promoters</code> (or <code>/promos</code>) — Lists all active Promoters."
         ),
     },
     "delivery": {
@@ -139,8 +170,10 @@ COMMAND_DETAILS = {
         "text": (
             "📦 <b>Dual File Delivery System</b>\n\n"
             "When you download a file from search results, the bot offers two delivery methods:\n\n"
-            "1. <b>🤖 Fast DM Delivery:</b> File is delivered directly to your private chat via helper bots.\n"
-            "2. <b>📢 Posting Channel:</b> File is temporarily posted in the official channel and auto-deleted after 5 minutes for privacy."
+            "1. <b>🤖 Fast PM Delivery:</b> The file is sent directly to your private chat via helper bots (with 5-minute auto-delete).\n"
+            "2. <b>📢 Posting Channel:</b> A temporary copy is posted in the channel (with 5-minute auto-delete).\n\n"
+            "⚠️ <b>Important Tip:</b>\n"
+            "Forward your received files to your <b>Saved Messages</b> before the 5-minute timer expires!"
         ),
     },
     "roles": {
@@ -148,13 +181,13 @@ COMMAND_DETAILS = {
         "category": "user",
         "text": (
             "👥 <b>Community User Roles & Privileges Breakdown</b>\n\n"
-            "Our community has 6 structured roles to organize library contributions and governance:\n\n"
+            "Our community has 6 structured tiers to organize library contributions and governance:\n\n"
             "👤 <b>Normal User:</b>\n"
             "• Quota: 10 daily searches & 10 daily requests.\n"
-            "• Access: /start, /search, /request, /quota, /refer, /support, /stats, /id, and rosters.\n\n"
+            "• Access: /start, /search, /request, /quota, /refer, /support, /stats, /id, rosters.\n\n"
             "📣 <b>Promoter:</b>\n"
             "• Quota: 20 daily searches & 20 daily requests.\n"
-            "• Appointed by Admins to promote the community.\n\n"
+            "• Appointed by Admins to share and promote our community library.\n\n"
             "🤝 <b>Volunteer:</b>\n"
             "• Quota: 30 daily searches & 30 daily requests.\n"
             "• Pre-approved direct book & audiobook indexing via Helper Bot DMs.\n\n"
@@ -163,7 +196,7 @@ COMMAND_DETAILS = {
             "• Direct indexing + Request Channel status management (Pending, Processing, Completed, Rejected).\n\n"
             "⚔️ <b>Administrator:</b>\n"
             "• Quota: Unlimited searches & requests.\n"
-            "• Batch range /index, /broadcast with auto-pin & pause/resume, /ban, /gift, /editscript, /checkhelpers, and promoting Mods/Vols/Promos.\n\n"
+            "• Batch range indexing (/index), announcements (/broadcast), bans (/ban), gifts (/gift), and team promotions.\n\n"
             "👑 <b>Creator:</b>\n"
             "• Supreme governance, admin appointments (/addadmin), production deployment (/publish), and system backups."
         ),
@@ -183,13 +216,13 @@ COMMAND_DETAILS = {
         ),
     },
     "vol_indexing": {
-        "title": "🤖 vol_indexing",
+        "title": "📚 vol_indexing",
         "category": "volunteer",
         "text": (
             "📚 <b>Volunteer Helper Bot Indexing Guide</b>\n\n"
             "1. Start a private chat with any official Helper Bot (e.g. @Heyuqtbot or @RickRiordanBot).\n"
             "2. Send or forward supported book (.epub, .pdf, .mobi, .azw) or audiobook (.mp3, .m4b, .flac) files.\n"
-            "3. The bot extracts metadata, stores the file in the Storage Group, and logs it automatically."
+            "3. The bot extracts metadata, enriches book details, stores the file in the Storage Group, and logs it automatically!"
         ),
     },
     "vol_notice": {
@@ -223,7 +256,7 @@ COMMAND_DETAILS = {
             "When users submit book requests via <code>/request</code>, they appear in the Request Channel.\n"
             "Moderators use inline buttons to update the status:\n"
             "• ⏳ <b>Pending:</b> Request is awaiting review.\n"
-            "• 🔄 <b>Processing:</b> Request is being sourced.\n"
+            "• 🔄 <b>Processing:</b> Request is currently being sourced.\n"
             "• ✅ <b>Completed:</b> File was found and indexed into the library.\n"
             "• ❌ <b>Rejected:</b> Book cannot be fulfilled."
         ),
@@ -233,8 +266,8 @@ COMMAND_DETAILS = {
         "category": "moderator",
         "text": (
             "🤖 <b>Moderator Direct Indexing Guide</b>\n\n"
-            "Send or forward supported ebook and audiobook files directly to any Helper Bot in private chat. "
-            "Metadata is enriched automatically and stored in the library."
+            "Send or forward supported ebook and audiobook files directly to any Helper Bot in private chat.\n"
+            "Metadata is enriched automatically across multiple book databases and stored in the library."
         ),
     },
     "mod_notice": {
@@ -257,7 +290,12 @@ COMMAND_DETAILS = {
             "🤖 <b>Command:</b> <code>/checkhelpers</code> (alias: <code>/helpers</code>)\n\n"
             "📝 <b>Purpose:</b>\n"
             "Audits all configured helper delivery bots. Verifies token reachability, username resolution, "
-            "presence in the Storage Group, and admin rights in the Posting Channel."
+            "presence in the Storage Group, and admin rights in the Posting Channel.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/checkhelpers</code>\n"
+            "• <code>/helpers</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/checkhelpers</code> to inspect your helper bot delivery fleet."
         ),
     },
     "index": {
@@ -267,10 +305,14 @@ COMMAND_DETAILS = {
             "📚 <b>Command:</b> <code>/index</code>\n\n"
             "📝 <b>Purpose:</b>\n"
             "Batch indexes ebooks and audiobooks from channels or groups into the Storage Group with multi-site metadata enrichment.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• <code>/index &lt;first_link&gt; &lt;last_link&gt;</code>\n"
-            "• <code>/index [skip_count]</code> (in source chat)\n"
-            "• <code>/index</code> in private chat for interactive step-by-step setup."
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/index</code> &lt;first_link&gt; &lt;last_link&gt;\n"
+            "• <code>/index</code> [skip_count] (in source channel)\n"
+            "• <code>/index</code> (in private chat for interactive wizard)\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/index</code> https://t.me/c/12345/10 https://t.me/c/12345/50\n"
+            "• <code>/index</code> 5\n"
+            "• <code>/index</code>"
         ),
     },
     "broadcast": {
@@ -279,8 +321,18 @@ COMMAND_DETAILS = {
         "text": (
             "📢 <b>Command:</b> <code>/broadcast</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Dispatches announcements with interactive toggles (Users, Groups, Channels, All), multi-bot pool delivery, "
-            "auto-pinning, and live Pause/Resume/Cancel controls."
+            "Dispatches announcements with interactive audience filters (Users, Groups, Channels, or All), "
+            "auto-pinning, and live Pause/Resume/Cancel controls.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/broadcast</code> &lt;announcement text&gt;\n"
+            "• Reply to any message or media with <code>/broadcast</code>\n"
+            "• <code>/pausebroadcast</code> — Pauses the ongoing broadcast\n"
+            "• <code>/resumebroadcast</code> — Resumes a paused broadcast\n"
+            "• <code>/cancelbroadcast</code> — Cancels the broadcast\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/broadcast</code> 📚 We have added 100 new fantasy books to the catalog!\n"
+            "• <code>/pausebroadcast</code>\n"
+            "• <code>/resumebroadcast</code>"
         ),
     },
     "ban": {
@@ -290,19 +342,32 @@ COMMAND_DETAILS = {
             "🚫 <b>Commands:</b> <code>/ban</code>, <code>/ban_pm</code>, <code>/ban_support</code>, <code>/unban</code>\n\n"
             "📝 <b>Purpose:</b>\n"
             "Applies or lifts granular restrictions on users or chats:\n"
-            "• <code>/ban &lt;id|@username&gt; [reason]</code>: Block globally.\n"
-            "• <code>/ban_pm &lt;id|@username&gt;</code>: Block in DMs only.\n"
-            "• <code>/ban_support &lt;id|@username&gt;</code>: Restrict in support chat.\n"
-            "• <code>/unban &lt;id|@username&gt;</code>: Completely lifts restrictions."
+            "• Global Ban: Restricts user from both DMs and community groups.\n"
+            "• PM Ban: Restricts user from bot private chat only.\n"
+            "• Support Ban: Restricts user from community support chat only.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/ban</code> &lt;user_id or @username&gt; [reason]\n"
+            "• <code>/ban_pm</code> &lt;user_id or @username&gt;\n"
+            "• <code>/ban_support</code> &lt;user_id or @username&gt;\n"
+            "• <code>/unban</code> &lt;user_id or @username&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/ban</code> 123456789 Spamming promotional links\n"
+            "• <code>/ban_pm</code> @bad_user\n"
+            "• <code>/unban</code> 123456789"
         ),
     },
     "gift": {
         "title": "🎁 gift",
         "category": "admin",
         "text": (
-            "🎁 <b>Command:</b> <code>/gift &lt;user_id&gt; &lt;searches&gt; &lt;requests&gt;</code>\n\n"
+            "🎁 <b>Command:</b> <code>/gift</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Grants bonus daily search and request allowances to any user."
+            "Grants bonus daily search and request allowances to any user.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/gift</code> &lt;user_id&gt; &lt;searches&gt; &lt;requests&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/gift</code> 123456789 25 25\n"
+            "• <code>/gift</code> 987654321 50 10"
         ),
     },
     "editscript": {
@@ -311,17 +376,29 @@ COMMAND_DETAILS = {
         "text": (
             "🛠️ <b>Command:</b> <code>/editscript</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Opens the dynamic configuration hub in <code>config.db</code> to modify templates, banners, "
-            "and text live without restarting the bot."
+            "Opens the dynamic configuration hub to modify banners, welcome messages, caption templates, "
+            "and channel links live without restarting the bot.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/editscript</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/editscript</code> to open the dynamic template management menu."
         ),
     },
     "log": {
         "title": "📋 log",
         "category": "admin",
         "text": (
-            "📋 <b>Command:</b> <code>/log [count|duration]</code>\n\n"
+            "📋 <b>Command:</b> <code>/log</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Exports in-memory system logs as a downloadable document directly in Telegram."
+            "Exports in-memory system logs as a downloadable document directly in Telegram.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/log</code> (recent logs)\n"
+            "• <code>/log</code> &lt;number of lines&gt;\n"
+            "• <code>/log</code> &lt;duration, e.g. 1h, 30m&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/log</code>\n"
+            "• <code>/log</code> 500\n"
+            "• <code>/log</code> 2h"
         ),
     },
     "ping": {
@@ -330,7 +407,11 @@ COMMAND_DETAILS = {
         "text": (
             "🏓 <b>Command:</b> <code>/ping</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Tests bot responsiveness, round-trip API latency, and network statistics."
+            "Tests bot responsiveness, round-trip API latency, and server uptime.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/ping</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/ping</code> to verify bot health and response latency."
         ),
     },
     "addmoderator": {
@@ -339,7 +420,14 @@ COMMAND_DETAILS = {
         "text": (
             "🛡️ <b>Commands:</b> <code>/addmoderator</code> & <code>/removemoderator</code>\n"
             "<i>(Aliases: /addmod, /removemod, /delmod)</i>\n\n"
-            "Promotes or demotes a Moderator (40 daily quota, request management buttons)."
+            "📝 <b>Purpose:</b>\n"
+            "Promotes or demotes a Moderator (40 daily quota, request management buttons).\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/addmoderator</code> &lt;user_id or @username&gt;\n"
+            "• <code>/removemoderator</code> &lt;user_id or @username&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/addmoderator</code> 123456789\n"
+            "• <code>/removemoderator</code> @username"
         ),
     },
     "addvolunteer": {
@@ -348,7 +436,14 @@ COMMAND_DETAILS = {
         "text": (
             "🤝 <b>Commands:</b> <code>/addvolunteer</code> & <code>/removevolunteer</code>\n"
             "<i>(Aliases: /addvol, /removevol, /delvol)</i>\n\n"
-            "Promotes or demotes a Volunteer (30 daily quota, pre-approved helper indexing)."
+            "📝 <b>Purpose:</b>\n"
+            "Promotes or demotes a Volunteer (30 daily quota, pre-approved helper indexing).\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/addvolunteer</code> &lt;user_id or @username&gt;\n"
+            "• <code>/removevolunteer</code> &lt;user_id or @username&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/addvolunteer</code> 123456789\n"
+            "• <code>/removevolunteer</code> @username"
         ),
     },
     "addpromoter": {
@@ -357,7 +452,14 @@ COMMAND_DETAILS = {
         "text": (
             "📣 <b>Commands:</b> <code>/addpromoter</code> & <code>/removepromoter</code>\n"
             "<i>(Aliases: /addpromo, /removepromo, /delpromo)</i>\n\n"
-            "Promotes or demotes a Promoter (20 daily quota)."
+            "📝 <b>Purpose:</b>\n"
+            "Promotes or demotes a Promoter (20 daily quota).\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/addpromoter</code> &lt;user_id or @username&gt;\n"
+            "• <code>/removepromoter</code> &lt;user_id or @username&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/addpromoter</code> 123456789\n"
+            "• <code>/removepromoter</code> @username"
         ),
     },
 
@@ -371,9 +473,13 @@ COMMAND_DETAILS = {
             "🚀 <b>Command:</b> <code>/publish</code>\n\n"
             "📝 <b>Purpose:</b>\n"
             "Merges the tested & verified <code>test</code> branch into <code>main</code> and pushes to "
-            "both <code>loki main</code> and <code>origin main</code>.\n"
-            "Triggers the live deployment on Render Public Books Bot with a single tap right from Telegram.\n\n"
-            "🔒 <b>Access:</b> Creator Only"
+            "both <code>loki main</code> and <code>origin main</code> using authenticated refspecs.\n"
+            "Triggers the live deployment on Render Public Books Bot with a single tap right from Telegram!\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/publish</code>\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Send <code>/publish</code> in Telegram after verifying features on the testing bot.\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
     "update": {
@@ -382,32 +488,47 @@ COMMAND_DETAILS = {
         "text": (
             "📦 <b>Command:</b> <code>/update</code>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Updates bot code in-chat without Termux. Send or reply to an updated <code>.zip</code> file with <code>/update</code>.\n"
+            "Updates bot code directly in-chat without Termux. Send or reply to an updated <code>.zip</code> file with <code>/update</code>.\n"
             "The bot unpacks the code, verifies with compileall, commits, and pushes to GitHub automatically!\n\n"
-            "🔒 <b>Access:</b> Creator Only"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/update</code> (as caption or reply to a .zip archive)\n\n"
+            "📌 <b>Example:</b>\n"
+            "• Forward <code>mastermind-test-updated-....zip</code> to the bot with caption <code>/update</code>.\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
     "sh": {
         "title": "💻 sh",
         "category": "creator",
         "text": (
-            "💻 <b>Command:</b> <code>/sh &lt;command&gt;</code> (alias: <code>/term</code>)\n\n"
+            "💻 <b>Command:</b> <code>/sh</code> (alias: <code>/term</code>)\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Executes bash shell commands directly from Telegram.\n\n"
-            "💡 <b>Usage:</b>\n"
-            "• <code>/sh git status</code>\n"
-            "• <code>/sh git log -1 --oneline</code>\n"
-            "• <code>/sh df -h</code>\n\n"
-            "🔒 <b>Access:</b> Creator Only"
+            "Executes bash shell commands directly on the host server and returns output live in Telegram.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/sh</code> &lt;shell command&gt;\n"
+            "• <code>/term</code> &lt;shell command&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/sh</code> git status\n"
+            "• <code>/sh</code> git log -1 --oneline\n"
+            "• <code>/sh</code> df -h\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
     "addadmin": {
         "title": "👑 addadmin",
         "category": "creator",
         "text": (
-            "👑 <b>Commands:</b> <code>/addadmin</code> & <code>/removeadmin</code>\n\n"
+            "👑 <b>Commands:</b> <code>/addadmin</code> & <code>/removeadmin</code>\n"
+            "<i>(Alias: /deladmin)</i>\n\n"
             "📝 <b>Purpose:</b>\n"
-            "Appoints or removes an Administrator. Exclusive to the Creator."
+            "Appoints or removes an Administrator. Exclusive to the Creator.\n\n"
+            "💡 <b>Syntax:</b>\n"
+            "• <code>/addadmin</code> &lt;user_id or @username&gt;\n"
+            "• <code>/removeadmin</code> &lt;user_id or @username&gt;\n\n"
+            "📌 <b>Examples:</b>\n"
+            "• <code>/addadmin</code> 123456789\n"
+            "• <code>/removeadmin</code> @username\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
     "creator_privileges": {
@@ -416,7 +537,8 @@ COMMAND_DETAILS = {
         "text": (
             "👑 <b>Creator Supreme Authority</b>\n\n"
             "The Creator has absolute governance across all bot operations, helper pools, "
-            "database persistence, and administrative appointments."
+            "database persistence, and administrative appointments.\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
     "backup": {
@@ -424,8 +546,9 @@ COMMAND_DETAILS = {
         "category": "creator",
         "text": (
             "💾 <b>Automated SQLite Backups</b>\n\n"
-            "Backups of <code>files.db</code>, <code>users.db</code>, and <code>config.db</code> are compiled into a ZIP "
-            "and posted to the Backup Topic (PUBLIC_BACKUP_TOPIC_ID=4 / TESTING_BACKUP_TOPIC_ID=583)."
+            "Backups of <code>files.db</code>, <code>users.db</code>, and <code>config.db</code> are compiled into a ZIP archive "
+            "every 6 hours and dispatched to the designated Backup Topic.\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
     "governance": {
@@ -433,14 +556,15 @@ COMMAND_DETAILS = {
         "category": "creator",
         "text": (
             "⚙️ <b>Global Architecture & Identity Governance</b>\n\n"
-            "Environment configuration, isolated Public/Testing credentials, and Render deployment monitoring."
+            "Environment configuration, isolated Public/Testing credentials, and Render deployment monitoring.\n\n"
+            "🔒 <b>Access:</b> Creator Only 👑"
         ),
     },
 }
 
 
 # ---------------------------------------------------------------------------
-# Menu Builders with Pagination (Max 4-6 buttons per page, Clean Command Labels with Emojis)
+# Menu Builders with Pagination (Max 6 buttons per page, Clean Command Labels with Emojis)
 # ---------------------------------------------------------------------------
 PAGE_SIZE = 6
 
@@ -476,7 +600,7 @@ def build_paginated_category_menu(category: str, page: int = 1):
 
     text = (
         f"<b>{cat_title}</b> (Page {page}/{total_pages})\n\n"
-        "Tap any command below to inspect its purpose, syntax, and guidelines:"
+        "Tap any command below to inspect its purpose, syntax, and examples:"
     )
 
     buttons = []
@@ -508,9 +632,8 @@ def build_paginated_category_menu(category: str, page: int = 1):
 def build_main_help_menu(user_id: int):
     """
     Builds the main help menu page:
-    1. Only displays categories accessible to the user's role level.
-    2. Includes a dedicated '👥 roles' (User Roles) button directly on the main page so all users
-       can view and understand the roles of other users without seeing higher-level commands.
+    1. Only displays categories accessible to the user\'s role level.
+    2. Includes a dedicated '👥 roles' button directly on the main page.
     """
     role = get_user_role_db(user_id)
     is_creator_user = is_creator(user_id)
@@ -604,45 +727,37 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await q.answer("⛔ Access restricted to Administrators.", show_alert=True)
             return
         if category == "creator" and not is_creator(user_id):
-            await q.answer("⛔ Access restricted to Creator only.", show_alert=True)
+            await q.answer("⛔ Access restricted to the Creator.", show_alert=True)
             return
 
-        text, markup = build_paginated_category_menu(category, page=page)
+        text, markup = build_paginated_category_menu(category, page)
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup)
 
     elif data.startswith("help_cmd_"):
-        cmd_key = data.replace("help_cmd_", "", 1)
-        item = COMMAND_DETAILS.get(cmd_key)
+        key = data.replace("help_cmd_", "")
+        item = COMMAND_DETAILS.get(key)
         if not item:
-            await q.answer("Command details not found.", show_alert=True)
+            await q.answer("Documentation not found.", show_alert=True)
             return
 
-        cat = item["category"]
-        if cat == "admin" and not is_admin_or_creator(user_id):
+        category = item.get("category", "user")
+        # Enforce role access on direct command inspects
+        if category == "volunteer" and role not in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"):
+            await q.answer("⛔ Access restricted to Volunteers and above.", show_alert=True)
+            return
+        if category == "moderator" and role not in ("Moderator", "Admin", "Creator", "Owner"):
+            await q.answer("⛔ Access restricted to Moderators and above.", show_alert=True)
+            return
+        if category == "admin" and not is_admin_or_creator(user_id):
             await q.answer("⛔ Access restricted to Administrators.", show_alert=True)
             return
-        if cat == "creator" and not is_creator(user_id):
-            await q.answer("⛔ Access restricted to Creator only.", show_alert=True)
-            return
-        if cat == "moderator" and role not in ("Moderator", "Admin", "Creator", "Owner"):
-            await q.answer("⛔ Access restricted to Moderators.", show_alert=True)
-            return
-        if cat == "volunteer" and role not in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"):
-            await q.answer("⛔ Access restricted to Volunteers.", show_alert=True)
+        if category == "creator" and not is_creator(user_id):
+            await q.answer("⛔ Access restricted to the Creator.", show_alert=True)
             return
 
-        back_cat_data = f"help_cat_{cat}_p1"
-        keyboard = [
-            [InlineKeyboardButton("« Back to Category", callback_data=back_cat_data)],
-            [InlineKeyboardButton("📖 Main Help Menu", callback_data="help_main")],
-        ]
-        await q.edit_message_text(
-            item["text"],
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            disable_web_page_preview=True,
-        )
-
-
-async def help_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await help_callback_handler(update, context)
+        text = item["text"]
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"« Back to {category.capitalize()} Menu", callback_data=f"help_cat_{category}_p1")],
+            [InlineKeyboardButton("« Main Help Hub", callback_data="help_main")],
+        ])
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)

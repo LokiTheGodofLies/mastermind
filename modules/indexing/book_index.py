@@ -108,6 +108,8 @@ def clean_filename_for_search(file_name: str) -> str:
         return ""
 
     name = re.sub(r"\.[a-zA-Z0-9]{2,5}$", "", file_name)
+    # Strip leading chapter, track, or index numbers (e.g. "38 ", "5 ", "01. ", "[02] ", "#5 ")
+    name = re.sub(r"^\s*(?:#?\d+|\[\d+\])[\s\.\-_]+", "", name)
     name = name.replace("’", "'").replace("‘", "'").replace("`", "'")
     name = re.sub(r"(^|\s)'([^']*)'(\s|$)", r"\1 \2 \3", name)
 

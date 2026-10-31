@@ -227,28 +227,29 @@ async def publish_callback_handler(update: Update, context: ContextTypes.DEFAULT
             logs.append(f"Fetch Loki main:\n{f_res.stdout}{f_res.stderr}".strip())
 
             # 2. Merge remote main into current branch with -X ours so verified test code takes precedence
-            m_res = subprocess.run('git merge FETCH_HEAD -m "Merge remote main into test before publish" -X ours', shell=True, capture_output=True, text=True, cwd=repo_path)
+            m_res = subprocess.run('git merge FETCH_HEAD -m "Merge remote main into test before publish" -X ours --allow-unrelated-histories', shell=True, capture_output=True, text=True, cwd=repo_path)
             logs.append(f"Merge main:\n{m_res.stdout}{m_res.stderr}".strip())
 
-            # 3. Push to loki (fast-forward, with +test:main fallback)
-            cmd_loki = f"git push {loki_url} test:main"
+            # 3. Push to loki (fast-forward, with +HEAD:main fallback)
+            subprocess.run("git checkout -B test", shell=True, cwd=repo_path, capture_output=True)
+            cmd_loki = f"git push {loki_url} HEAD:main"
             res1 = subprocess.run(cmd_loki, shell=True, capture_output=True, text=True, cwd=repo_path)
             if res1.returncode != 0:
-                cmd_loki_force = f"git push {loki_url} +test:main"
+                cmd_loki_force = f"git push {loki_url} +HEAD:main"
                 res1 = subprocess.run(cmd_loki_force, shell=True, capture_output=True, text=True, cwd=repo_path)
             logs.append(f"Loki Push (test -> main):\n{res1.stdout}{res1.stderr}".strip())
 
-            # 4. Push to origin (fast-forward, with +test:main fallback)
-            cmd_orig = f"git push {origin_url} test:main"
+            # 4. Push to origin (fast-forward, with +HEAD:main fallback)
+            cmd_orig = f"git push {origin_url} HEAD:main"
             res2 = subprocess.run(cmd_orig, shell=True, capture_output=True, text=True, cwd=repo_path)
             if res2.returncode != 0:
-                cmd_orig_force = f"git push {origin_url} +test:main"
+                cmd_orig_force = f"git push {origin_url} +HEAD:main"
                 res2 = subprocess.run(cmd_orig_force, shell=True, capture_output=True, text=True, cwd=repo_path)
             logs.append(f"Origin Push (test -> main):\n{res2.stdout}{res2.stderr}".strip())
 
-            # 5. Keep test branch synchronized with the merge commit
-            subprocess.run(f"git push {loki_url} test", shell=True, cwd=repo_path, capture_output=True)
-            subprocess.run(f"git push {origin_url} test", shell=True, cwd=repo_path, capture_output=True)
+            # 5. Keep test branch synchronized with HEAD:test
+            subprocess.run(f"git push {loki_url} HEAD:test", shell=True, cwd=repo_path, capture_output=True)
+            subprocess.run(f"git push {origin_url} HEAD:test", shell=True, cwd=repo_path, capture_output=True)
 
             if res1.returncode != 0:
                 return False, "\n\n".join(logs)
@@ -469,6 +470,12 @@ async def _process_update_zip(update: Update, context: ContextTypes.DEFAULT_TYPE
 
             push_log = ""
             if has_changes:
+                subprocess.run('git config user.name "Mastermind Bot"', shell=True, cwd=repo_path, capture_output=True)
+                subprocess.run('git config user.email "bot@mastermind.local"', shell=True, cwd=repo_path, capture_output=True)
+                subprocess.run("git checkout -B test", shell=True, cwd=repo_path, capture_output=True)
+                # Untrack virtual environment directories if previously committed
+                subprocess.run("git rm -r --cached .venv venv env ENV 2>/dev/null", shell=True, cwd=repo_path, capture_output=True)
+
                 subprocess.run("git add -A", shell=True, capture_output=True, cwd=repo_path)
                 commit_res = subprocess.run(
                     'git commit -m "feat: in-chat auto-update via /update"',
@@ -483,13 +490,12 @@ async def _process_update_zip(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if gh_token:
                     push_url_loki = f"https://{gh_token}@github.com/LokiTheGodofLies/mastermind.git"
                     push_url_orig = f"https://{gh_token}@github.com/mastermindmayankofficial/mastermind.git"
-                    p1 = subprocess.run(f"git push {push_url_loki} test", shell=True, capture_output=True, text=True, cwd=repo_path)
-                    p2 = subprocess.run(f"git push {push_url_orig} test", shell=True, capture_output=True, text=True, cwd=repo_path)
+                    p1 = subprocess.run(f"git push {push_url_loki} HEAD:test", shell=True, capture_output=True, text=True, cwd=repo_path)
+                    p2 = subprocess.run(f"git push {push_url_orig} HEAD:test", shell=True, capture_output=True, text=True, cwd=repo_path)
                     push_log += f"Loki Push: {p1.stdout}{p1.stderr}\nOrigin Push: {p2.stdout}{p2.stderr}\n"
                 else:
-                    p1 = subprocess.run("git push loki test", shell=True, capture_output=True, text=True, cwd=repo_path)
-                    p2 = subprocess.run("git push origin test", shell=True, capture_output=True, text=True, cwd=repo_path)
-                    push_log += f"Loki Push: {p1.stdout}{p1.stderr}\nOrigin Push: {p2.stdout}{p2.stderr}\n"
+                    p1 = subprocess.run("git push origin HEAD:test", shell=True, capture_output=True, text=True, cwd=repo_path)
+                    push_log += f"Push: {p1.stdout}{p1.stderr}\n"
 
             return True, push_log
 
