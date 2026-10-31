@@ -19,11 +19,12 @@ A high-performance, modular Telegram bot built using Python and `python-telegram
 ---
 
 ## 📋 Search Result Tables (`modules/search/handlers.py`, `modules/utility/rich_ui.py`)
-
-* Each search result is a Bot API 10.3 rich `<table>` (`build_result_table_html()`): **No. / Title / Author / Series / Size / Format / Ext**, followed by its own `<tg-button-row>` (`📥 Download #N`, `⚡ Direct Link`). In-text buttons keep the translucent, colored look.
-* **Fallback** (Telegram rejects the rich message): `tables_to_pre()` turns every table into a monospace block (plain letters), buttons move to the keyboard under the message, and long cells are shortened step by step so the message stays under 4096 characters.
+* Each search page is **ONE wide rich `<table>`** (`build_results_table_html()`, header row + one row per book, scrolls sideways on a phone like Mira's tables): **No. / Title / Author / Series / Size / Format / Ext**.
+* **Download = first column.** Cell 1 is a tappable link `📥 N` (`https://t.me/<bot>?start=dl_<id>`, same `deliver_file_dual` pipeline). Telegram table cells accept inline formatting only, so a real `<tg-button>` cannot sit inside a cell; the link is the closest equivalent.
+* **Fallback** (Telegram rejects the rich message): `tables_to_pre()` turns the table into a monospace block (plain letters) and `table_download_buttons()` rebuilds every `📥 N` link as a green `file_dl_<id>` keyboard button (5 per row); long cells are shortened step by step so the message stays under 4096 characters.
+* Bottom keyboard unchanged: Prev / Next, Ebooks / Send All / Audio, Back.
 * In-text button URLs are percent-encoded (`_safe_url()`), because a raw space or apostrophe in a link (e.g. the `/start` share link) can make Telegram reject the whole rich message and force the solid keyboard-button fallback.
-* When a rich send/edit is rejected, the reason is now logged as a **WARNING** (`sendRichMessage rejected...` / `editMessageText(rich) rejected...`) so it shows in the Render logs.
+* When a rich send/edit is rejected, the reason is logged as a **WARNING** (`sendRichMessage rejected...` / `editMessageText(rich) rejected...`) so it shows in the Render logs.
 * Tests: `python tests/test_search_table.py`.
 
 ## 🔠 Small Caps Text Engine (`modules/utility/small_caps.py`)
@@ -59,7 +60,7 @@ The system implements a strict 6-tier role hierarchy:
 
 ### 👤 Standard User Commands
 * `/start`: Opens the interactive welcome menu with colorful buttons, processes referral bonuses, and handles deep-link file delivery.
-* `/search <query>`: Tokenized SQL search across filenames, titles, authors, series, and captions with dual-apostrophe matching, pagination, and and one **table per result** (No., Title, Author, Series or Standalone, Size, Format = Ebook / Audiobook / Archive, Ext) with its in-text `📥 Download #N` + `⚡ Direct Link` buttons directly below it. The Download button is unchanged (`file_dl_<id>` callback and `?start=dl_<id>` deep link, same dual delivery).
+* `/search <query>`: Tokenized SQL search across filenames, titles, authors, series, and captions with dual-apostrophe matching, pagination, pagination, and **one wide table per page** (📥 N download link in column 1, Title, Author, Series or Standalone, Size, Format = Ebook / Audiobook / Archive, Ext). The 📥 link opens `?start=dl_<id>` (same dual delivery as before).
 * `/request <title and author>`: Interactive request assistant with Goodreads metadata lookup and colorful `📥 Select` / `📖 Goodreads` buttons, routed to the Request Channel.
 * `/quota`: Displays real-time search/request quota consumption, tier badges, and midnight IST reset status.
 * `/refer` & `/myreferrals`: Personal referral dashboard with one-tap `📋 Copy Invite Link` and `📤 Share Link` buttons (+10 searches & requests per invite).
@@ -162,3 +163,8 @@ The system implements a strict 6-tier role hierarchy:
      * Support Chat: `-1003689459842` (`TESTING_SUPPORT_CHAT_ID`)
      * Search Topic ID: `579` (`TESTING_SEARCH_TOPIC_ID`)
      * Backup Topic ID: `583` (`TESTING_BACKUP_TOPIC_ID`)
+
+
+## 🗂 Caption Layout (Storage Group + delivery card)
+Mira style, one field per line, bold label + monospace value:
+`📚 Book:` / `🎧 Audiobook:` title (linked when the source URL is known), `✍️ Author:` / `✍️ By:`, `📚 Series:`, optional `🎙 Narrated by`, `⭐ Rating`, `🏷 Genres`, `⏱ Length`, `📄 Pages`, `📅 Release Date` (each only when really found), blank line, then `📁 File:` and `📦 Size: x | Type: .ext` (extension only, no MIME). The delivery card (`build_file_info_html()` in `modules/search/delivery.py`) shows the same block above the "delivered" notice. Caption parsers no longer read across line breaks, so an empty `Author:` line cannot swallow the next line.

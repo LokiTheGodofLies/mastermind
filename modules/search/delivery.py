@@ -135,6 +135,38 @@ async def _auto_delete_message(token: str | None, fallback_bot, chat_id: int, me
         logger.warning("Auto-delete failed in chat %s for msg %s: %s", chat_id, message_id, exc)
 
 
+def build_file_info_html(row) -> str:
+    """Mira-style file block used in the delivery card (same look as the Storage Group caption):
+    Book/Audiobook + Author/By + Series lines (only when the caption has them), blank line,
+    `📁 File:` and `📦 Size: x | Type: .ext`. Labels bold, values monospace."""
+    from modules.indexing.book_index import _parse_caption_meta
+    from modules.search.handlers import _format_size, _item_kind
+
+    kind = _item_kind(row)
+    meta = _parse_caption_meta(row["caption"] or "") or {}
+    ext = (row["extension"] or "").lstrip(".")
+    lines = []
+    title = (meta.get("book_title") or "").strip()
+    author = (meta.get("book_author") or "").strip()
+    series = (meta.get("book_series") or "").strip()
+    if title:
+        lbl = "🎧 <b>Audiobook:</b>" if kind == "Audiobook" else "📚 <b>Book:</b>"
+        lines.append(f"{lbl} {html.escape(title)}")
+    if author:
+        lbl = "✍️ <b>By:</b>" if kind == "Audiobook" else "✍️ <b>Author:</b>"
+        lines.append(f"{lbl} <code>{html.escape(author)}</code>")
+    if series:
+        lines.append(f"📚 <b>Series:</b> <code>{html.escape(series)}</code>")
+    if lines:
+        lines.append("")
+    lines.append(f"📁 <b>File:</b> <code>{html.escape(row['file_name'] or 'File')}</code>")
+    lines.append(
+        f"📦 <b>Size:</b> <code>{html.escape(_format_size(row['file_size']))}</code>"
+        + (f" | <b>Type:</b> <code>.{html.escape(ext)}</code>" if ext else "")
+    )
+    return "\n".join(lines)
+
+
 async def _ensure_storage_message_id(main_bot, row) -> int | None:
     """Ensures the file has a valid message inside PUBLIC_/TESTING_STORAGE_GROUP_ID so helper bots can copy_message it."""
     storage_id = storage_group_id()
@@ -147,7 +179,7 @@ async def _ensure_storage_message_id(main_bot, row) -> int | None:
         return None
 
     try:
-        cap = f"📁 <b>{html.escape(row['file_name'] or 'File')}</b>"
+        cap = build_file_info_html(row)
         sent = await main_bot.send_document(
             chat_id=int(storage_id),
             document=file_id,
@@ -331,7 +363,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                     pass
 
     # 3. Send Main Bot notification card with Bot API 10.3 colorful in-text buttons
-    file_name_esc = html.escape(row["file_name"] or f"File #{row_id}")
+    file_info = build_file_info_html(row)
     helper_start_url = (
         f"https://t.me/{helper_username}?start=dl_{row_id}"
         if helper_username
@@ -341,14 +373,14 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if helper_username and posting_link:
         if pm_delivered:
             text = (
-                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"{file_info}\n\n"
                 f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n"
                 f"📢 A backup copy is also ready in the Posting Channel.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — both copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
-                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"{file_info}\n\n"
                 f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive the file in PM, "
                 f"or open it directly in the Posting Channel.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
@@ -356,19 +388,19 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     elif helper_username:
         if pm_delivered:
             text = (
-                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"{file_info}\n\n"
                 f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
-                f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+                f"{file_info}\n\n"
                 f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive your file in PM.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
     elif posting_link:
         text = (
-            f"📁 <b>File:</b> <mark>{file_name_esc}</mark>\n\n"
+            f"{file_info}\n\n"
             f"📢 Tap the button below to get your file from the Posting Channel.\n\n"
             f"⚠️ <b>Forward the file to your Saved Messages — it auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
         )

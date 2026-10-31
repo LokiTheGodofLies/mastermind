@@ -1334,8 +1334,8 @@ def format_index_channel_caption(
     Constructs clean, structured Storage Group caption (Option B):
     1. If metadata was matched:
        - Clean `📖 Title:` hyperlinked with the matched website book info URL (`<a href="URL">Title</a>`).
-       - Separate `📚 Series:` line (`Eddie Flynn (Book #5)` or `Standalone`).
-       - `✍️ Author:` line.
+       - `✍️ Author:` / `✍️ By:` line, then separate `📚 Series:` line (`Eddie Flynn (Book #5)` or `Standalone`).
+       - Every field on its own line (Mira style); bottom block `📁 File:` + `📦 Size: x | Type: .ext`.
        - Zero N/A: omits any missing optional field (`Narrated by`, `Length`, `Pages`, `Rating`, `Genres`, `Release Date`).
     2. If enrichment failed (<2 parameters):
        - Leaves Title and Author empty with clean placeholders so search does not index false info.
@@ -1346,15 +1346,20 @@ def format_index_channel_caption(
     is_audio = category == "audiobook" or f".{ext_clean.lower()}" in supported_audiobook_extensions()
     is_archive = category == "archive" or f".{ext_clean.lower()}" in supported_archive_extensions()
 
+    # Mira-style layout: one field per line, bold label + monospace value, blank line, then File / Size | Type.
+    file_line = f"📁 <b>File:</b> <code>{esc_file_name}</code>"
+    size_line = f"📦 <b>Size:</b> <code>{html.escape(file_size_str)}</code> | <b>Type:</b> <code>.{ext_clean}</code>"
+
     if not is_matched:
         header_lbl = "🎧 <b>Audiobook:</b> " if is_audio else "📚 <b>Book:</b> "
         author_lbl = "✍️ <b>By:</b> " if is_audio else "✍️ <b>Author:</b> "
         lines = [
             header_lbl,
-            "📚 <b>Series:</b> ",
             author_lbl,
-            f"📁 <b>File Name:</b> <code>{esc_file_name}</code>",
-            f"📦 <b>Size:</b> <code>{html.escape(file_size_str)}</code> | <b>Type:</b> <code>{html.escape(file_type)} (.{ext_clean})</code>",
+            "📚 <b>Series:</b> ",
+            "",
+            file_line,
+            size_line,
         ]
         return "\n".join(lines)[:1020]
 
@@ -1383,9 +1388,10 @@ def format_index_channel_caption(
     else:
         lines.append(f"📚 <b>Book:</b> {title_display}")
 
-    lines.append(f"📚 <b>Series:</b> <code>{esc_series}</code>")
     if esc_author:
-        lines.append(f"✍️ <b>Author:</b> <code>{esc_author}</code>")
+        author_lbl = "✍️ <b>By:</b>" if is_audio else "✍️ <b>Author:</b>"
+        lines.append(f"{author_lbl} <code>{esc_author}</code>")
+    lines.append(f"📚 <b>Series:</b> <code>{esc_series}</code>")
     if esc_narrator:
         lines.append(f"🎙 <b>Narrated by:</b> <code>{esc_narrator}</code>")
     if esc_rating:
@@ -1393,20 +1399,16 @@ def format_index_channel_caption(
         lines.append(f"⭐ <b>Rating:</b> <code>{esc_rating}</code>{rc_str}")
     if esc_genres:
         lines.append(f"🏷 <b>Genres:</b> <code>{esc_genres}</code>")
-
-    meta_span = []
     if esc_length:
-        meta_span.append(f"⏱ <b>Length:</b> <code>{esc_length}</code>")
+        lines.append(f"⏱ <b>Length:</b> <code>{esc_length}</code>")
     if esc_pages:
-        meta_span.append(f"📄 <b>Pages:</b> <code>{esc_pages}</code>")
+        lines.append(f"📄 <b>Pages:</b> <code>{esc_pages}</code>")
     if esc_published:
-        meta_span.append(f"📅 <b>Release Date:</b> <code>{esc_published}</code>")
-    if meta_span:
-        lines.append(" | ".join(meta_span))
+        lines.append(f"📅 <b>Release Date:</b> <code>{esc_published}</code>")
 
     lines.append("")
-    lines.append(f"📁 <b>File Name:</b> <code>{esc_file_name}</code>")
-    lines.append(f"📦 <b>Size:</b> <code>{html.escape(file_size_str)}</code> | <b>Type:</b> <code>{html.escape(file_type)} (.{ext_clean})</code>")
+    lines.append(file_line)
+    lines.append(size_line)
 
     return "\n".join(lines)[:1020]
 
@@ -1530,28 +1532,28 @@ def _parse_caption_meta(raw_caption: str) -> dict:
     if not cleaned:
         return {}
     meta = {}
-    m = re.search(r"(?:Title|Book|Audiobook):\s*([^\n]+)", cleaned, re.IGNORECASE)
+    m = re.search(r"(?:Title|Book|Audiobook):[ \t]*([^\n]+)", cleaned, re.IGNORECASE)
     if m and m.group(1).strip():
         clean_t, s_from_t = parse_title_and_series(re.sub(r"<[^>]+>", "", m.group(1)).strip())
         if clean_t:
             meta["book_title"] = clean_t
         if s_from_t and s_from_t != "Standalone":
             meta["book_series"] = s_from_t
-    m = re.search(r"(?:Author|By):\s*([^\n]+)", cleaned, re.IGNORECASE)
+    m = re.search(r"(?:Author|By):[ \t]*([^\n]+)", cleaned, re.IGNORECASE)
     if m and m.group(1).strip():
         val = re.sub(r"<[^>]+>", "", m.group(1)).strip()
         if val:
             meta["book_author"] = val
-    m = re.search(r"Narrated by:\s*([^\n]+)", cleaned, re.IGNORECASE)
+    m = re.search(r"Narrated by:[ \t]*([^\n]+)", cleaned, re.IGNORECASE)
     if m and m.group(1).strip():
         meta["narrator"] = re.sub(r"<[^>]+>", "", m.group(1)).strip()
-    m = re.search(r"Length:\s*([^\n]+)", cleaned, re.IGNORECASE)
+    m = re.search(r"Length:[ \t]*([^\n]+)", cleaned, re.IGNORECASE)
     if m and m.group(1).strip():
         meta["length"] = re.sub(r"<[^>]+>", "", m.group(1)).strip().split("|")[0].strip()
-    m = re.search(r"Release Date:\s*([^\n]+)", cleaned, re.IGNORECASE)
+    m = re.search(r"Release Date:[ \t]*([^\n]+)", cleaned, re.IGNORECASE)
     if m and m.group(1).strip():
         meta["book_published"] = re.sub(r"<[^>]+>", "", m.group(1)).strip()
-    m = re.search(r"Series:\s*([^\n]+)", cleaned, re.IGNORECASE)
+    m = re.search(r"Series:[ \t]*([^\n]+)", cleaned, re.IGNORECASE)
     if m and m.group(1).strip():
         meta["book_series"] = format_series_label(re.sub(r"<[^>]+>", "", m.group(1)).strip())
     return meta

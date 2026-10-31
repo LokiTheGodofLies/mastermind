@@ -401,6 +401,23 @@ def tables_to_pre(rich_text: str, max_cell: int = 44) -> str:
     return _RE_TABLE.sub(_render, rich_text or "")
 
 
+_RE_DL_LINK = re.compile(
+    r'<a\s[^>]*href="[^"]*[?&]start=dl_(\d+)[^"]*"[^>]*>(.*?)</a>', re.DOTALL | re.IGNORECASE
+)
+
+
+def table_download_buttons(rich_text: str, per_row: int = 5) -> list[list[InlineKeyboardButton]]:
+    """Plain-HTML fallback helper: every `<a href="...?start=dl_<id>">📥 N</a>` link inside a rich
+    `<table>` (the search results' first column) becomes a real green `file_dl_<id>` keyboard
+    button, `per_row` per row, so Download keeps working when the rich message is rejected."""
+    buttons: list[InlineKeyboardButton] = []
+    for tbl in _RE_TABLE.finditer(rich_text or ""):
+        for m in _RE_DL_LINK.finditer(tbl.group(1)):
+            label = html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip() or "📥"
+            buttons.append(styled_button(label, callback_data=f"file_dl_{m.group(1)}", style="success"))
+    return [buttons[i : i + per_row] for i in range(0, len(buttons), per_row)]
+
+
 _MAX_FALLBACK_VISIBLE = 3600  # Telegram's plain text limit is 4096 characters
 
 
@@ -452,6 +469,7 @@ def extract_buttons_and_clean_html_for_fallback(
             extracted_rows.append(row_btns)
         return ""
 
+    table_rows = table_download_buttons(rich_text)  # must run before tables become <pre>
     cleaned = _RE_TG_BUTTON_ROW.sub(_replace_row, rich_text)
 
     def _replace_inline_btn(match: re.Match) -> str:
@@ -483,7 +501,7 @@ def extract_buttons_and_clean_html_for_fallback(
     cleaned = re.sub(r"<h3>(.*?)</h3>", r"<b>\1</b>", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
-    final_rows: list[list[InlineKeyboardButton]] = list(extracted_rows)
+    final_rows: list[list[InlineKeyboardButton]] = list(table_rows) + list(extracted_rows)
     if existing_markup and getattr(existing_markup, "inline_keyboard", None):
         styled_existing = style_inline_keyboard(existing_markup, include_disabled=False)
         if styled_existing:

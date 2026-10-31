@@ -33,7 +33,7 @@ from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
 from modules.indexing.book_index import format_series_label, parse_title_and_series
 from modules.search.delivery import deliver_file_dual
-from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
+from modules.utility.rich_ui import styled_button
 from modules.utility.small_caps import from_small_caps
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
 
     # 1. Title
     title = ""
-    m_t = re.search(r"(?:Title|Book|Audiobook|Archive):\s*([^\n]+)", caption, re.IGNORECASE)
+    m_t = re.search(r"(?:Title|Book|Audiobook|Archive):[ \t]*([^\n]+)", caption, re.IGNORECASE)
     if m_t:
         clean_t = re.sub(r"<[^>]+>", "", m_t.group(1)).strip()
         if clean_t:
@@ -96,7 +96,7 @@ def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
 
     # 2. Series (Option B format)
     series = ""
-    m_s = re.search(r"Series:\s*([^\n]+)", caption, re.IGNORECASE)
+    m_s = re.search(r"Series:[ \t]*([^\n]+)", caption, re.IGNORECASE)
     if m_s:
         clean_s = re.sub(r"<[^>]+>", "", m_s.group(1)).strip()
         if clean_s:
@@ -108,7 +108,7 @@ def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
 
     # 3. Author
     author = ""
-    m_a = re.search(r"(?:Author|By):\s*([^\n]+)", caption, re.IGNORECASE)
+    m_a = re.search(r"(?:Author|By):[ \t]*([^\n]+)", caption, re.IGNORECASE)
     if m_a:
         clean_a = re.sub(r"<[^>]+>", "", m_a.group(1)).strip()
         if clean_a:
@@ -130,23 +130,36 @@ def _item_kind(row) -> str:
     return "Ebook"
 
 
-def build_result_table_html(idx, title, author, series, size_str, kind, ext) -> str:
-    """Rich-HTML table for ONE search result (field | value rows). Every value is escaped.
-    In a plain-HTML fallback `rich_ui.tables_to_pre()` turns it into a monospace block."""
-    fields = (
-        ("No.", str(idx)),
-        ("Title", title),
-        ("Author", author),
-        ("Series", series),
-        ("Size", size_str),
-        ("Format", kind),
-        ("Ext", f".{ext}" if ext else "-"),
-    )
-    body = "".join(
-        f"<tr><td><b>{html.escape(label)}</b></td><td>{html.escape(str(value))}</td></tr>"
-        for label, value in fields
-    )
-    return f"<table>{body}</table>"
+_TABLE_HEADERS = ("No.", "Title", "Author", "Series", "Size", "Format", "Ext")
+
+
+def build_results_table_html(items) -> str:
+    """ONE wide rich-HTML table for a whole result page (Mira style: scrolls sideways on a phone).
+
+    `items` = iterable of (idx, row_id, title, author, series, size_str, kind, ext, dl_url).
+    Column 1 is the download column: `<a href="...?start=dl_<row id>">📥 N</a>`. Telegram tables
+    accept inline formatting only (no `<tg-button>` blocks inside cells), so a tappable link is the
+    closest thing to a button; the deep link runs the same `deliver_file_dual` pipeline.
+    All values are HTML-escaped. In a plain-HTML fallback `rich_ui.tables_to_pre()` turns the table
+    into a monospace block and `rich_ui` rebuilds the 📥 links as real keyboard buttons."""
+    def esc(v) -> str:
+        return html.escape(str(v), quote=False)
+
+    head = "<tr>" + "".join(f"<th>{esc(h)}</th>" for h in _TABLE_HEADERS) + "</tr>"
+    body = []
+    for idx, _row_id, title, author, series, size_str, kind, ext, dl_url in items:
+        body.append(
+            "<tr>"
+            f'<td><a href="{html.escape(dl_url, quote=True)}">📥 {idx}</a></td>'
+            f"<td>{esc(title)}</td>"
+            f"<td>{esc(author)}</td>"
+            f"<td>{esc(series)}</td>"
+            f"<td>{esc(size_str)}</td>"
+            f"<td>{esc(kind)}</td>"
+            f"<td>{esc(f'.{ext}' if ext else '-')}</td>"
+            "</tr>"
+        )
+    return f"<table striped>{head}{''.join(body)}</table>"
 
 
 async def perform_search(
@@ -158,9 +171,9 @@ async def perform_search(
 ):
     """
     Renders search results in Bot API 10.3 Rich Format with colorful in-text buttons.
-    Each result is a table, with its buttons directly below it:
-      | No. | Title | Author | Series (or Standalone) | Size | Format (Ebook/Audiobook/Archive) | Ext |
-      <tg-button-row> [📥 Download #N] [⚡ Direct Link] </tg-button-row>
+    One wide, sideways-scrolling table per page (one row per book):
+      | 📥 N (download link) | Title | Author | Series (or Standalone) | Size | Format | Ext |
+    Bottom keyboard: pagination, Ebooks / Send All / Audio filters.
     """
     user = update.effective_user
     msg = update.effective_message
@@ -248,25 +261,15 @@ async def perform_search(
     page_items = filtered_rows[start_idx : start_idx + per_page]
 
     if page_items:
+        table_items = []
         for idx, row in enumerate(page_items, start=start_idx + 1):
             title, series, author, size_str, ext = _extract_item_fields(row)
             row_id_val = str(row["id"])
             dl_url = f"https://t.me/{bot_uname}?start=dl_{row_id_val}"
-
-            # One table per result (serial, title, author, series, size, format, extension),
-            # then its Download button row directly below it. The buttons are unchanged:
-            # `file_dl_<row id>` (callback) and the `?start=dl_<row id>` deep link.
-            lines.append(build_result_table_html(idx, title, author, series, size_str, _item_kind(row), ext))
-            lines.append(
-                tg_button_row_html(
-                    [
-                        tg_button_html(f"📥 Download #{idx}", callback_data=f"file_dl_{row_id_val}", style="success"),
-                        tg_button_html("⚡ Direct Link", url=dl_url, style="primary"),
-                    ],
-                    align="left",
-                )
-            )
-            lines.append("")
+            table_items.append((idx, row_id_val, title, author, series, size_str, _item_kind(row), ext, dl_url))
+        lines.append(build_results_table_html(table_items))
+        lines.append("")
+        lines.append("<i>👆 Tap the 📥 number in the first column to download that book.</i>")
     else:
         lines.append(f"• No files found matching <mark>{esc_term}</mark> in <b>{filter_label_str}</b>.\n")
 
