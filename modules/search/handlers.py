@@ -33,7 +33,7 @@ from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
 from modules.indexing.book_index import format_series_label, parse_title_and_series
 from modules.search.delivery import deliver_file_dual
-from modules.utility.rich_ui import styled_button
+from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
 from modules.utility.small_caps import from_small_caps
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,7 @@ def build_results_table_html(items) -> str:
     for idx, _row_id, title, author, series, size_str, kind, ext, dl_url in items:
         body.append(
             "<tr>"
-            f'<td><a href="{html.escape(dl_url, quote=True)}">📥 {idx}</a></td>'
+            f"<td>{idx}</td>"
             f"<td>{esc(title)}</td>"
             f"<td>{esc(author)}</td>"
             f"<td>{esc(series)}</td>"
@@ -269,7 +269,15 @@ async def perform_search(
             table_items.append((idx, row_id_val, title, author, series, size_str, _item_kind(row), ext, dl_url))
         lines.append(build_results_table_html(table_items))
         lines.append("")
-        lines.append("<i>👆 Tap the 📥 number in the first column to download that book.</i>")
+        lines.append("<i>👇 Tap a Download button (same number as the No. column).</i>")
+        # Real buttons cannot live inside table cells (inline formatting only), so each book gets a
+        # green in-text Download button right under the table, 2 per row, same `file_dl_<id>` callback.
+        dl_btns = [
+            tg_button_html(f"Download {it[0]}", callback_data=f"file_dl_{it[1]}", style="success")
+            for it in table_items
+        ]
+        for i in range(0, len(dl_btns), 2):
+            lines.append(tg_button_row_html(dl_btns[i:i + 2], align="center"))
     else:
         lines.append(f"• No files found matching <mark>{esc_term}</mark> in <b>{filter_label_str}</b>.\n")
 

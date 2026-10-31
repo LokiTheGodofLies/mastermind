@@ -136,35 +136,40 @@ async def _auto_delete_message(token: str | None, fallback_bot, chat_id: int, me
 
 
 def build_file_info_html(row) -> str:
-    """Mira-style file block used in the delivery card (same look as the Storage Group caption):
-    Book/Audiobook + Author/By + Series lines (only when the caption has them), blank line,
-    `📁 File:` and `📦 Size: x | Type: .ext`. Labels bold, values monospace."""
+    """Field | Value TABLE (Mira style) for the delivery card: italic emoji labels, monospace values.
+    Rows: Book/Audiobook, Author/By, Series, Narrated by, Length, Release Date (only what the caption
+    really has), then File, Size, Type. Rich tables exist only in text messages, so this is used for
+    the main bot's delivery card; file captions (Storage Group / copied file) stay text."""
     from modules.indexing.book_index import _parse_caption_meta
     from modules.search.handlers import _format_size, _item_kind
 
+    e = lambda v: html.escape(str(v), quote=False)
     kind = _item_kind(row)
+    audio = kind == "Audiobook"
     meta = _parse_caption_meta(row["caption"] or "") or {}
     ext = (row["extension"] or "").lstrip(".")
-    lines = []
-    title = (meta.get("book_title") or "").strip()
-    author = (meta.get("book_author") or "").strip()
-    series = (meta.get("book_series") or "").strip()
-    if title:
-        lbl = "🎧 <b>Audiobook:</b>" if kind == "Audiobook" else "📚 <b>Book:</b>"
-        lines.append(f"{lbl} {html.escape(title)}")
-    if author:
-        lbl = "✍️ <b>By:</b>" if kind == "Audiobook" else "✍️ <b>Author:</b>"
-        lines.append(f"{lbl} <code>{html.escape(author)}</code>")
-    if series:
-        lines.append(f"📚 <b>Series:</b> <code>{html.escape(series)}</code>")
-    if lines:
-        lines.append("")
-    lines.append(f"📁 <b>File:</b> <code>{html.escape(row['file_name'] or 'File')}</code>")
-    lines.append(
-        f"📦 <b>Size:</b> <code>{html.escape(_format_size(row['file_size']))}</code>"
-        + (f" | <b>Type:</b> <code>.{html.escape(ext)}</code>" if ext else "")
-    )
-    return "\n".join(lines)
+    rows = []
+
+    def add(label, value, code=True):
+        value = (value or "").strip()
+        if value:
+            rows.append(f"<tr><td>{label}</td><td>{'<code>' + e(value) + '</code>' if code else e(value)}</td></tr>")
+
+    add("🎧 <i>Audiobook</i>" if audio else "📚 <i>Book</i>", meta.get("book_title"), code=False)
+    add("✍️ <i>By</i>" if audio else "✍️ <i>Author</i>", meta.get("book_author"))
+    add("📚 <i>Series</i>", meta.get("book_series"))
+    add("🎙 <i>Narrated by</i>", meta.get("narrator"))
+    add("⏱ <i>Length</i>", meta.get("length"))
+    add("📅 <i>Release Date</i>", meta.get("book_published"))
+    add("📁 <i>File</i>", row["file_name"] or "File")
+    add("📦 <i>Size</i>", _format_size(row["file_size"]))
+    add("📦 <i>Type</i>", f".{ext}" if ext else "")
+    return "<table><tr><th>Field</th><th>Value</th></tr>" + "".join(rows) + "</table>"
+
+
+def _fmt_size(n) -> str:
+    from modules.search.handlers import _format_size
+    return _format_size(n)
 
 
 async def _ensure_storage_message_id(main_bot, row) -> int | None:
@@ -179,7 +184,11 @@ async def _ensure_storage_message_id(main_bot, row) -> int | None:
         return None
 
     try:
-        cap = build_file_info_html(row)
+        cap = (
+            f"📁 <b>File:</b> <code>{html.escape(row['file_name'] or 'File')}</code>\n"
+            f"📦 <b>Size:</b> <code>{html.escape(_fmt_size(row['file_size']))}</code> | "
+            f"<b>Type:</b> <code>.{html.escape((row['extension'] or '').lstrip('.'))}</code>"
+        )
         sent = await main_bot.send_document(
             chat_id=int(storage_id),
             document=file_id,
@@ -373,14 +382,14 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if helper_username and posting_link:
         if pm_delivered:
             text = (
-                f"{file_info}\n\n"
+                f"{file_info}\n"
                 f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n"
                 f"📢 A backup copy is also ready in the Posting Channel.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — both copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
-                f"{file_info}\n\n"
+                f"{file_info}\n"
                 f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive the file in PM, "
                 f"or open it directly in the Posting Channel.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
@@ -388,19 +397,19 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     elif helper_username:
         if pm_delivered:
             text = (
-                f"{file_info}\n\n"
+                f"{file_info}\n"
                 f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
-                f"{file_info}\n\n"
+                f"{file_info}\n"
                 f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive your file in PM.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
     elif posting_link:
         text = (
-            f"{file_info}\n\n"
+            f"{file_info}\n"
             f"📢 Tap the button below to get your file from the Posting Channel.\n\n"
             f"⚠️ <b>Forward the file to your Saved Messages — it auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
         )
