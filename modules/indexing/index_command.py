@@ -418,35 +418,36 @@ _LIFECYCLE = {
 
 async def _log_lifecycle(context, job, kind: str, bot_label: str = "Bot", stats: dict | None = None,
                          source_info: str | None = None, detail: str = ""):
-    """Task lifecycle event -> Index Logs TOPIC only (never the Index Logs channel)."""
+    """Task lifecycle event -> Index Logs TOPIC only (never the Index Logs channel), formatted as `<table striped>`."""
     emoji, title = _LIFECYCLE[kind]
     chat_line = source_info or html.escape(job["title"])
-    lines = [
-        f"{emoji} <b>{title}</b>",
-        "",
-        f"📂 <b>Chat:</b> {chat_line}",
-        f"🔢 <b>Range:</b> <code>{job['start_id']} → {job['end_id']}</code>",
-        f"⚙️ <b>Mode:</b> <code>{html.escape(str(job.get('priority_mode') or 'direct'))}</code>",
-        f"👤 <b>Started By:</b> {user_link_html(job['requester_id'], job['requester_name'])}"
-        + (f" (<code>{job['requester_id']}</code>)" if job["requester_id"] else ""),
-        f"🤖 <b>Bot:</b> <code>{html.escape(bot_label)}</code>",
-        f"🕒 <b>Time:</b> {html.escape(_ist_now_str())}",
+    started_by = user_link_html(job["requester_id"], job["requester_name"]) + (
+        f" (<code>{job['requester_id']}</code>)" if job["requester_id"] else ""
+    )
+    rows = [
+        f"<tr><td>📂 <b>Chat</b></td><td>{chat_line}</td></tr>",
+        f"<tr><td>🔢 <b>Range</b></td><td><code>{job['start_id']} → {job['end_id']}</code></td></tr>",
+        f"<tr><td>⚙️ <b>Mode</b></td><td><code>{html.escape(str(job.get('priority_mode') or 'direct'))}</code></td></tr>",
+        f"<tr><td>👤 <b>Started By</b></td><td>{started_by}</td></tr>",
+        f"<tr><td>🤖 <b>Bot</b></td><td><code>{html.escape(bot_label)}</code></td></tr>",
+        f"<tr><td>🕒 <b>Time</b></td><td>{html.escape(_ist_now_str())}</td></tr>",
     ]
     if stats is not None:
         total = max(1, job["end_id"] - job["start_id"] + 1)
-        lines += [
-            "",
-            f"📥 Fetched: <code>{stats['fetched']}/{total}</code>",
-            f"✅ Indexed / Healed: <code>{stats['ok']}</code>",
-            f"♻️ Verified Duplicates: <code>{stats['dup']}</code>",
-            f"🚫 Filtered: <code>{stats['filtered']}</code>",
-            f"🗑 Deleted: <code>{stats['deleted']}</code>",
-            f"⚠️ Errors: <code>{stats['skipped']}</code>",
+        rows += [
+            f"<tr><td>📥 <b>Fetched</b></td><td><code>{stats['fetched']}/{total}</code></td></tr>",
+            f"<tr><td>✅ <b>Indexed / Healed</b></td><td><code>{stats['ok']}</code></td></tr>",
+            f"<tr><td>♻️ <b>Verified Duplicates</b></td><td><code>{stats['dup']}</code></td></tr>",
+            f"<tr><td>🚫 <b>Filtered</b></td><td><code>{stats['filtered']}</code></td></tr>",
+            f"<tr><td>🗑 <b>Deleted</b></td><td><code>{stats['deleted']}</code></td></tr>",
+            f"<tr><td>⚠️ <b>Errors</b></td><td><code>{stats['skipped']}</code></td></tr>",
         ]
+    table_html = "<table striped><tr><th>Field</th><th>Details</th></tr>" + "".join(rows) + "</table>"
+    parts = [f"{emoji} <b>{title}</b>", "", table_html]
     if detail:
-        lines += ["", f"<i>{html.escape(detail)}</i>"]
+        parts += ["", f"<i>{html.escape(detail)}</i>"]
     try:
-        await send_index_topic_log(context.bot, "\n".join(lines))
+        await send_index_topic_log(context.bot, "\n".join(parts))
     except Exception as exc:
         logger.warning("Index lifecycle log failed: %s", exc)
 

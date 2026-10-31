@@ -89,7 +89,13 @@ from modules.stats.handlers import stats_command  # noqa: E402
 from modules.search.handlers import search_command, search_callback_handler  # noqa: E402
 from modules.search.topic import SEARCH_TOPIC_FILTER, search_topic_command_guard, search_topic_text_handler  # noqa: E402
 from modules.search.delivery import handle_deeplink_file_delivery  # noqa: E402
-from modules.indexing.book_index import handle_book_indexing, handle_storage_caption_edit  # noqa: E402
+from modules.indexing.book_index import (
+    editcaption_callback,
+    editcaption_command,
+    handle_book_indexing,
+    handle_storage_caption_edit,
+    storage_caption_reply_handler,
+)  # noqa: E402
 from modules.indexing.index_command import index_command, index_callback, index_flow_handler  # noqa: E402
 from modules.broadcast.handlers import broadcast_command, cancelbroadcast_command, broadcast_callback_handler  # noqa: E402
 from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
@@ -225,6 +231,7 @@ async def _start_helper_apps() -> list:
             happ = ApplicationBuilder().token(tok).build()
             happ.add_handler(CommandHandler("start", _helper_start_command))
             happ.add_handler(CommandHandler("index", index_command))
+            happ.add_handler(CommandHandler(["editcaption", "setcaption", "caption"], editcaption_command))
             happ.add_handler(CommandHandler("id", id_command))
             happ.add_handler(
                 MessageHandler(
@@ -239,6 +246,14 @@ async def _start_helper_apps() -> list:
                 )
             )
             happ.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_"))
+            happ.add_handler(CallbackQueryHandler(editcaption_callback, pattern=r"^ecap_"))
+            happ.add_handler(
+                MessageHandler(
+                    filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+                    storage_caption_reply_handler,
+                ),
+                group=1,
+            )
             happ.add_handler(
                 MessageHandler(
                     filters.ChatType.PRIVATE & (filters.Document.ALL | filters.AUDIO),
@@ -370,6 +385,7 @@ def main():
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler(["request", "req"], request_command))
     application.add_handler(CommandHandler("index", index_command))
+    application.add_handler(CommandHandler(["editcaption", "setcaption", "caption"], editcaption_command))
     application.add_handler(CommandHandler(["broadcast", "bc", "pinbroadcast", "pinbc"], broadcast_command))
     application.add_handler(CommandHandler(["cancelbroadcast", "stopbroadcast"], cancelbroadcast_command))
     application.add_handler(CommandHandler(["admins", "adminlist"], admins_command))
@@ -381,6 +397,7 @@ def main():
 
     # Callback Query Routers
     application.add_handler(CallbackQueryHandler(index_callback, pattern=r"^idx_"))
+    application.add_handler(CallbackQueryHandler(editcaption_callback, pattern=r"^ecap_"))
     application.add_handler(CallbackQueryHandler(broadcast_callback_handler, pattern=r"^bc_"))
     application.add_handler(
         CallbackQueryHandler(
@@ -395,13 +412,20 @@ def main():
     application.add_handler(CallbackQueryHandler(editscript_callback, pattern=r"^es_"))
     application.add_handler(CallbackQueryHandler(publish_callback_handler, pattern=r"^publish_"))
 
-    # Storage Group Live Caption Edit Sync (Admin manual edits)
+    # Storage Group Live Caption Edit Sync (Admin manual edits + /editcaption prompt replies)
     application.add_handler(
         MessageHandler(
             filters.UpdateType.EDITED_MESSAGE & (filters.Document.ALL | filters.AUDIO),
             handle_storage_caption_edit,
         ),
         group=0,
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+            storage_caption_reply_handler,
+        ),
+        group=1,
     )
 
     # Direct file upload indexing (supports both Document and Audio attachments), /index interactive flow, and private normal-text fallback

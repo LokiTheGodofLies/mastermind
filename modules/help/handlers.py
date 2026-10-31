@@ -304,6 +304,21 @@ COMMAND_DETAILS = {
             "• <code>/index</code> (in private chat for interactive wizard)"
         ),
     },
+    "editcaption": {
+        "title": "✏️ editcaption",
+        "category": "admin",
+        "text": (
+            "✏️ <b>Command:</b> <code>/editcaption</code> (aliases: <code>/setcaption</code>, <code>/caption</code>)\n\n"
+            "📝 <b>Purpose:</b>\n"
+            "Updates the caption of any file inside the <b>Storage Group</b> (since Telegram does not let human admins directly edit messages sent by Helper/Main bots).\n"
+            "• Every stored file in the Storage Group also includes a one-tap <mark>✏️ Edit Caption</mark> button.\n"
+            "• Works <b>only inside the Storage Group</b>: asks you to reply to the bot's prompt with the new caption, updates the Storage Group message in place, updates <code>files.db</code>, and sends the Table Audit Card to the Index Logs Topic + the Table Library Card to the Index Logs Channel.\n\n"
+            "💡 <b>Syntax (Storage Group Only):</b>\n"
+            "• Tap <mark>✏️ Edit Caption</mark> below any file in the Storage Group\n"
+            "• Reply to a file in the Storage Group with <code>/editcaption</code>\n"
+            "• <code>/editcaption</code> &lt;storage_message_id&gt;"
+        ),
+    },
     "broadcast": {
         "title": "📢 broadcast",
         "category": "admin",
@@ -526,7 +541,7 @@ CATEGORY_COMMANDS = {
     "volunteer": ["vol_privileges", "vol_indexing", "vol_notice"],
     "moderator": ["mod_privileges", "mod_requests", "mod_indexing", "mod_notice"],
     "admin": [
-        "checkhelpers", "index", "broadcast", "ban", "gift", "editscript",
+        "checkhelpers", "index", "editcaption", "broadcast", "ban", "gift", "editscript",
         "log", "ping", "addmoderator", "addvolunteer", "addpromoter"
     ],
     "creator": ["publish", "update", "sh", "addadmin", "creator_privileges", "backup", "governance"],

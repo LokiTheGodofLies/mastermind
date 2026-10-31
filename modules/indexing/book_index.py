@@ -19,22 +19,37 @@ except ImportError:
     aiohttp = None
 
 try:
-    from telegram import Update
+    from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
     from telegram.error import BadRequest, TelegramError
     from telegram.ext import ContextTypes
 except ImportError:
+    Bot = None
     Update = object
     BadRequest = Exception
     TelegramError = Exception
+
+    class InlineKeyboardButton:
+        def __init__(self, text, callback_data=None, url=None, api_kwargs=None):
+            self.text = text
+            self.callback_data = callback_data
+            self.url = url
+            self.api_kwargs = api_kwargs or {}
+
+    class InlineKeyboardMarkup:
+        def __init__(self, inline_keyboard):
+            self.inline_keyboard = inline_keyboard
 
     class ContextTypes:
         DEFAULT_TYPE = object
 
 from config import (
     admin_ids,
+    anon_admin_id,
+    bot_token,
     creator_id,
     goodreads_base_url,
     goodreads_cache_max,
+    helper_bot_tokens,
     index_channel_id,
     log_topic,
     logger_group_id,
@@ -52,7 +67,8 @@ from modules.database.file_db import (
     save_indexed_file_db,
     update_file_caption_db,
 )
-from modules.database.user_db import is_admin_or_creator
+from modules.database.user_db import get_user_role_db, is_admin_or_creator
+from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
 
 logger = logging.getLogger(__name__)
 
@@ -1497,6 +1513,25 @@ def _caption_without_file_lines(caption_html: str | None) -> str:
     return "\n".join(keep).strip()
 
 
+def _caption_html_to_table_rows(caption_html: str | None, strip_file_lines: bool = False) -> list[str]:
+    """Converts structured HTML caption lines into `<tr><td>Label</td><td>Value</td></tr>` rows."""
+    src = _caption_without_file_lines(caption_html) if strip_file_lines else (caption_html or "").strip()
+    rows: list[str] = []
+    for raw_ln in src.split("\n"):
+        ln = raw_ln.strip()
+        if not ln:
+            continue
+        m = re.match(r"^((?:[^\w<]+\s*)?<b>[^<]+?</b>:?\s*|[^:<]+:\s*)(.*)$", ln)
+        if m:
+            lbl = m.group(1).strip()
+            val = m.group(2).strip()
+            if val:
+                rows.append(f"<tr><td>{lbl}</td><td>{val}</td></tr>")
+        else:
+            rows.append(f"<tr><td>📝 <b>Info:</b></td><td>{ln}</td></tr>")
+    return rows
+
+
 def format_index_audit_card(
     file_name: str,
     file_size_str: str,
@@ -1517,53 +1552,76 @@ def format_index_audit_card(
     added_by_label: str = "Added By",
 ) -> str:
     """
-    Per-file Index Audit Card for the Index Logs TOPIC (internal staff audit).
-    Always sent, whether caption enrichment succeeded or failed; the failure note appears only on failure.
+    Per-file Index Audit Card for the Index Logs TOPIC (internal staff audit), formatted with
+    Bot API 10.3 `<table striped>` blocks. Always sent, whether caption enrichment succeeded or failed.
     """
     e = lambda v: html.escape(str(v or ""), quote=False)
     ext_disp = extension if (not extension or extension.startswith(".")) else f".{extension}"
-    lines = [
-        "📄 <b>FILE INDEXED AUDIT</b>",
-        f"• <b>{e(added_by_label)}</b>: {user_link_html(user_id, user_title)}"
-        + (f" (<code>{int(user_id)}</code>)" if user_id else ""),
+
+    added_val = user_link_html(user_id, user_title) + (f" (<code>{int(user_id)}</code>)" if user_id else "")
+    audit_rows = [
+        f"<tr><td>• <b>{e(added_by_label)}</b></td><td>{added_val}</td></tr>",
     ]
     if source_info:
-        lines.append(f"• <b>Source</b>: {source_info}")
+        audit_rows.append(f"<tr><td>• <b>Source</b></td><td>{source_info}</td></tr>")
     if storage_link:
-        lines.append(f'• <b>Storage</b>: <a href="{html.escape(storage_link, quote=True)}">View in Storage Group</a>')
-    lines.append(f"• <b>Timestamp</b>: {e(_ist_now_str())}")
+        audit_rows.append(
+            f'<tr><td>• <b>Storage</b></td><td><a href="{html.escape(storage_link, quote=True)}">View in Storage Group</a></td></tr>'
+        )
+    audit_rows.append(f"<tr><td>• <b>Timestamp</b></td><td>{e(_ist_now_str())}</td></tr>")
     if indexed_by_bot:
-        lines.append(f"• <b>Indexed By</b>: {e(indexed_by_bot)}")
-    lines += [
-        "",
-        "📂 <b>File Details</b>:",
-        f"• <b>File Name</b>: <code>{e(file_name)}</code>",
-        f"• <b>File Size</b>: {e(file_size_str)}",
-        f"• <b>Extension</b>: {e(ext_disp)}",
+        audit_rows.append(f"<tr><td>• <b>Indexed By</b></td><td>{e(indexed_by_bot)}</td></tr>")
+    audit_table = "<table striped><tr><th>Audit Field</th><th>Details</th></tr>" + "".join(audit_rows) + "</table>"
+
+    file_rows = [
+        f"<tr><td>• <b>File Name</b>:</td><td><code>{e(file_name)}</code></td></tr>",
+        f"<tr><td>• <b>File Size</b>:</td><td>{e(file_size_str)}</td></tr>",
+        f"<tr><td>• <b>Extension</b>:</td><td>{e(ext_disp)}</td></tr>",
     ]
     if duration_str:
-        lines.append(f"• <b>Duration</b>: {e(duration_str)}")
-    lines.append(f"• <b>File Unique ID</b>: <code>{e(file_unique_id)}</code>")
-    lines += [
-        "",
-        f"1. 🗄 <b>Database Presence</b>: {e(db_badge)}",
-        f"2. 📦 <b>Storage Group Presence</b>: {e(storage_badge)}",
-        f"3. 📝 <b>Caption Enrichment</b>: {e(caption_badge)}",
+        file_rows.append(f"<tr><td>• <b>Duration</b>:</td><td>{e(duration_str)}</td></tr>")
+    file_rows.append(f"<tr><td>• <b>File Unique ID</b>:</td><td><code>{e(file_unique_id)}</code></td></tr>")
+    file_table = "<table striped><tr><th>📂 File Details</th><th>Value</th></tr>" + "".join(file_rows) + "</table>"
+
+    stage_rows = [
+        f"<tr><td>1. 🗄 <b>Database Presence</b></td><td>{e(db_badge)}</td></tr>",
+        f"<tr><td>2. 📦 <b>Storage Group Presence</b></td><td>{e(storage_badge)}</td></tr>",
+        f"<tr><td>3. 📝 <b>Caption Enrichment</b></td><td>{e(caption_badge)}</td></tr>",
     ]
+    stage_table = "<table striped><tr><th>Verification Stage</th><th>Status</th></tr>" + "".join(stage_rows) + "</table>"
+
+    sections = [
+        "📄 <b>FILE INDEXED AUDIT</b>",
+        "",
+        audit_table,
+        "",
+        "📂 <b>File Details</b>:",
+        file_table,
+        "",
+        stage_table,
+    ]
+
     orig = (original_caption or "").strip()
     if orig:
         if len(orig) > 500:
             orig = orig[:497] + "..."
-        lines += ["", "📝 <b>Original Caption</b>:", f"<blockquote>{e(orig)}</blockquote>"]
+        sections += ["", "📝 <b>Original Caption</b>:", f"<blockquote>{e(orig)}</blockquote>"]
+
     if is_enriched and (enriched_caption_html or "").strip():
-        lines += ["", "✨ <b>Enriched Caption</b>:", f"<blockquote>{enriched_caption_html.strip()}</blockquote>"]
+        cap_rows = _caption_html_to_table_rows(enriched_caption_html, strip_file_lines=False)
+        if cap_rows:
+            cap_table = "<table striped><tr><th>Field</th><th>Value</th></tr>" + "".join(cap_rows) + "</table>"
+            sections += ["", "✨ <b>Enriched Caption</b>:", cap_table]
+        else:
+            sections += ["", "✨ <b>Enriched Caption</b>:", f"<blockquote>{enriched_caption_html.strip()}</blockquote>"]
+
     if not is_enriched:
-        lines += [
+        sections += [
             "",
             "⚠️ <b>Note</b>: Caption enrichment failed for this item. "
-            "Please update the caption manually in the Storage Group.",
+            "Please update the caption manually in the Storage Group (tap <b>✏️ Edit Caption</b> or reply with <code>/editcaption</code>).",
         ]
-    return "\n".join(lines)
+    return "\n".join(sections)
 
 
 def format_index_channel_card(
@@ -1574,23 +1632,20 @@ def format_index_channel_card(
     enriched_caption_html: str | None,
     duration_str: str = "",
 ) -> str:
-    """Curated card for the Index Logs CHANNEL: only for files whose caption enrichment succeeded."""
+    """Curated `<table striped>` card for the Index Logs CHANNEL: only for files whose caption enrichment succeeded."""
     e = lambda v: html.escape(str(v or ""), quote=False)
     ext_disp = extension if (not extension or extension.startswith(".")) else f".{extension}"
-    lines = [
-        "📚 <b>New file added to library</b>",
-        "",
-        f"• <b>File Name:</b> <code>{e(file_name)}</code>",
-        f"• <b>File Size:</b> {e(file_size_str)}",
-        f"• <b>Extension:</b> {e(ext_disp)}",
+    rows = [
+        f"<tr><td>• <b>File Name:</b></td><td><code>{e(file_name)}</code></td></tr>",
+        f"<tr><td>• <b>File Size:</b></td><td>{e(file_size_str)}</td></tr>",
+        f"<tr><td>• <b>Extension:</b></td><td>{e(ext_disp)}</td></tr>",
     ]
     if duration_str:
-        lines.append(f"• <b>Duration:</b> {e(duration_str)}")
-    lines.append(f"• <b>File Unique ID:</b> <code>{e(file_unique_id)}</code>")
-    cap = _caption_without_file_lines(enriched_caption_html)
-    if cap:
-        lines += ["", cap]
-    return "\n".join(lines)
+        rows.append(f"<tr><td>• <b>Duration:</b></td><td>{e(duration_str)}</td></tr>")
+    rows.append(f"<tr><td>• <b>File Unique ID:</b></td><td><code>{e(file_unique_id)}</code></td></tr>")
+    rows.extend(_caption_html_to_table_rows(enriched_caption_html, strip_file_lines=True))
+    table_html = "<table striped><tr><th>Field</th><th>Details</th></tr>" + "".join(rows) + "</table>"
+    return f"📚 <b>New file added to library</b>\n\n{table_html}"
 
 
 async def _send_with_fallback(chat_id, text: str, bot, fallback_bot=None, thread_id=None, label: str = "log") -> bool:
@@ -1777,29 +1832,52 @@ def extract_media_info(message) -> dict | None:
     }
 
 
+def storage_caption_markup(storage_msg_id: int | None = None) -> InlineKeyboardMarkup:
+    """Builds the Storage-Group-only `✏️ Edit Caption` button attached to every stored file."""
+    suffix = str(int(storage_msg_id)) if storage_msg_id else "0"
+    return InlineKeyboardMarkup([
+        [styled_button("✏️ Edit Caption", callback_data=f"ecap_btn_{suffix}", style="primary")]
+    ])
+
+
 async def send_media_to_storage(bot, storage_chat_id: int, info: dict, caption_html: str):
+    markup = storage_caption_markup()
     if info["media_kind"] == "audio":
         try:
-            return await bot.send_audio(
+            sent = await bot.send_audio(
                 chat_id=storage_chat_id,
                 audio=info["file_id"],
                 caption=caption_html,
                 parse_mode="HTML",
+                reply_markup=markup,
             )
         except Exception:
-            return await bot.send_document(
+            sent = await bot.send_document(
                 chat_id=storage_chat_id,
                 document=info["file_id"],
                 caption=caption_html,
                 parse_mode="HTML",
+                reply_markup=markup,
             )
     else:
-        return await bot.send_document(
+        sent = await bot.send_document(
             chat_id=storage_chat_id,
             document=info["file_id"],
             caption=caption_html,
             parse_mode="HTML",
+            reply_markup=markup,
         )
+    mid = getattr(sent, "message_id", None)
+    if mid and hasattr(bot, "edit_message_reply_markup"):
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=storage_chat_id,
+                message_id=int(mid),
+                reply_markup=storage_caption_markup(int(mid)),
+            )
+        except Exception:
+            pass
+    return sent
 
 
 def _make_storage_msg_link(storage_id: int, message_id: int) -> str:
@@ -1945,6 +2023,7 @@ async def verify_and_heal_indexed_file(
                 message_id=int(target_msg_id),
                 caption=caption_html,
                 parse_mode="HTML",
+                reply_markup=storage_caption_markup(int(target_msg_id)),
             )
             was_in_storage = True
             if was_caption_healed or not existing_enriched_flag:
@@ -2092,16 +2171,26 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
         # Send Error Log alert if any stage failed or enrichment failed (< 2 parameters)
         if (not is_success_enrichment or not res["db_ok"]) and error_log_topic_id and log_group_id:
             try:
+                storage_btn_row = tg_button_row_html([
+                    tg_button_html(
+                        f"📦 Open Storage Message #{target_msg_id}",
+                        url=storage_link,
+                        style="primary",
+                    )
+                ])
                 err_text = (
                     f"⚠️ <b>Caption Enrichment Failed (&lt;2 Parameters Matched)</b>\n\n"
-                    f"📁 <b>File:</b> <code>{html.escape(file_name)}</code>\n"
-                    f"🔗 <b>Storage Message:</b> <a href=\"{storage_link}\">Message #{target_msg_id}</a>\n"
-                    f"🔑 <b>Unique ID:</b> <code>{file_unique_id}</code>\n\n"
-                    f"<b>3-Stage Check:</b>\n"
-                    f"1. 🗄 <b>Database:</b> {res['db_badge']}\n"
-                    f"2. 📦 <b>Storage:</b> {res['storage_badge']}\n"
-                    f"3. 📝 <b>Caption:</b> {res['caption_badge']}\n\n"
-                    f"<i>Admins please edit the storage message caption manually. The bot will automatically capture your edit and update the database.</i>"
+                    f"<table striped>"
+                    f"<tr><th>Field</th><th>Details</th></tr>"
+                    f"<tr><td>📁 <b>File</b></td><td><code>{html.escape(file_name)}</code></td></tr>"
+                    f"<tr><td>🔗 <b>Storage Message</b></td><td><a href=\"{storage_link}\">Message #{target_msg_id}</a></td></tr>"
+                    f"<tr><td>🔑 <b>Unique ID</b></td><td><code>{html.escape(file_unique_id)}</code></td></tr>"
+                    f"<tr><td>1. 🗄 <b>Database</b></td><td>{html.escape(res['db_badge'])}</td></tr>"
+                    f"<tr><td>2. 📦 <b>Storage</b></td><td>{html.escape(res['storage_badge'])}</td></tr>"
+                    f"<tr><td>3. 📝 <b>Caption</b></td><td>{html.escape(res['caption_badge'])}</td></tr>"
+                    f"</table>\n\n"
+                    f"<i>Open the Storage Group message and tap <b>✏️ Edit Caption</b> (or reply with <code>/editcaption</code>) to update the caption.</i>\n\n"
+                    f"{storage_btn_row}"
                 )
                 await context.bot.send_message(
                     chat_id=int(log_group_id),
@@ -2228,3 +2317,550 @@ async def handle_storage_caption_edit(update: Update, context: ContextTypes.DEFA
         )
     except Exception as e:
         logger.error("Failed to send admin caption edit index log: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Storage Group Interactive Edit Caption Command (/editcaption) & Button (ecap_)
+# ---------------------------------------------------------------------------
+EDIT_CAPTION_ROLES = {"Volunteer", "Moderator", "Admin", "Administrator", "Creator", "Owner"}
+_PENDING_CAPTION_EDITS: dict[tuple[int, int], dict] = {}
+_PENDING_CAPTION_EDITS_BY_USER: dict[tuple[int, int], dict] = {}
+_SEEN_EDITCAP_CMDS: set[tuple[int, int]] = set()
+_SEEN_EDITCAP_REPLIES: set[tuple[int, int]] = set()
+
+
+def _has_edit_caption_access(user) -> bool:
+    if user is None:
+        return True
+    uid = getattr(user, "id", 0) or 0
+    if uid == anon_admin_id():
+        return True
+    return get_user_role_db(uid) in EDIT_CAPTION_ROLES
+
+
+def build_manual_storage_caption(
+    raw_input_text: str,
+    file_name: str = "File",
+    file_size_str: str = "",
+    extension: str = "",
+    category: str = "ebook",
+) -> str:
+    """
+    Formats an admin-supplied caption reply into clean Mira-style Storage Group HTML:
+    - Recognizes structured fields (`Book:`, `Audiobook:`, `Title:`, `Author:`, `By:`, `Series:`,
+      `Narrated by:`, `Rating:`, `Genres:`, `Length:`, `Pages:`, `Release Date:`) and formats them
+      with bold labels and `<code>...</code>` values.
+    - Preserves any remaining custom lines cleanly.
+    - Always appends `📁 File:` and `📦 Size: ... | Type: .ext` at the bottom if not already present.
+    """
+    cleaned = clean_promo_text(raw_input_text or "").strip()
+    ext_clean = (extension or os.path.splitext(file_name or "")[1]).lstrip(".")
+    is_audio = category == "audiobook" or (ext_clean and f".{ext_clean.lower()}" in supported_audiobook_extensions())
+
+    label_map = {
+        "title": ("🎧 <b>Audiobook:</b>" if is_audio else "📚 <b>Book:</b>", False),
+        "book": ("📚 <b>Book:</b>", False),
+        "audiobook": ("🎧 <b>Audiobook:</b>", False),
+        "book / audiobook": ("📦 <b>Book / Audiobook:</b>", False),
+        "author": ("✍️ <b>Author:</b>", True),
+        "by": ("✍️ <b>By:</b>", True),
+        "series": ("📚 <b>Series:</b>", True),
+        "narrated by": ("🎙 <b>Narrated by:</b>", True),
+        "narrator": ("🎙 <b>Narrated by:</b>", True),
+        "rating": ("⭐ <b>Rating:</b>", True),
+        "genres": ("🏷 <b>Genres:</b>", True),
+        "genre": ("🏷 <b>Genres:</b>", True),
+        "length": ("⏱ <b>Length:</b>", True),
+        "duration": ("⏱ <b>Length:</b>", True),
+        "pages": ("📄 <b>Pages:</b>", True),
+        "release date": ("📅 <b>Release Date:</b>", True),
+        "published": ("📅 <b>Release Date:</b>", True),
+    }
+
+    body_lines: list[str] = []
+    for raw_ln in cleaned.split("\n"):
+        ln = raw_ln.strip()
+        if not ln:
+            continue
+        # Strip leading bullets or emojis to inspect the field name
+        m = re.match(r"^(?:[^A-Za-z0-9<]*\s*)?([A-Za-z][A-Za-z /]{1,22}):[ \t]*(.*)$", re.sub(r"<[^>]+>", "", ln))
+        if m:
+            key = m.group(1).strip().lower()
+            val = m.group(2).strip()
+            if key in ("file", "file name", "size", "type"):
+                continue
+            if key in label_map and val:
+                lbl_html, use_code = label_map[key]
+                if key == "series":
+                    val = format_series_label(val)
+                esc_val = html.escape(val, quote=False)
+                if key == "rating" and "(" in val:
+                    p1, p2 = val.split("(", 1)
+                    body_lines.append(f"{lbl_html} <code>{html.escape(p1.strip(), quote=False)}</code> ({html.escape(p2, quote=False)}")
+                elif use_code:
+                    body_lines.append(f"{lbl_html} <code>{esc_val}</code>")
+                else:
+                    body_lines.append(f"{lbl_html} {esc_val}")
+                continue
+        body_lines.append(html.escape(re.sub(r"<[^>]+>", "", ln), quote=False))
+
+    esc_fname = html.escape(file_name or "Unknown", quote=False)
+    footer_lines = [f"📁 <b>File:</b> <code>{esc_fname}</code>"]
+    if file_size_str or ext_clean:
+        sz_part = f"📦 <b>Size:</b> <code>{html.escape(file_size_str or '0 KB', quote=False)}</code>"
+        tp_part = f" | <b>Type:</b> <code>.{html.escape(ext_clean, quote=False)}</code>" if ext_clean else ""
+        footer_lines.append(sz_part + tp_part)
+
+    out = body_lines + ([""] if body_lines else []) + footer_lines
+    return "\n".join(out)[:1020]
+
+
+async def edit_storage_message_caption_any_bot(
+    primary_bot,
+    storage_id: int,
+    target_msg_id: int,
+    caption_html: str,
+) -> tuple[bool, str]:
+    """
+    Edits a file message's caption inside `STORAGE_GROUP_ID`, trying `primary_bot` first and
+    falling back across the Main Bot (`bot_token()`) and all `helper_bot_tokens()` so whichever
+    bot originally uploaded the file in the Storage Group can edit its own message.
+    """
+    markup = storage_caption_markup(int(target_msg_id))
+
+    async def _try_bot(b) -> tuple[bool, str | None]:
+        try:
+            await b.edit_message_caption(
+                chat_id=int(storage_id),
+                message_id=int(target_msg_id),
+                caption=caption_html,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+            uname = getattr(b, "username", None)
+            if not uname and hasattr(b, "get_me"):
+                try:
+                    me = await b.get_me()
+                    uname = getattr(me, "username", None)
+                except Exception:
+                    uname = None
+            return True, (f"@{uname}" if uname else "Bot")
+        except Exception as exc:
+            if "message is not modified" in str(exc).lower():
+                uname = getattr(b, "username", None)
+                return True, (f"@{uname}" if uname else "Bot")
+            return False, str(exc)
+
+    if primary_bot is not None:
+        ok, info_or_err = await _try_bot(primary_bot)
+        if ok:
+            return True, info_or_err or "Bot"
+
+    if Bot is not None:
+        tokens: list[str] = []
+        try:
+            mt = bot_token()
+            if mt:
+                tokens.append(mt)
+        except Exception:
+            pass
+        try:
+            for ht in helper_bot_tokens():
+                if ht and ht not in tokens:
+                    tokens.append(ht)
+        except Exception:
+            pass
+
+        for tok in tokens:
+            try:
+                async with Bot(tok) as candidate:
+                    ok, info_or_err = await _try_bot(candidate)
+                    if ok:
+                        return True, info_or_err or "Bot"
+            except Exception:
+                continue
+
+    return False, "Could not edit caption with any configured bot token."
+
+
+async def _delete_later(bot, chat_id: int, message_id: int, delay_s: float = 8.0):
+    await asyncio.sleep(max(1.0, delay_s))
+    try:
+        await bot.delete_message(chat_id=int(chat_id), message_id=int(message_id))
+    except Exception:
+        pass
+
+
+async def _open_edit_caption_prompt(
+    bot,
+    storage_id: int,
+    target_msg_id: int,
+    user_id: int,
+    user_title: str,
+    target_msg=None,
+):
+    """Posts the interactive Edit Caption prompt inside the Storage Group and registers the session."""
+    row = get_file_by_storage_message_id_db(int(target_msg_id))
+    info = extract_media_info(target_msg) if target_msg is not None else None
+
+    file_name = (
+        (info.get("file_name") if info else None)
+        or (row["file_name"] if row else None)
+        or f"Message #{target_msg_id}"
+    )
+    file_size = (
+        (info.get("file_size") if info else None)
+        or (int(row["file_size"] or 0) if row else 0)
+    )
+    duration = (
+        (info.get("duration") if info else None)
+        or (int(row["duration"] or 0) if row else 0)
+    )
+    extension = (
+        (info.get("extension") if info else None)
+        or (row["extension"] if row else "")
+        or os.path.splitext(file_name)[1].lower()
+    )
+    file_unique_id = (
+        (info.get("file_unique_id") if info else None)
+        or (row["file_unique_id"] if row else f"msg_{target_msg_id}")
+    )
+    category = (
+        (info.get("category") if info else None)
+        or (row["category"] if row else None)
+        or ("audiobook" if extension in supported_audiobook_extensions() else "ebook")
+    )
+    orig_caption = (
+        (info.get("raw_caption") if info else None)
+        or (row["caption"] if row else "")
+        or ""
+    )
+
+    is_audio = category == "audiobook" or extension in supported_audiobook_extensions()
+    sample_block = (
+        "🎧 Audiobook: Book Title\n✍️ By: Author Name\n📚 Series: Series Name (Book #1)"
+        if is_audio
+        else "📚 Book: Book Title\n✍️ Author: Author Name\n📚 Series: Series Name (Book #1)"
+    )
+
+    prompt_html = (
+        f"✏️ <b>Edit Caption — Storage Message #{target_msg_id}</b>\n"
+        f"📁 <b>File:</b> <code>{html.escape(file_name, quote=False)}</code>\n\n"
+        f"Please <b>reply to this prompt</b> with the new caption:\n"
+        f"<pre>{sample_block}</pre>\n"
+        f"<i>(File Name, Size &amp; Type are preserved automatically.)</i>"
+    )
+    cancel_kb = InlineKeyboardMarkup([
+        [styled_button("⛔ Cancel Edit", callback_data=f"ecap_cancel_{target_msg_id}", style="danger")]
+    ])
+
+    send_kw = {
+        "chat_id": int(storage_id),
+        "text": prompt_html,
+        "parse_mode": "HTML",
+        "reply_markup": cancel_kb,
+        "reply_to_message_id": int(target_msg_id),
+    }
+    try:
+        prompt_msg = await bot.send_message(**send_kw)
+    except Exception:
+        send_kw.pop("reply_to_message_id", None)
+        prompt_msg = await bot.send_message(**send_kw)
+
+    session = {
+        "storage_id": int(storage_id),
+        "target_msg_id": int(target_msg_id),
+        "prompt_msg_id": int(prompt_msg.message_id),
+        "prompt_bot_id": getattr(bot, "id", None),
+        "user_id": int(user_id or 0),
+        "user_title": user_title or "Admin",
+        "file_name": file_name,
+        "file_size": file_size,
+        "duration": duration,
+        "extension": extension,
+        "file_unique_id": file_unique_id,
+        "category": category,
+        "original_caption": orig_caption,
+    }
+    _PENDING_CAPTION_EDITS[(int(storage_id), int(prompt_msg.message_id))] = session
+    if user_id:
+        _PENDING_CAPTION_EDITS_BY_USER[(int(storage_id), int(user_id))] = session
+    return prompt_msg
+
+
+async def editcaption_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    `/editcaption` (aliases: `/setcaption`, `/caption`) — works ONLY in `STORAGE_GROUP_ID`.
+    Asks the user to reply to the bot's prompt with the new caption, then updates the Storage Group
+    message caption, updates `files.db`, and posts the Table Audit + Channel Library cards.
+    """
+    msg = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    if not msg or not chat:
+        return
+
+    storage_id = storage_group_id()
+    if not storage_id or str(chat.id) != str(storage_id):
+        cmd_key = (int(chat.id), int(msg.message_id))
+        if cmd_key in _SEEN_EDITCAP_CMDS:
+            return
+        _SEEN_EDITCAP_CMDS.add(cmd_key)
+        await msg.reply_text(
+            "⛔ <b>Storage Group Only:</b> The <code>/editcaption</code> command works exclusively inside the Storage Group.",
+            parse_mode="HTML",
+        )
+        return
+
+    # If the user replied to a file message sent by a specific bot, let that bot handle the prompt first
+    replied = getattr(msg, "reply_to_message", None)
+    replied_bot_id = getattr(getattr(replied, "from_user", None), "id", None) if replied else None
+    my_bot_id = getattr(context.bot, "id", None)
+    if replied_bot_id and my_bot_id and replied_bot_id != my_bot_id:
+        await asyncio.sleep(0.2)
+
+    cmd_key = (int(chat.id), int(msg.message_id))
+    if cmd_key in _SEEN_EDITCAP_CMDS:
+        return
+    _SEEN_EDITCAP_CMDS.add(cmd_key)
+    if len(_SEEN_EDITCAP_CMDS) > 500:
+        _SEEN_EDITCAP_CMDS.clear()
+
+    if not _has_edit_caption_access(user):
+        await msg.reply_text("⛔ Access restricted to Volunteers, Moderators, Admins, and the Creator.")
+        return
+
+    target_msg_id = None
+    target_msg = None
+    if replied is not None:
+        target_msg_id = int(replied.message_id)
+        target_msg = replied
+    elif context.args:
+        arg0 = str(context.args[0]).strip()
+        m_link = re.search(r"/(\d+)$", arg0)
+        if m_link:
+            target_msg_id = int(m_link.group(1))
+        elif arg0.lstrip("#").isdigit():
+            target_msg_id = int(arg0.lstrip("#"))
+
+    if not target_msg_id:
+        hint = await msg.reply_text(
+            "💡 <b>How to Edit a File Caption:</b>\n"
+            "• Tap the <b>✏️ Edit Caption</b> button on any file in this Storage Group, OR\n"
+            "• Reply to a file message here with <code>/editcaption</code> (or <code>/editcaption &lt;message_id&gt;</code>).",
+            parse_mode="HTML",
+        )
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        if getattr(hint, "message_id", None):
+            asyncio.create_task(_delete_later(context.bot, int(storage_id), int(hint.message_id), 12.0))
+        return
+
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    uid = user.id if user else 0
+    utitle = (user.full_name or user.username or "Admin") if user else "Admin"
+    await _open_edit_caption_prompt(
+        bot=context.bot,
+        storage_id=int(storage_id),
+        target_msg_id=int(target_msg_id),
+        user_id=uid,
+        user_title=utitle,
+        target_msg=target_msg,
+    )
+
+
+async def editcaption_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles `✏️ Edit Caption` (`ecap_btn_<id>`) and `⛔ Cancel Edit` (`ecap_cancel_<id>`) in Storage Group."""
+    q = update.callback_query
+    if not q or not q.data:
+        return
+    msg = q.message
+    chat = getattr(msg, "chat", None)
+    user = q.from_user
+    storage_id = storage_group_id()
+
+    if not chat or not storage_id or str(chat.id) != str(storage_id):
+        await q.answer("⛔ Edit Caption works only inside the Storage Group.", show_alert=True)
+        return
+
+    if not _has_edit_caption_access(user):
+        await q.answer("⛔ Access restricted to team members.", show_alert=True)
+        return
+
+    data = q.data
+    if data.startswith("ecap_cancel_"):
+        if msg and getattr(msg, "message_id", None):
+            sess = _PENDING_CAPTION_EDITS.pop((int(storage_id), int(msg.message_id)), None)
+            if sess and sess.get("user_id"):
+                _PENDING_CAPTION_EDITS_BY_USER.pop((int(storage_id), int(sess["user_id"])), None)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+        await q.answer("Edit caption cancelled.")
+        return
+
+    if data.startswith("ecap_btn_"):
+        raw_id = data.replace("ecap_btn_", "").strip()
+        target_msg_id = int(raw_id) if (raw_id.isdigit() and int(raw_id) > 0) else int(getattr(msg, "message_id", 0) or 0)
+        if not target_msg_id:
+            await q.answer("❌ Could not determine target message ID.", show_alert=True)
+            return
+        await q.answer("Reply to the prompt with the new caption!")
+        uid = user.id if user else 0
+        utitle = (user.full_name or user.username or "Admin") if user else "Admin"
+        await _open_edit_caption_prompt(
+            bot=context.bot,
+            storage_id=int(storage_id),
+            target_msg_id=int(target_msg_id),
+            user_id=uid,
+            user_title=utitle,
+            target_msg=msg,
+        )
+
+
+async def storage_caption_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Captures the admin's reply to the Edit Caption prompt inside `STORAGE_GROUP_ID`,
+    updates the file message caption in place, updates `files.db`, and sends the Table Audit
+    Card to the Index Logs Topic + Table Library Card to the Index Logs Channel.
+    """
+    msg = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    if not msg or not chat:
+        return
+
+    storage_id = storage_group_id()
+    if not storage_id or str(chat.id) != str(storage_id):
+        return
+
+    raw_text = (msg.text or msg.caption or "").strip()
+    if not raw_text or raw_text.startswith("/"):
+        return
+
+    replied = getattr(msg, "reply_to_message", None)
+    session = None
+    if replied and getattr(replied, "message_id", None):
+        session = _PENDING_CAPTION_EDITS.get((int(storage_id), int(replied.message_id)))
+    if session is None and user and getattr(user, "id", None):
+        session = _PENDING_CAPTION_EDITS_BY_USER.get((int(storage_id), int(user.id)))
+    if session is None:
+        return
+
+    # Let the bot instance that created the prompt handle the reply first
+    my_bot_id = getattr(context.bot, "id", None)
+    prompt_bot_id = session.get("prompt_bot_id")
+    if prompt_bot_id and my_bot_id and prompt_bot_id != my_bot_id:
+        await asyncio.sleep(0.2)
+
+    reply_key = (int(storage_id), int(msg.message_id))
+    if reply_key in _SEEN_EDITCAP_REPLIES:
+        return
+    _SEEN_EDITCAP_REPLIES.add(reply_key)
+    if len(_SEEN_EDITCAP_REPLIES) > 500:
+        _SEEN_EDITCAP_REPLIES.clear()
+
+    _PENDING_CAPTION_EDITS.pop((int(storage_id), int(session["prompt_msg_id"])), None)
+    if session.get("user_id"):
+        _PENDING_CAPTION_EDITS_BY_USER.pop((int(storage_id), int(session["user_id"])), None)
+
+    target_msg_id = int(session["target_msg_id"])
+    file_name = session["file_name"]
+    file_size = int(session.get("file_size") or 0)
+    duration = int(session.get("duration") or 0)
+    extension = session.get("extension") or os.path.splitext(file_name)[1].lower()
+    file_unique_id = session.get("file_unique_id") or f"msg_{target_msg_id}"
+    category = session.get("category") or "ebook"
+
+    size_mb = file_size / (1024 * 1024)
+    file_size_str = f"{size_mb:.2f} MB" if size_mb >= 1 else (f"{file_size / 1024:.2f} KB" if file_size > 0 else "")
+
+    new_caption_html = build_manual_storage_caption(
+        raw_input_text=raw_text,
+        file_name=file_name,
+        file_size_str=file_size_str,
+        extension=extension,
+        category=category,
+    )
+
+    edited_ok, bot_label = await edit_storage_message_caption_any_bot(
+        primary_bot=context.bot,
+        storage_id=int(storage_id),
+        target_msg_id=target_msg_id,
+        caption_html=new_caption_html,
+    )
+
+    parsed_meta = _parse_caption_meta(new_caption_html)
+    searchable_caption = (
+        f"{new_caption_html} {file_name} {parsed_meta.get('book_title', '')} "
+        f"{parsed_meta.get('book_author', '')} {parsed_meta.get('book_series', '')}"
+    ).strip()
+    update_file_caption_db(storage_message_id=target_msg_id, new_caption=searchable_caption, is_enriched=1)
+
+    storage_link = _make_storage_msg_link(int(storage_id), target_msg_id)
+    admin_id = user.id if user else int(session.get("user_id") or 0)
+    admin_name = (user.full_name or user.username or session.get("user_title") or "Admin") if user else "Admin"
+
+    info_payload = {
+        "file_name": file_name,
+        "file_size": file_size,
+        "duration": duration,
+        "extension": extension,
+        "file_unique_id": file_unique_id,
+        "category": category,
+    }
+    res_payload = {
+        "status": "indexed",
+        "is_success_enrichment": True,
+        "file_size_str": file_size_str or "0 KB",
+        "storage_link": storage_link,
+        "db_badge": "✅ Updated in files.db",
+        "storage_badge": (
+            f"✅ Caption Updated in Storage Group (Msg #{target_msg_id})"
+            if edited_ok
+            else f"⚠️ Stored in files.db (Msg #{target_msg_id})"
+        ),
+        "caption_badge": "✅ ✍️ Enriched manually by Admin",
+        "caption_html": new_caption_html,
+    }
+
+    try:
+        await send_index_file_logs(
+            context.bot,
+            info=info_payload,
+            res=res_payload,
+            user_id=admin_id,
+            user_title=admin_name,
+            indexed_by_bot=bot_label,
+            added_by_label="Caption Updated By",
+            original_caption=session.get("original_caption") or "",
+        )
+    except Exception as exc:
+        logger.error("Failed to send index logs after manual caption edit: %s", exc)
+
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    prompt_mid = int(session["prompt_msg_id"])
+    try:
+        await context.bot.edit_message_text(
+            chat_id=int(storage_id),
+            message_id=prompt_mid,
+            text=f"✅ <b>Caption updated for Message #{target_msg_id}!</b>",
+            parse_mode="HTML",
+        )
+        asyncio.create_task(_delete_later(context.bot, int(storage_id), prompt_mid, 8.0))
+    except Exception:
+        try:
+            await context.bot.delete_message(chat_id=int(storage_id), message_id=prompt_mid)
+        except Exception:
+            pass

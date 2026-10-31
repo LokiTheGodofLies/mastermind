@@ -1,4 +1,4 @@
-"""Offline tests: index audit/channel cards + routing, restart card and 'Verified & Indexed' reply tables (build 20261031-1830)."""
+"""Offline tests: index audit/channel table cards + routing, Storage Group /editcaption command & button, restart card and 'Verified & Indexed' reply tables (build 20261031-2025)."""
 import asyncio, os, re, sys
 from types import SimpleNamespace
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -11,7 +11,7 @@ def check(n, c, x=""):
     global fails
     print(("PASS " if c else "FAIL ") + n + ((" -> " + x) if (x and not c) else "")); fails += (not c)
 
-# ---- Index logs: audit card (topic) + curated card (channel) + routing (build 20261031-1830) ----
+# ---- Index logs: audit table card (topic) + curated table card (channel) + routing (build 20261031-2025) ----
 INFO_AUDIO = {"file_name": "3 The Dragon's Choice - Roxie Ray.m4b", "file_unique_id": "AgAD-SAAAtcToVI", "extension": ".m4b",
               "duration": 51730, "raw_caption": "Roxie Ray - Dragon <final> release", "file_size": 335_000_000}
 INFO_EBOOK = dict(INFO_AUDIO, file_name="The Final Empire.epub", extension=".epub", duration=0)
@@ -32,42 +32,150 @@ audit = bi.format_index_audit_card("The Final Empire.epub", "1.45 MB", ".epub", 
     "✅ Added to files.db", "✅ Added to Storage Group (Msg #1087)", "✅ Enriched via Goodreads", True,
     source_info='<a href="https://t.me/c/442/9">Fantasy Archive</a> (<code>-100442</code>) | Msg <code>#95</code>',
     indexed_by_bot="@Heyuqtbot", original_caption="Brandon Sanderson - Mistborn <b>Book 1</b>", enriched_caption_html=CAP)
-check("audit: header", audit.startswith("📄 <b>FILE INDEXED AUDIT</b>"))
+check("audit: header + tables", audit.startswith("📄 <b>FILE INDEXED AUDIT</b>") and audit.count("<table striped>") >= 4, audit)
 check("audit: user title embedded link + id", '<a href="tg://user?id=123">Loki &lt;&amp;&gt; Co</a> (<code>123</code>)' in audit, audit)
 check("audit: source with msg id", "Fantasy Archive" in audit and "Msg <code>#95</code>" in audit)
 check("audit: storage embedded link (no raw url text)", '<a href="https://t.me/c/3511375054/1087">View in Storage Group</a>' in audit)
 check("audit: details", all(x in audit for x in ("File Name", "File Size", "Extension", "File Unique ID")) and "Duration" not in audit)
 check("audit: ticks in order", audit.index("1. 🗄") < audit.index("2. 📦") < audit.index("3. 📝"))
 check("audit: original caption escaped in blockquote", "<blockquote>Brandon Sanderson - Mistborn &lt;b&gt;Book 1&lt;/b&gt;</blockquote>" in audit)
-check("audit: enriched caption block", "✨ <b>Enriched Caption</b>" in audit and "Brandon Sanderson" in audit)
+check("audit: enriched caption table", "✨ <b>Enriched Caption</b>" in audit and "<tr><td>✍️ <b>Author:</b></td><td><code>Brandon Sanderson</code></td></tr>" in audit)
 check("audit: no failure note on success", "Caption enrichment failed" not in audit)
 fail_audit = bi.format_index_audit_card("x.epub", "1 MB", ".epub", "U", "https://t.me/c/1/2", 5, "A", "d", "s", "c", False, enriched_caption_html=CAP)
 check("audit: failure note, no enriched block", "Caption enrichment failed for this item" in fail_audit and "Enriched Caption" not in fail_audit)
-check("audit: duration row for media", "Duration</b>: 14h 22m 10s" in bi.format_index_audit_card("a.m4b", "1 MB", ".m4b", "U", "", 0, "A", "d", "s", "c", True, duration_str="14h 22m 10s"))
+check("audit: duration row for media", "Duration</b>:</td><td>14h 22m 10s" in bi.format_index_audit_card("a.m4b", "1 MB", ".m4b", "U", "", 0, "A", "d", "s", "c", True, duration_str="14h 22m 10s"))
 
 card = bi.format_index_channel_card("The Final Empire.epub", "1.45 MB", ".epub", "AQADAgADxqc", CAP)
-check("channel card: header + fields", card.startswith("📚 <b>New file added to library</b>") and all(x in card for x in ("File Name:", "File Size:", "Extension:", "File Unique ID:")))
+check("channel card: header + table + fields", card.startswith("📚 <b>New file added to library</b>") and "<table striped>" in card and all(x in card for x in ("File Name:", "File Size:", "Extension:", "File Unique ID:")))
 check("channel card: no duration for ebook", "Duration" not in card)
-check("channel card: enriched caption kept, file/size lines not duplicated", "Brandon Sanderson" in card and "📁 <b>File:</b>" not in card and "📦 <b>Size:</b>" not in card)
+check("channel card: enriched caption kept in table, file/size lines not duplicated", "Brandon Sanderson" in card and "📁 <b>File:</b>" not in card and "📦 <b>Size:</b>" not in card)
 check("channel card: no audit-only fields", all(x not in card for x in ("Added By", "Timestamp", "Storage", "Original Caption", "Database")))
-check("channel card: duration for media", "Duration:</b> 14h 22m 10s" in bi.format_index_channel_card("a.m4b", "1 MB", ".m4b", "U", CAP, "14h 22m 10s"))
+check("channel card: duration for media", "Duration:</b></td><td>14h 22m 10s" in bi.format_index_channel_card("a.m4b", "1 MB", ".m4b", "U", CAP, "14h 22m 10s"))
 check("channel card: archive header 📦 line survives", "📦 <b>Book / Audiobook:</b>" in bi.format_index_channel_card("a.zip", "1 MB", ".zip", "U", "📦 <b>Book / Audiobook:</b> X\n\n📁 <b>File:</b> <code>a</code>\n📦 <b>Size:</b> <code>1</code>"))
 
+# ---- Storage Group /editcaption command, ✏️ Edit Caption button, and reply flow ----
+kb = bi.storage_caption_markup(1114)
+btn0 = kb.inline_keyboard[0][0]
+check("edit caption button markup", "Edit Caption" in btn0.text and btn0.callback_data == "ecap_btn_1114")
+
+manual_cap = bi.build_manual_storage_caption(
+    "🎧 Audiobook: King of Envy\n✍️ By: Ana Huang\n📚 Series: Kings of Sin, Book 5",
+    file_name="5 King of Envy - Ana Huang GGL.m4b",
+    file_size_str="889.79 MB",
+    extension=".m4b",
+    category="audiobook",
+)
+check("manual caption formatting + series normalization + file/size footer",
+      "🎧 <b>Audiobook:</b> King of Envy" in manual_cap
+      and "✍️ <b>By:</b> <code>Ana Huang</code>" in manual_cap
+      and "📚 <b>Series:</b> <code>Kings of Sin (Book #5)</code>" in manual_cap
+      and "📁 <b>File:</b> <code>5 King of Envy - Ana Huang GGL.m4b</code>" in manual_cap
+      and "📦 <b>Size:</b> <code>889.79 MB</code> | <b>Type:</b> <code>.m4b</code>" in manual_cap,
+      manual_cap)
+
 class Sink:
+    id = 8752800863
     username = "Heyuqtbot"
-    def __init__(self): self.sent = []
-    async def send_message(self, **kw): self.sent.append(kw)
+    def __init__(self):
+        self.sent = []
+        self.edited_captions = []
+        self.edited_texts = []
+    async def send_message(self, **kw):
+        self.sent.append(kw)
+        return SimpleNamespace(message_id=2000 + len(self.sent), chat_id=kw.get("chat_id"))
+    async def edit_message_caption(self, **kw):
+        self.edited_captions.append(kw)
+        return True
+    async def edit_message_text(self, **kw):
+        self.edited_texts.append(kw)
+        return True
+    async def delete_message(self, **kw):
+        return True
+
 bi.index_channel_id = lambda: "-1004343321416"
 bi.logger_group_id = lambda: "-1004293995714"
+bi.storage_group_id = lambda: "-1003511375054"
 bi.log_topic = lambda name: 590 if name == "INDEX" else None
+bi.get_user_role_db = lambda uid: "Creator"
+
+async def test_edit_caption_flow():
+    bot = Sink()
+    # 1. Calling /editcaption outside Storage Group is rejected
+    out_replies = []
+    async def _out_reply(t, **kw): out_replies.append(t)
+    upd_outside = SimpleNamespace(
+        effective_message=SimpleNamespace(message_id=10, reply_text=_out_reply, reply_to_message=None),
+        effective_chat=SimpleNamespace(id=-100999999),
+        effective_user=SimpleNamespace(id=8853305382, full_name="Loki", username="loki"),
+    )
+    await bi.editcaption_command(upd_outside, SimpleNamespace(bot=bot, args=[]))
+    check("editcaption rejected outside storage group", len(out_replies) == 1 and "Storage Group Only" in out_replies[0])
+
+    # 2. Tapping ✏️ Edit Caption button inside Storage Group opens bot prompt
+    answers = []
+    async def _q_ans(t="", **kw): answers.append((t, kw))
+    target_media_msg = SimpleNamespace(
+        message_id=1114,
+        chat=SimpleNamespace(id=-1003511375054),
+        document=None,
+        audio=SimpleNamespace(
+            file_id="fid_1114",
+            file_unique_id="AgADiyMAArwRmVY",
+            file_name="5 King of Envy - Ana Huang GGL.m4b",
+            file_size=933_000_000,
+            duration=36000,
+            mime_type="audio/x-m4b",
+        ),
+        caption="🎧 Audiobook:\n✍️ By:\n📚 Series:",
+    )
+    upd_cb = SimpleNamespace(
+        callback_query=SimpleNamespace(
+            data="ecap_btn_1114",
+            message=target_media_msg,
+            from_user=SimpleNamespace(id=8853305382, full_name="Loki", username="loki"),
+            answer=_q_ans,
+        )
+    )
+    await bi.editcaption_callback(upd_cb, SimpleNamespace(bot=bot))
+    check("editcaption button sends prompt in storage group",
+          len(bot.sent) == 1 and bot.sent[0]["chat_id"] == -1003511375054 and "Edit Caption — Storage Message #1114" in bot.sent[0]["text"])
+    prompt_mid = 2001
+
+    # 3. Admin replies to bot prompt with new caption -> edits storage caption, updates DB, sends table audit + channel cards
+    db_updates = []
+    bi.update_file_caption_db = lambda **kw: db_updates.append(kw)
+    async def _noop_del(): pass
+    upd_reply = SimpleNamespace(
+        effective_message=SimpleNamespace(
+            message_id=2002,
+            text="🎧 Audiobook: King of Envy\n✍️ By: Ana Huang\n📚 Series: Kings of Sin, Book 5",
+            caption=None,
+            reply_to_message=SimpleNamespace(message_id=prompt_mid),
+            delete=_noop_del,
+        ),
+        effective_chat=SimpleNamespace(id=-1003511375054),
+        effective_user=SimpleNamespace(id=8853305382, full_name="Loki", username="loki"),
+    )
+    await bi.storage_caption_reply_handler(upd_reply, SimpleNamespace(bot=bot))
+    check("reply updates storage message caption in place",
+          len(bot.edited_captions) == 1 and bot.edited_captions[0]["message_id"] == 1114 and "King of Envy" in bot.edited_captions[0]["caption"])
+    check("reply updates files.db", len(db_updates) == 1 and db_updates[0]["storage_message_id"] == 1114 and db_updates[0]["is_enriched"] == 1)
+    topic_logs = [m for m in bot.sent if m["chat_id"] == -1004293995714]
+    chan_logs = [m for m in bot.sent if m["chat_id"] == -1004343321416]
+    check("reply sends table audit card to topic + table library card to channel",
+          len(topic_logs) == 1 and "<table striped>" in topic_logs[0]["text"]
+          and len(chan_logs) == 1 and "<table striped>" in chan_logs[0]["text"])
+
+asyncio.run(test_edit_caption_flow())
+
 async def routing():
     for label, ok, status, want_chan in (("enriched", True, "indexed", 1), ("failed", False, "indexed", 0), ("duplicate", True, "duplicate", 0)):
         b = Sink()
         await bi.send_index_file_logs(b, info=INFO_AUDIO, res=res(ok, status), user_id=7, user_title="U", indexed_by_bot="@x", original_caption="o")
         topic = [m for m in b.sent if m["chat_id"] == -1004293995714]
         chan = [m for m in b.sent if m["chat_id"] == -1004343321416]
-        check(f"routing {label}: topic gets audit card (thread 590)", len(topic) == 1 and topic[0].get("message_thread_id") == 590 and "FILE INDEXED AUDIT" in topic[0]["text"])
-        check(f"routing {label}: channel cards = {want_chan}", len(chan) == want_chan and (not want_chan or ("New file added to library" in chan[0]["text"] and "message_thread_id" not in chan[0] and "Duration:</b> 14h 22m 10s" in chan[0]["text"])))
+        check(f"routing {label}: topic gets audit table card (thread 590)", len(topic) == 1 and topic[0].get("message_thread_id") == 590 and "FILE INDEXED AUDIT" in topic[0]["text"] and "<table striped>" in topic[0]["text"])
+        check(f"routing {label}: channel table cards = {want_chan}", len(chan) == want_chan and (not want_chan or ("New file added to library" in chan[0]["text"] and "<table striped>" in chan[0]["text"] and "message_thread_id" not in chan[0] and "Duration:</b></td><td>14h 22m 10s" in chan[0]["text"])))
     b = Sink()
     await bi.send_index_topic_log(b, "lifecycle")
     check("lifecycle/topic-only sender never hits channel", [m["chat_id"] for m in b.sent] == [-1004293995714])
