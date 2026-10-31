@@ -1432,33 +1432,35 @@ def format_index_log_message(
     2. Storage Group Presence
     3. Caption Enrichment
     """
-    esc_fn = html.escape(file_name)
-    esc_user = html.escape(user_title or "Unknown")
+    e = lambda v: html.escape(str(v or ""), quote=False)
+    esc_user = e(user_title or "Unknown")
     user_link = f'<a href="tg://user?id={user_id}">{esc_user}</a>' if user_id else esc_user
     ts = _ist_now_str()
     esc_slink = html.escape(storage_link or "", quote=True)
 
-    lines = [
-        "📥 <b>File Index Log</b>\n",
-        f"📁 <b>File Name:</b> <code>{esc_fn}</code>",
-        f"📦 <b>File Size:</b> <mark>{html.escape(file_size_str)}</mark>",
-        f"🔑 <b>Unique ID:</b> <code>{html.escape(file_unique_id)}</code>",
-        f"🔗 <b>Storage Link:</b> <a href=\"{esc_slink}\">{esc_slink}</a>",
-        f"👤 <b>Sent By:</b> {user_link}",
+    rows = [
+        ("📁 <i>File Name</i>", f"<code>{e(file_name)}</code>"),
+        ("📦 <i>File Size</i>", f"<code>{e(file_size_str)}</code>"),
+        ("🔑 <i>Unique ID</i>", f"<code>{e(file_unique_id)}</code>"),
+        ("👤 <i>Sent By</i>", user_link),
     ]
+    if esc_slink:
+        rows.insert(3, ("🔗 <i>Storage Link</i>", f'<a href="{esc_slink}">Open message</a>'))
     if indexed_by_bot:
-        lines.append(f"🤖 <b>Indexed By:</b> <mark>{html.escape(indexed_by_bot)}</mark>")
+        rows.append(("🤖 <i>Indexed By</i>", e(indexed_by_bot)))
     if source_info:
-        lines.append(f"🌐 <b>Source:</b> {source_info}")
+        rows.append(("🌐 <i>Source</i>", source_info))
+    rows += [
+        ("1. 🗄 <i>Database Presence</i>", e(db_badge)),
+        ("2. 📦 <i>Storage Group Presence</i>", e(storage_badge)),
+        ("3. 📝 <i>Caption Enrichment</i>", e(caption_badge)),
+        ("⏰ <i>Timestamp</i>", f"<code>{e(ts)}</code>"),
+    ]
+    table = "<table striped><tr><th>Field</th><th>Value</th></tr>" + "".join(
+        f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows
+    ) + "</table>"
 
-    lines.extend([
-        "",
-        "<b>3-Stage Verification Status:</b>",
-        f"1. 🗄 <b>Database Presence:</b> {db_badge}",
-        f"2. 📦 <b>Storage Group Presence:</b> {storage_badge}",
-        f"3. 📝 <b>Caption Enrichment:</b> {caption_badge}",
-        f"⏰ <b>Timestamp:</b> <code>{ts}</code>",
-    ])
+    lines = ["📥 <b>File Index Log</b>", "", table]
     if esc_slink:
         lines.append("")
         lines.append(
@@ -1973,22 +1975,20 @@ async def handle_book_indexing(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if update.message and update.message.chat.type == "private":
             label = "Audiobook" if res["category"] == "audiobook" else "Book"
-            if is_success_enrichment:
-                await update.message.reply_text(
-                    f"✅ <b>{label} Verified &amp; Indexed!</b>\n"
-                    f"1. 🗄 {res['db_badge']}\n"
-                    f"2. 📦 {res['storage_badge']}\n"
-                    f"3. 📝 {res['caption_badge']}",
-                    parse_mode="HTML",
-                )
-            else:
-                await update.message.reply_text(
-                    f"⚠️ <b>{label} Stored (Manual Caption Review Needed)</b>\n"
-                    f"1. 🗄 {res['db_badge']}\n"
-                    f"2. 📦 {res['storage_badge']}\n"
-                    f"3. 📝 {res['caption_badge']}",
-                    parse_mode="HTML",
-                )
+            head = (
+                f"✅ <b>{label} Verified &amp; Indexed!</b>"
+                if is_success_enrichment
+                else f"⚠️ <b>{label} Stored (Manual Caption Review Needed)</b>"
+            )
+            _e = lambda v: html.escape(str(v or ""), quote=False)
+            table = (
+                "<table striped><tr><th>Step</th><th>Status</th></tr>"
+                f"<tr><td>1. 🗄 <i>Database</i></td><td>{_e(res['db_badge'])}</td></tr>"
+                f"<tr><td>2. 📦 <i>Storage Group</i></td><td>{_e(res['storage_badge'])}</td></tr>"
+                f"<tr><td>3. 📝 <i>Caption</i></td><td>{_e(res['caption_badge'])}</td></tr>"
+                "</table>"
+            )
+            await update.message.reply_text(f"{head}\n\n{table}", parse_mode="HTML")
 
     except Exception as e:
         logger.error("Failed to process media index: %s", e)

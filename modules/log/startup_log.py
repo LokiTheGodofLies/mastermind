@@ -91,28 +91,37 @@ async def _helper_bots():
     return helper_bot_tokens()
 
 
-async def _helper_lines(problems):
-    lines = []
+def _table(headers, rows) -> str:
+    """Rich `<table>`; every cell is already-escaped HTML. Falls back to a monospace block in plain mode."""
+    head = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+    return f"<table striped>{head}{body}</table>"
+
+
+async def _helper_rows(problems):
+    rows = []
     for i, token in enumerate(await _helper_bots(), 1):
         try:
             async with Bot(token) as hb:
                 me = await hb.get_me()
-            lines.append(f"  {i}. ✅ {_bot_line(me)}")
+            uname = f"@{me.username}" if me.username else "no username"
+            rows.append([str(i), "✅", _esc(me.first_name), _esc(uname), f"<code>{me.id}</code>"])
         except Exception as e:
             logger.warning("Helper bot %d check failed: %s", i, e)
-            lines.append(f"  {i}. ❌ Unreachable (token ends …{token[-4:]})")
+            rows.append([str(i), "❌", "Unreachable", f"token …{_esc(token[-4:])}", "—"])
             problems.append(f"Helper bot {i} unreachable (token ends …{token[-4:]}): {e}")
-    return lines
+    return rows
 
 
-async def _chat_line(bot, me_id, label, chat_id_raw, default_name, problems):
+async def _chat_row(bot, me_id, label, chat_id_raw, default_name, problems):
+    """[Slot, status icon, chat name, chat id, invite link] for the Groups & Channels table."""
     if not chat_id_raw:
-        return f"• {label}: ⚠️ Not set"
+        return [_esc(label), "⚠️", "Not set", "—", "—"]
     try:
         chat_id = int(chat_id_raw)
     except ValueError:
         problems.append(f"{label}: invalid chat ID {chat_id_raw}")
-        return f"• {label}: ❌ Invalid ID ({_esc(chat_id_raw)})"
+        return [_esc(label), "❌", "Invalid ID", f"<code>{_esc(chat_id_raw)}</code>", "—"]
     try:
         chat = await bot.get_chat(chat_id)
         name = chat.title or default_name
@@ -134,54 +143,51 @@ async def _chat_line(bot, me_id, label, chat_id_raw, default_name, problems):
         except Exception:
             pass
         icon = "✅" if is_admin else "⚠️"
-        line = f"• {label}: {icon} {_esc(name)} ({chat_id})"
         if not is_admin:
-            line += " — bot is not admin"
             problems.append(f"{label} ({name}, {chat_id}): bot is not an admin")
-        if link:
-            line += f' — <a href="{html.escape(link, quote=True)}">Invite Link</a>'
-        return line
+        link_cell = f'<a href="{html.escape(link, quote=True)}">Invite Link</a>' if link else "—"
+        status = icon if is_admin else "⚠️ not admin"
+        return [_esc(label), status, _esc(name), f"<code>{chat_id}</code>", link_cell]
     except Exception as e:
         logger.warning("Startup check for %s (%s) failed: %s", label, chat_id, e)
         problems.append(f"{label} ({chat_id}): not accessible — {e}")
-        return f"• {label}: ❌ Not accessible ({chat_id})"
+        return [_esc(label), "❌", "Not accessible", f"<code>{chat_id}</code>", "—"]
 
 
 async def build_startup_text(application, problems):
+    """Restart card as Field | Value tables (rich message; plain monospace blocks as fallback)."""
     bot = application.bot
     me = await bot.get_me()
     gen_topic = str(general_topic_id())
 
     mode_str = "🧪 TESTING MAIN BOT (test branch)" if bot_mode() == "testing" else "🌐 PUBLIC MAIN BOT (main branch)"
+    uname = f"@{me.username}" if me.username else "no username"
+    files, users, templates = _db_counts()
+    db_icon = "✅" if DB_STATUS_OK else "⚠️"
+    now = datetime.datetime.now(IST).strftime("%d-%m-%Y | %I:%M:%S %p IST")
+
     parts = ["🔄 <b>Bot Restarted Successfully</b>", ""]
-    parts.append(f"🏷️ <b>Environment:</b> <code>{mode_str}</code>")
-    parts.append(f"🤖 <b>Main Bot:</b> {_bot_line(me)}")
+    parts.append(_table(["Field", "Value"], [
+        ["🏷️ <i>Environment</i>", f"<code>{_esc(mode_str)}</code>"],
+        ["🤖 <i>Main Bot</i>", f"{_esc(me.first_name)} ({_esc(uname)}) | <code>{me.id}</code>"],
+        ["💾 <i>Database</i>", f"{db_icon} {_esc(DB_STATUS)}"],
+        ["📚 <i>Files</i> | 👥 <i>Users</i> | 🧩 <i>Templates</i>", f"<code>{files}</code> | <code>{users}</code> | <code>{templates}</code>"],
+        ["⏱ <i>Timestamp</i>", f"<code>{_esc(now)}</code>"],
+    ]))
 
-    helpers = await _helper_lines(problems)
+    helpers = await _helper_rows(problems)
     if helpers:
-        parts += ["", "🤝 <b>Helper Bots:</b>", *helpers]
+        parts += ["", "🤝 <b>Helper Bots</b>", _table(["#", "", "Name", "Username", "ID"], helpers)]
 
-    chat_lines = [
-        await _chat_line(bot, me.id, label, _cfg(env), default, problems)
+    chat_rows = [
+        await _chat_row(bot, me.id, label, _cfg(env), default, problems)
         for label, env, default in CHAT_SLOTS
     ]
-    parts += ["", "📡 <b>Groups &amp; Channels:</b>", *chat_lines]
+    parts += ["", "📡 <b>Groups &amp; Channels</b>", _table(["Slot", "", "Name", "ID", "Link"], chat_rows)]
 
-    topics = " | ".join(
-        f"{label}:{(_cfg(env) if env else gen_topic) or '—'}" for label, env in TOPIC_SLOTS
-    )
-    parts += ["", f"🧵 <b>Topics:</b> {topics}"]
+    topic_rows = [[_esc(label), f"<code>{_esc((_cfg(env) if env else gen_topic) or '—')}</code>"] for label, env in TOPIC_SLOTS]
+    parts += ["", "🧵 <b>Topics</b>", _table(["Topic", "ID"], topic_rows)]
 
-    files, users, templates = _db_counts()
-    icon = "✅" if DB_STATUS_OK else "⚠️"
-    parts += [
-        "",
-        f"💾 <b>Database:</b> {icon} {_esc(DB_STATUS)} "
-        f"(📚 files: {files} | 👥 users: {users} | 🧩 templates: {templates})",
-    ]
-
-    now = datetime.datetime.now(IST).strftime("%d-%m-%Y | %I:%M:%S %p IST")
-    parts += ["", f"⏱ <b>Timestamp:</b> {now}"]
     parts += [
         "",
         "📌 <b>Reminder:</b> check that no other bot instance is running "
