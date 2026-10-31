@@ -150,25 +150,64 @@ def parse_title_and_series(raw_title: str) -> tuple[str, str]:
     return raw_title.strip(), "Standalone"
 
 
-def is_derivative_work(title: str, query: str) -> bool:
+def parse_filename_components(file_name: str) -> tuple[str, str]:
+    """Extracts likely (title, author) from filename pattern, stripping release tags and watermarks."""
+    base = re.sub(r"\.[a-zA-Z0-9]{2,5}$", "", file_name)
+    base = re.sub(r"^\s*(?:#?\d+|\[\d+\])[\s\.\-_]+", "", base)
+    base = re.sub(r"\[[^\]]*(?:retail|z-lib|epub|pdf|mobi|audiobookbay|libgen)[^\]]*\]", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\([^)]*(?:retail|z-lib|epub|pdf|mobi|audiobookbay|libgen)[^)]*\)", "", base, flags=re.IGNORECASE)
+
+    t, a = "", ""
+    if " - " in base:
+        parts = base.split(" - ", 1)
+        t, a = parts[0].strip(), parts[1].strip()
+    else:
+        m_by = re.search(r"\s+by\s+", base, re.IGNORECASE)
+        if m_by:
+            t, a = base[: m_by.start()].strip(), base[m_by.end() :].strip()
+        else:
+            t, a = base.strip(), ""
+
+    t = re.sub(r"\s*\[[^\]]+\]$", "", t).strip()
+    a = re.sub(r"\s*\[[^\]]+\]$", "", a).strip()
+    return t, a
+
+
+def is_derivative_or_compilation(title: str, query: str) -> bool:
+    """Strictly identifies derivative works (study guides, summaries) and multi-book collections/omnibuses."""
     q_low = query.lower()
     t_low = title.lower()
-    indicators = [
-        "study guide:",
-        "study guide :",
-        "summary of",
-        "summary & analysis",
-        "summary and analysis",
-        "book analysis:",
-        "companion guide",
-        "supersummary",
-        "instaread",
-        "quicklet",
+
+    # Derivative study guides / summaries
+    derivatives = [
+        "study guide", "summary of", "summary & analysis", "summary and analysis",
+        "book analysis", "companion guide", "supersummary", "instaread", "quicklet",
+        "cliffsnotes", "sparknotes", "sidekick"
     ]
-    for ind in indicators:
-        if ind in t_low and ind not in q_low:
+    for d in derivatives:
+        if d in t_low and d not in q_low:
             return True
+
+    # Multi-book compilations, collections, box sets & omnibuses
+    compilations = [
+        "complete novels", "complete works", "complete collection", "collected works",
+        "omnibus", "boxed set", "box set", "anthology", "novels of",
+        "3-in-1", "2-in-1", "4-in-1", "5-in-1", "books 1-", "vol 1:", "vol. 1:", "volume 1:"
+    ]
+    for c in compilations:
+        if c in t_low and c not in q_low:
+            return True
+
+    # Slash-separated multiple titles (e.g. 'Sense & Sensibility/Pride & Prejudice/Mansfield Park')
+    if "/" in title and "/" not in query:
+        parts = [p.strip() for p in title.split("/") if len(p.strip()) > 3]
+        if len(parts) >= 2:
+            return True
+
     return False
+
+# Backward-compatibility alias
+is_derivative_work = is_derivative_or_compilation
 
 
 def _normalize_tokens(text: str) -> set[str]:
@@ -184,39 +223,68 @@ def _normalize_tokens(text: str) -> set[str]:
     return tokens
 
 
+def score_candidate(cand: dict, filename_query: str, expected_title: str = "", expected_author: str = "") -> float:
+    """Scores a candidate book record against filename query and expected components.
+    Penalizes unrelated collections, omnibuses, and mismatched authors; rewards exact title matches."""
+    cand_title = cand.get("title", "")
+    cand_raw_title = cand.get("raw_title", "") or cand_title
+    cand_author = cand.get("author", "")
+
+    # Reject derivative works and multi-book compilations/omnibuses
+    if is_derivative_or_compilation(cand_raw_title, filename_query) or is_derivative_or_compilation(cand_title, filename_query):
+        return -100.0
+
+    score = 0.0
+    fn_tokens = _normalize_tokens(filename_query)
+    title_target = expected_title if expected_title else filename_query
+    target_tokens = _normalize_tokens(title_target)
+    cand_title_tokens = _normalize_tokens(cand_title)
+    cand_author_tokens = _normalize_tokens(cand_author)
+
+    author_target = expected_author if expected_author else ""
+    author_target_tokens = _normalize_tokens(author_target) if author_target else set()
+
+    # 1. Author Matching
+    if author_target_tokens:
+        if cand_author_tokens.intersection(author_target_tokens):
+            score += 5.0
+        else:
+            score -= 5.0
+    elif cand_author_tokens and fn_tokens:
+        if cand_author_tokens.intersection(fn_tokens):
+            score += 3.0
+
+    # 2. Title Matching
+    if cand_title.strip().lower() == title_target.strip().lower():
+        score += 10.0
+    elif target_tokens and cand_title_tokens:
+        overlap = cand_title_tokens.intersection(target_tokens)
+        if len(overlap) == len(target_tokens):
+            score += 6.0
+        elif len(overlap) >= 2:
+            score += len(overlap) * 2.0
+        elif len(overlap) == 1 and len(target_tokens) == 1:
+            score += 3.0
+        else:
+            return -50.0
+
+        # Excess title words penalty (penalizes diluted or bloated collection titles)
+        excess = cand_title_tokens - target_tokens - author_target_tokens
+        score -= len(excess) * 1.0
+
+    return score
+
+
 def match_parameters(
     filename_query: str,
     item_title: str,
     item_author: str,
     item_series: str = "",
 ) -> int:
-    fn_tokens = _normalize_tokens(filename_query)
-    title_tokens = _normalize_tokens(item_title)
-    author_tokens = _normalize_tokens(item_author)
-    series_tokens = _normalize_tokens(item_series) if item_series and item_series != "Standalone" else set()
-
-    matches = 0
-    author_matched = False
-    if author_tokens and fn_tokens:
-        overlap = author_tokens.intersection(fn_tokens)
-        if overlap:
-            matches += 1
-            author_matched = True
-
-    if title_tokens and fn_tokens:
-        overlap = title_tokens.intersection(fn_tokens)
-        if len(overlap) >= min(2, len(title_tokens)):
-            matches += 1
-
-    if series_tokens and fn_tokens:
-        overlap = series_tokens.intersection(fn_tokens)
-        if overlap:
-            matches += 1
-
-    if author_tokens and not author_matched and len(author_tokens) > 0:
-        matches = max(0, matches - 1)
-
-    return matches
+    """Backward-compatibility adapter for legacy match_parameters callers."""
+    cand = {"title": item_title, "author": item_author, "series": item_series}
+    sc = score_candidate(cand, filename_query)
+    return max(0, int(sc // 2))
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +553,9 @@ async def enrich_book_metadata(file_name: str, category: str = "ebook") -> dict:
     else:
         primary_sequence = ["goodreads", "google", "openlibrary", "apple", "audible"]
 
-    matched_item = None
+    expected_title, expected_author = parse_filename_components(file_name)
+    best_overall_cand = None
+    best_overall_score = -100.0
     matched_provider = None
 
     try:
@@ -502,24 +572,31 @@ async def enrich_book_metadata(file_name: str, category: str = "ebook") -> dict:
             elif prov == "apple":
                 candidates = await _fetch_apple_books(clean_query, is_audiobook=is_audio)
 
+            prov_best_cand = None
+            prov_best_score = -100.0
+
             for cand in candidates:
-                if is_derivative_work(cand.get("raw_title", "") or cand.get("title", ""), clean_query):
-                    continue
-
-                score = match_parameters(
+                sc = score_candidate(
+                    cand=cand,
                     filename_query=clean_query,
-                    item_title=cand.get("title", ""),
-                    item_author=cand.get("author", ""),
-                    item_series=cand.get("series", ""),
+                    expected_title=expected_title,
+                    expected_author=expected_author,
                 )
+                if sc > prov_best_score:
+                    prov_best_score = sc
+                    prov_best_cand = cand
 
-                if score >= 2:
-                    matched_item = dict(cand)
+            if prov_best_cand and prov_best_score >= 3.0:
+                if prov_best_score > best_overall_score:
+                    best_overall_score = prov_best_score
+                    best_overall_cand = prov_best_cand
                     matched_provider = prov
+
+                # Exact match found (score >= 10.0), accept immediately without checking lower-tier providers
+                if prov_best_score >= 10.0:
                     break
 
-            if matched_item:
-                break
+        matched_item = dict(best_overall_cand) if best_overall_cand else None
 
         if matched_item:
             v_title = matched_item.get("title") or ""
