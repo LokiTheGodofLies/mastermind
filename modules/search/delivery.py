@@ -3,6 +3,7 @@ from modules.database.user_db import record_user_last_file_db
 import asyncio
 import html
 import logging
+import time
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -214,47 +215,43 @@ async def _copy_with_bot(token: str | None, target_chat_id: int, from_chat_id: i
         )
 
 
-async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, row_id: int):
-    """
-    Executes dual file delivery when a user clicks a search result:
-      1. Selects ONE helper bot (resolving its @username dynamically from PUBLIC_/TESTING_HELPER_BOT_TOKENS).
-      2. Sends the file via that helper bot to PUBLIC_/TESTING_POSTING_CHANNEL_ID with 5-minute auto-delete.
-      3. Sends the file via that SAME helper bot to the user's PM (if they have started that helper bot).
-      4. Replies via the main bot with colorful Bot API 10.3 in-text buttons to open the helper bot PM
-         or view the file in the posting channel, reminding them to forward the file to Saved Messages.
-    """
-    user = update.effective_user
-    msg = update.effective_message
-    if not msg or not user:
+# Helper-bot permission audits (storage group / posting channel) cost several API calls per file. A passing
+# audit is remembered for a few minutes so "Send All" (10 files) does not repeat it ten times.
+_AUDIT_OK_UNTIL: dict[tuple, float] = {}
+_AUDIT_TTL_SECONDS = 600
+_BG_TASKS: set = set()
+
+
+def _spawn(coro):
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
+
+def _is_main_bot(bot) -> bool:
+    """True when `bot` is the MAIN bot (compared with the id inside the configured main token).
+    Helper bots never send delivery cards: the card belongs to the main bot's PM."""
+    try:
+        main_token = bot_token()
+        return bool(main_token) and int(str(main_token).split(":")[0]) == int(bot.id)
+    except Exception:
+        return False
+
+
+async def _audit_helper_access(context, helper_token, helper_id, helper_username, storage_id, post_chan_id):
+    """Reports (to the Error Logs topic) a helper bot that is missing from the Storage Group / Posting Channel.
+    A clean audit is cached for `_AUDIT_TTL_SECONDS`."""
+    key = (helper_id, storage_id, post_chan_id)
+    if _AUDIT_OK_UNTIL.get(key, 0) > time.time():
         return
+    problem = False
 
-    record_user_last_file_db(user.id, row_id)
-    row = get_file_by_id_db(int(row_id))
-    if not row:
-        await msg.reply_text("❌ File record no longer found in database.")
-        return
-
-    storage_id = storage_group_id()
-    post_chan_id = posting_channel_id()
-    delete_secs = auto_delete_seconds()
-    delete_mins = max(1, round(delete_secs / 60))
-
-    storage_msg_id = await _ensure_storage_message_id(context.bot, row)
-    if not storage_msg_id or not storage_id:
-        await msg.reply_text("❌ Storage group or file message is not available.")
-        return
-
-    helper = await select_helper_bot(context.bot, context.application)
-    helper_token = helper.get("token")
-    helper_username = (helper.get("username") or "").lstrip("@")
-    helper_id = helper.get("id")
-
-    # Proactively audit Helper Bot presence in Storage Group and Posting Channel
     if helper_token and storage_id:
         try:
             async with Bot(helper_token) as hb:
                 sm = await hb.get_chat_member(int(storage_id), helper_id)
                 if sm.status not in ("administrator", "creator", "member"):
+                    problem = True
                     err_details = (
                         f"🚨 <b>Helper Bot Missing in Storage Group</b>\n\n"
                         f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
@@ -264,6 +261,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                     )
                     await report_error(context.application, err_details, title="Helper Bot Missing in Storage Group")
         except Exception as exc:
+            problem = True
             err_details = (
                 f"🚨 <b>Helper Bot Storage Group Access Error</b>\n\n"
                 f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
@@ -280,6 +278,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 can_post = getattr(pm, "can_post_messages", True)
                 can_delete = getattr(pm, "can_delete_messages", True)
                 if pm.status not in ("administrator", "creator") or not (can_post and can_delete):
+                    problem = True
                     err_details = (
                         f"🚨 <b>Helper Bot Posting Channel Permission Error</b>\n\n"
                         f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
@@ -289,6 +288,7 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                     )
                     await report_error(context.application, err_details, title="Helper Bot Posting Channel Permission Error")
         except Exception as exc:
+            problem = True
             err_details = (
                 f"🚨 <b>Helper Bot Posting Channel Access Error</b>\n\n"
                 f"• Helper Bot: @{helper_username} (<code>{helper_id}</code>)\n"
@@ -298,27 +298,56 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             )
             await report_error(context.application, err_details, title="Helper Bot Posting Channel Access Error")
 
-    # 1. Send file to Posting Channel with auto-delete using the selected helper bot
-    posting_link = None
+    if not problem:
+        _AUDIT_OK_UNTIL[key] = time.time() + _AUDIT_TTL_SECONDS
+
+
+async def _deliver_core(update: Update, context: ContextTypes.DEFAULT_TYPE, row_id: int, helper: dict | None = None) -> dict:
+    """Copies ONE file to the Posting Channel and to the user's PM through ONE helper bot.
+    Sends NOTHING to the user: returns a result dict that the caller turns into a card.
+
+    Result keys: ok, error, row, helper_username, helper_start_url, pm_delivered, posting_link,
+    delete_secs, delete_mins."""
+    user = update.effective_user
+    res = {
+        "ok": False, "error": None, "row": None, "helper_username": "", "helper_start_url": None,
+        "pm_delivered": False, "posting_link": None, "delete_secs": auto_delete_seconds(),
+    }
+    res["delete_mins"] = max(1, round(res["delete_secs"] / 60))
+
+    record_user_last_file_db(user.id, row_id)
+    row = get_file_by_id_db(int(row_id))
+    if not row:
+        res["error"] = "❌ File record no longer found in database."
+        return res
+    res["row"] = row
+
+    storage_id = storage_group_id()
+    post_chan_id = posting_channel_id()
+    delete_secs = res["delete_secs"]
+
+    storage_msg_id = await _ensure_storage_message_id(context.bot, row)
+    if not storage_msg_id or not storage_id:
+        res["error"] = "❌ Storage group or file message is not available."
+        return res
+
+    if helper is None:
+        helper = await select_helper_bot(context.bot, context.application)
+    helper_token = helper.get("token")
+    helper_username = (helper.get("username") or "").lstrip("@")
+    helper_id = helper.get("id")
+    res["helper_username"] = helper_username
+    res["helper_start_url"] = f"https://t.me/{helper_username}?start=dl_{row_id}" if helper_username else None
+
+    await _audit_helper_access(context, helper_token, helper_id, helper_username, storage_id, post_chan_id)
+
+    # 1. Posting Channel copy (auto-deleted) through the selected helper bot
     if post_chan_id:
         try:
-            posted_msg = await _copy_with_bot(
-                helper_token,
-                int(post_chan_id),
-                int(storage_id),
-                int(storage_msg_id),
-            )
+            posted_msg = await _copy_with_bot(helper_token, int(post_chan_id), int(storage_id), int(storage_msg_id))
             chan_uname = await _get_posting_channel_username(context.bot, int(post_chan_id))
-            posting_link = build_channel_message_link(int(post_chan_id), posted_msg.message_id, chan_uname)
-            asyncio.create_task(
-                _auto_delete_message(
-                    helper_token,
-                    context.bot,
-                    int(post_chan_id),
-                    posted_msg.message_id,
-                    delete_secs,
-                )
-            )
+            res["posting_link"] = build_channel_message_link(int(post_chan_id), posted_msg.message_id, chan_uname)
+            _spawn(_auto_delete_message(helper_token, context.bot, int(post_chan_id), posted_msg.message_id, delete_secs))
         except Exception as exc:
             logger.error("Helper bot posting channel delivery failed: %s", exc)
             err_details = (
@@ -334,27 +363,13 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             except Exception as report_err:
                 logger.error("Failed to report delivery error to logger group: %s", report_err)
 
-    # 2. Send file to User's Bot PM using the SAME selected helper bot ONLY (with auto-delete)
-    pm_delivered = False
+    # 2. PM copy (auto-deleted) through the SAME helper bot
     if helper_token:
         try:
-            pm_copy = await _copy_with_bot(
-                helper_token,
-                int(user.id),
-                int(storage_id),
-                int(storage_msg_id),
-            )
-            pm_delivered = True
+            pm_copy = await _copy_with_bot(helper_token, int(user.id), int(storage_id), int(storage_msg_id))
+            res["pm_delivered"] = True
             if pm_copy and delete_secs > 0:
-                asyncio.create_task(
-                    _auto_delete_message(
-                        helper_token,
-                        context.bot,
-                        int(user.id),
-                        pm_copy.message_id,
-                        delete_secs,
-                    )
-                )
+                _spawn(_auto_delete_message(helper_token, context.bot, int(user.id), pm_copy.message_id, delete_secs))
         except Exception as exc:
             exc_str = str(exc)
             logger.info("Helper bot PM delivery pending user /start for %s: %s", user.id, exc_str)
@@ -371,26 +386,37 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 except Exception:
                     pass
 
-    # 3. Send Main Bot notification card with Bot API 10.3 colorful in-text buttons
+    res["ok"] = bool(res["pm_delivered"] or res["posting_link"])
+    if not res["ok"]:
+        res["error"] = (
+            "❌ Could not deliver the file. Please ensure PUBLIC_/TESTING_HELPER_BOT_TOKENS and PUBLIC_/TESTING_POSTING_CHANNEL_ID "
+            "are configured and the helper bot is an admin in the Storage Group and Posting Channel."
+        )
+    return res
+
+
+def _single_card(res: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Delivery card text + buttons for one file (same wording as before)."""
+    row = res["row"]
+    helper_username = res["helper_username"]
+    posting_link = res["posting_link"]
+    pm_delivered = res["pm_delivered"]
+    delete_mins = res["delete_mins"]
     file_info = build_file_info_html(row)
-    helper_start_url = (
-        f"https://t.me/{helper_username}?start=dl_{row_id}"
-        if helper_username
-        else None
-    )
+    hu = html.escape(helper_username)
 
     if helper_username and posting_link:
         if pm_delivered:
             text = (
                 f"{file_info}\n"
-                f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n"
+                f"✅ <b>Delivered directly to your PM via @{hu}!</b>\n"
                 f"📢 A backup copy is also ready in the Posting Channel.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — both copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
                 f"{file_info}\n"
-                f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive the file in PM, "
+                f"🤖 Tap the green button below to start <b>@{hu}</b> and receive the file in PM, "
                 f"or open it directly in the Posting Channel.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"
             )
@@ -398,13 +424,13 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         if pm_delivered:
             text = (
                 f"{file_info}\n"
-                f"✅ <b>Delivered directly to your PM via @{html.escape(helper_username)}!</b>\n\n"
+                f"✅ <b>Delivered directly to your PM via @{hu}!</b>\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
         else:
             text = (
                 f"{file_info}\n"
-                f"🤖 Tap the green button below to start <b>@{html.escape(helper_username)}</b> and receive your file in PM.\n\n"
+                f"🤖 Tap the green button below to start <b>@{hu}</b> and receive your file in PM.\n\n"
                 f"⚠️ <b>Forward the file to your Saved Messages — PM copy auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
             )
     elif posting_link:
@@ -414,41 +440,150 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             f"⚠️ <b>Forward the file to your Saved Messages — it auto-deletes in <mark>{delete_mins} mins</mark>!</b>"
         )
     else:
-        text = (
-            "❌ Could not deliver the file. Please ensure PUBLIC_/TESTING_HELPER_BOT_TOKENS and PUBLIC_/TESTING_POSTING_CHANNEL_ID "
-            "are configured and the helper bot is an admin in the Storage Group and Posting Channel."
-        )
+        text = res.get("error") or "❌ Could not deliver the file."
 
     buttons = []
-    if helper_username and helper_start_url:
-        if pm_delivered:
-            buttons.append([styled_button(f"🤖 Open in @{helper_username} PM ↗️", url=helper_start_url, style="success")])
-        else:
-            buttons.append([styled_button(f"🤖 Start @{helper_username} (Receive in PM) ↗️", url=helper_start_url, style="success")])
+    if helper_username and res["helper_start_url"]:
+        label = f"🤖 Open in @{helper_username} PM ↗️" if pm_delivered else f"🤖 Start @{helper_username} (Receive in PM) ↗️"
+        buttons.append([styled_button(label, url=res["helper_start_url"], style="success")])
     if posting_link:
         buttons.append([styled_button("📢 View in Posting Channel ↗️", url=posting_link, style="primary")])
+    return text, (InlineKeyboardMarkup(buttons) if buttons else None)
 
-    # Do NOT send the redundant delivery confirmation card inside the helper bot itself
-    main_bot_id = None
-    if context.application and context.application.bot:
-        main_bot_id = context.application.bot.id
-    if not main_bot_id:
+
+async def _send_card_to_pm(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, markup, delete_secs: int):
+    """Sends a delivery card to the user's PM with the MAIN bot (never into the Search topic / group).
+    If the user has not started the main bot yet, ONE short card is posted in the current chat instead
+    (with an "open PM" button) and removed after `delete_secs`, so the group never fills with cards.
+    Cards delete themselves after `delete_secs`, like the file copies."""
+    user = update.effective_user
+    sent = None
+    try:
+        sent = await context.bot.send_message(
+            chat_id=int(user.id), text=text, parse_mode="HTML",
+            disable_web_page_preview=True, reply_markup=markup,
+        )
+    except Exception as exc:
+        logger.info("Delivery card to PM of %s failed (%s); falling back to current chat.", user.id, exc)
+        msg = update.effective_message
+        chat = update.effective_chat
+        if msg is not None and chat is not None and chat.type != "private":
+            bot_uname = getattr(context.bot, "username", None) or ""
+            rows = list(markup.inline_keyboard) if markup else []
+            if bot_uname:
+                rows.append([styled_button("💬 Open bot PM (start it once)", url=f"https://t.me/{bot_uname}?start", style="primary")])
+            try:
+                sent = await msg.reply_text(
+                    text + "\n\n💡 <i>Start the bot in PM once so delivery cards arrive privately.</i>",
+                    parse_mode="HTML", disable_web_page_preview=True,
+                    reply_markup=InlineKeyboardMarkup(rows) if rows else None,
+                )
+            except Exception as exc2:
+                logger.warning("Delivery card fallback failed: %s", exc2)
+    if sent is not None and delete_secs > 0:
+        _spawn(_auto_delete_message(None, context.bot, sent.chat_id, sent.message_id, delete_secs))
+    return sent
+
+
+async def deliver_file_dual(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    row_id: int,
+    *,
+    send_card: bool = True,
+    helper: dict | None = None,
+) -> dict | None:
+    """
+    Dual file delivery when a user taps a search result / deep link:
+      1. ONE helper bot copies the file to the Posting Channel (auto-delete) and to the user's PM (auto-delete).
+      2. The MAIN bot sends ONE delivery card to the user's PM (never to the Search topic), which also
+         deletes itself. Helper bots never send a card.
+    `send_card=False` (used by Send All) skips the card and returns the result dict so the caller can build
+    a single combined card. `helper` lets a batch reuse one helper bot for every file.
+    """
+    user = update.effective_user
+    if not user:
+        return None
+    res = await _deliver_core(update, context, row_id, helper=helper)
+    if not send_card or not _is_main_bot(context.bot):
+        return res
+    if res["row"] is None or (not res["ok"] and not res["helper_username"]):
+        text, markup = (res.get("error") or "❌ Could not deliver the file."), None
+    else:
+        text, markup = _single_card(res)
+    await _send_card_to_pm(update, context, text, markup, res["delete_secs"])
+    return res
+
+
+async def deliver_batch_combined(update: Update, context: ContextTypes.DEFAULT_TYPE, rows) -> dict:
+    """Send All: delivers every row through ONE helper bot, then sends ONE combined `<table striped>` card
+    (# | Title | Author | Size | Ext | Status | Channel link) to the user's PM instead of one card per file."""
+    from modules.search.handlers import _extract_item_fields, _format_size
+
+    helper = await select_helper_bot(context.bot, context.application)
+    results = []
+    for row in rows:
         try:
-            main_token = bot_token()
-            if main_token:
-                main_bot_id = int(main_token.split(":")[0])
-        except Exception:
-            pass
-    if context.bot and context.bot.id and main_bot_id and (context.bot.id != main_bot_id):
-        return
+            res = await deliver_file_dual(update, context, int(row["id"]), send_card=False, helper=helper)
+        except Exception as exc:
+            logger.error("Send All item %s failed: %s", row["id"], exc)
+            res = {"ok": False, "row": row, "pm_delivered": False, "posting_link": None, "error": str(exc),
+                   "helper_username": helper.get("username") or ""}
+        results.append(res or {"ok": False, "row": row, "pm_delivered": False, "posting_link": None})
+        await asyncio.sleep(0.4)
 
-    markup = InlineKeyboardMarkup(buttons) if buttons else None
-    await msg.reply_text(
-        text,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=markup,
+    delete_secs = auto_delete_seconds()
+    delete_mins = max(1, round(delete_secs / 60))
+    helper_username = (helper.get("username") or "").lstrip("@")
+    esc = lambda v: html.escape(str(v or ""), quote=False)
+
+    body = []
+    pending_ids = []
+    ok_pm = 0
+    for n, res in enumerate(results, 1):
+        row = res.get("row")
+        if row is not None:
+            title, _series, author, _size, ext = _extract_item_fields(row)
+            size = _format_size(row["file_size"])
+        else:
+            title = author = size = ext = "—"
+        if res.get("pm_delivered"):
+            status = "✅ PM"
+            ok_pm += 1
+        elif row is not None and res.get("helper_username"):
+            status = "⏳ Start bot"
+            pending_ids.append(row["id"])
+        else:
+            status = "❌ Failed"
+        link = res.get("posting_link")
+        link_cell = f'<a href="{html.escape(link, quote=True)}">View</a>' if link else "—"
+        body.append(
+            f"<tr><td>{n}</td><td>{esc(title)}</td><td>{esc(author)}</td><td>{esc(size)}</td>"
+            f"<td>{esc(f'.{ext}' if ext and ext != '—' else '—')}</td><td>{status}</td><td>{link_cell}</td></tr>"
+        )
+    table = (
+        "<table striped><tr><th>#</th><th>Title</th><th>Author</th><th>Size</th><th>Ext</th><th>Status</th><th>Channel</th></tr>"
+        + "".join(body) + "</table>"
     )
+    failed = sum(1 for r in results if not r.get("ok"))
+    lines = [f"📨 <b>Send All — {len(results)} file(s)</b>", "", table, ""]
+    if helper_username:
+        lines.append(f"✅ <b>{ok_pm}</b> delivered to your PM via @{html.escape(helper_username)}")
+    if pending_ids:
+        lines.append(f"⏳ <b>{len(pending_ids)}</b> waiting: tap the green button to start @{html.escape(helper_username)}, then press Send All again.")
+    if failed:
+        lines.append(f"❌ <b>{failed}</b> could not be delivered (admins were notified).")
+    lines += ["", f"⚠️ <b>Forward the files to your Saved Messages — all copies auto-delete in <mark>{delete_mins} mins</mark>!</b>"]
+
+    buttons = []
+    if helper_username:
+        start_id = pending_ids[-1] if pending_ids else (results[-1]["row"]["id"] if results and results[-1].get("row") is not None else "")
+        url = f"https://t.me/{helper_username}" + (f"?start=dl_{start_id}" if start_id != "" else "")
+        label = f"🤖 Start @{helper_username} (Receive in PM) ↗️" if pending_ids else f"🤖 Open @{helper_username} PM ↗️"
+        buttons.append([styled_button(label, url=url, style="success")])
+    markup = InlineKeyboardMarkup(buttons) if buttons else None
+    await _send_card_to_pm(update, context, "\n".join(lines), markup, delete_secs)
+    return {"results": results, "delivered_pm": ok_pm, "failed": failed}
 
 
 async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE, payload: str):

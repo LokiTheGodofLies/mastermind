@@ -355,19 +355,78 @@ def keyboard_to_rich_rows(markup: InlineKeyboardMarkup | None, align: str = "cen
     return "\n".join(row_blocks)
 
 
+# Rich messages (`InputRichMessage.html`) follow HTML whitespace rules: a raw newline is collapsed into a
+# space, so every multi-line card (/help, /editscript, the /index wizard ...) would turn into ONE paragraph.
+# `build_rich_html()` therefore writes real `<br>` tags. Blocks whose inner whitespace must stay as-is
+# (`<pre>`, `<code>`, `<table>`, `<tg-button-row>`) are left untouched.
+_BR_ENABLED = True
+_RE_BR_PROTECTED = re.compile(
+    r"(<pre\b.*?</pre>|<code\b.*?</code>|<table\b.*?</table>|<tg-button-row\b.*?</tg-button-row>)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def newlines_to_br(text: str) -> str:
+    """Converts `\n` into `<br>` outside `<pre>`, `<code>`, `<table>` and `<tg-button-row>` blocks."""
+    parts = _RE_BR_PROTECTED.split(text or "")
+    for i in range(0, len(parts), 2):  # even indexes = text outside protected blocks
+        parts[i] = parts[i].replace("\n", "<br>")
+    out = "".join(parts)
+    # A line break right before/after a block element only adds an empty line.
+    out = re.sub(r"(?:<br>)+(?=<table\b|<tg-button-row\b)", "<br>", out, flags=re.IGNORECASE)
+    out = re.sub(r"(?<=</table>)(?:<br>)+|(?<=</tg-button-row>)(?:<br>)+", "<br>", out, flags=re.IGNORECASE)
+    out = re.sub(r"(?:<br>){3,}", "<br><br>", out)
+    return out
+
+
 def build_rich_html(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     align: str = "center",
+    use_br: bool | None = None,
 ) -> str:
-    """Combines rich HTML body text with `<tg-button-row>` blocks from `reply_markup`."""
+    """Combines rich HTML body text with `<tg-button-row>` blocks from `reply_markup`.
+    Newlines in the text become `<br>` (see above) unless `use_br` is False (or auto-disabled)."""
     base = (text or "").strip()
+    if (_BR_ENABLED if use_br is None else use_br):
+        base = newlines_to_br(base)
     kb_html = keyboard_to_rich_rows(reply_markup, align=align)
     if kb_html:
         if base:
             return f"{base}\n\n{kb_html}"
         return kb_html
     return base
+
+
+def _br_rejected(exc: Exception) -> bool:
+    """True when Telegram refused a rich message because of its HTML (so `<br>` may be the cause)."""
+    msg = str(exc).lower()
+    return isinstance(exc, BadRequest) and any(k in msg for k in ("parse", "tag", "html", "unsupported", "unexpected"))
+
+
+async def _post_rich(bot, method: str, base_data: dict, html_text: str, reply_markup, sc: bool, small_media: bool):
+    """Posts a rich message. First with `<br>` line breaks; if Telegram rejects the HTML, once more with the
+    raw text, and `<br>` stays disabled for this process (so a rejected tag can never break every message)."""
+    global _BR_ENABLED
+    last_exc: Exception | None = None
+    for use_br in ((True, False) if _BR_ENABLED else (False,)):
+        rich_html = build_rich_html(html_text, reply_markup, use_br=use_br)
+        if sc:
+            rich_html = sc_convert(rich_html, "HTML")  # after button styles were inferred
+        payload: dict[str, Any] = {"html": rich_html}
+        if small_media:
+            payload["prefer_small_media"] = True
+        data = dict(base_data, rich_message=payload)
+        try:
+            return await bot._post(method, data=data)
+        except Exception as exc:
+            last_exc = exc
+            if use_br and _br_rejected(exc) and "\n" in (html_text or ""):
+                logger.warning("Rich <br> line breaks rejected (%s); retrying with raw newlines and disabling <br>.", exc)
+                _BR_ENABLED = False
+                continue
+            raise
+    raise last_exc  # pragma: no cover
 
 
 _RE_TABLE = re.compile(r"<table\b[^>]*>(.*?)</table>", re.DOTALL | re.IGNORECASE)
@@ -501,6 +560,7 @@ def extract_buttons_and_clean_html_for_fallback(
         cleaned = sc_convert(cleaned, "HTML")
     cleaned = re.sub(r"<mark>(.*?)</mark>", r"<code>\1</code>", cleaned, flags=re.DOTALL | re.IGNORECASE)
     cleaned = re.sub(r"<h3>(.*?)</h3>", r"<b>\1</b>", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.IGNORECASE)  # plain HTML mode has no <br>
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
     final_rows: list[list[InlineKeyboardButton]] = list(table_rows) + list(extracted_rows)
@@ -524,17 +584,7 @@ async def send_rich_message(
     prefer_small_media: bool = False,
 ) -> Message:
     """Calls Bot API 10.3 `sendRichMessage` directly via `bot._post`."""
-    rich_html = build_rich_html(html_text, reply_markup)
-    if _sc_allowed(chat_id):
-        rich_html = sc_convert(rich_html, "HTML")  # after button styles were inferred
-    rich_payload: dict[str, Any] = {"html": rich_html}
-    if prefer_small_media:
-        rich_payload["prefer_small_media"] = True
-
-    data: dict[str, Any] = {
-        "chat_id": chat_id,
-        "rich_message": rich_payload,
-    }
+    data: dict[str, Any] = {"chat_id": chat_id}
     if message_thread_id is not None:
         data["message_thread_id"] = message_thread_id
     if reply_to_message_id is not None:
@@ -542,7 +592,7 @@ async def send_rich_message(
     if disable_notification is not None:
         data["disable_notification"] = disable_notification
 
-    result = await bot._post("sendRichMessage", data=data)
+    result = await _post_rich(bot, "sendRichMessage", data, html_text, reply_markup, _sc_allowed(chat_id), prefer_small_media)
     return Message.de_json(result, bot)  # type: ignore[return-value]
 
 
@@ -555,19 +605,8 @@ async def edit_rich_message(
     prefer_small_media: bool = False,
 ) -> Message | bool:
     """Calls Bot API 10.3 `editMessageText` with `rich_message` directly via `bot._post`."""
-    rich_html = build_rich_html(html_text, reply_markup)
-    if _sc_allowed(chat_id):
-        rich_html = sc_convert(rich_html, "HTML")  # after button styles were inferred
-    rich_payload: dict[str, Any] = {"html": rich_html}
-    if prefer_small_media:
-        rich_payload["prefer_small_media"] = True
-
-    data: dict[str, Any] = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "rich_message": rich_payload,
-    }
-    result = await bot._post("editMessageText", data=data)
+    data: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+    result = await _post_rich(bot, "editMessageText", data, html_text, reply_markup, _sc_allowed(chat_id), prefer_small_media)
     if isinstance(result, bool):
         return result
     return Message.de_json(result, bot)  # type: ignore[return-value]

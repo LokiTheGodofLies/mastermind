@@ -107,6 +107,27 @@ def init_user_db():
         )
     ''')
 
+    # First-start tracker per bot (main bot = 'main', helper bots = 'helper:<bot_id>').
+    # Independent from `users`, because a user row can already exist (search quota, gifts, ...)
+    # before the person ever presses /start. Seeded once with every existing user for the main
+    # bot so the first deploy does not log the whole user base as "new".
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bot_starts'")
+    had_bot_starts = cursor.fetchone() is not None
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_starts (
+            user_id INTEGER,
+            bot_key TEXT,
+            bot_username TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, bot_key)
+        )
+    ''')
+    if not had_bot_starts:
+        cursor.execute(
+            "INSERT OR IGNORE INTO bot_starts (user_id, bot_key, bot_username) "
+            "SELECT user_id, 'main', '' FROM users"
+        )
+
     conn.commit()
     conn.close()
 
@@ -141,12 +162,13 @@ def ensure_user_quota_db(user_id, username="", full_name=""):
 
 
 def add_or_update_user_db(user_id, username, full_name, today_str):
-    """Inserts a new user or updates their username/full name."""
+    """Inserts a new user or updates their username/full name. Returns True when the user was NOT in `users` yet."""
     conn = sqlite3.connect(_db_file())
     cursor = conn.cursor()
 
     cursor.execute("SELECT user_id, role FROM users WHERE user_id = ?", (user_id,))
     existing = cursor.fetchone()
+    is_new = existing is None
 
     if not existing:
         role = _initial_role(user_id)
@@ -174,6 +196,40 @@ def add_or_update_user_db(user_id, username, full_name, today_str):
 
     conn.commit()
     conn.close()
+    return is_new
+
+
+def record_bot_start_db(user_id: int, bot_key: str, bot_username: str = "") -> bool:
+    """Records the first /start of `user_id` on a bot. Returns True only the first time (-> log it)."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR IGNORE INTO bot_starts (user_id, bot_key, bot_username) VALUES (?, ?, ?)",
+            (int(user_id), str(bot_key), (bot_username or "").lstrip("@")),
+        )
+        first = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return first
+    except Exception as exc:
+        print(f"record_bot_start_db error: {exc}")
+        return False
+
+
+def get_user_info_db(user_id: int) -> dict | None:
+    """Returns {'user_id', 'full_name', 'username'} for a known user, else None."""
+    try:
+        conn = sqlite3.connect(_db_file())
+        row = conn.execute(
+            "SELECT user_id, full_name, username FROM users WHERE user_id = ?", (int(user_id),)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {"user_id": row[0], "full_name": row[1] or "", "username": row[2] or ""}
+    except Exception:
+        return None
 
 
 def get_user_role_db(user_id):

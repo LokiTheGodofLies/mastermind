@@ -63,7 +63,7 @@ The system implements a strict 6-tier role hierarchy:
 * `/search <query>`: Tokenized SQL search across filenames, titles, authors, series, and captions with dual-apostrophe matching, pagination, pagination, and **one wide table per page** (serial in column 1, green `Download N` buttons under it, Title, Author, Series or Standalone, Size, Format = Ebook / Audiobook / Archive, Ext). 
 * `/request <title and author>`: Interactive request assistant with Goodreads metadata lookup and colorful `📥 Select` / `📖 Goodreads` buttons, routed to the Request Channel.
 * `/quota`: Displays real-time search/request quota consumption, tier badges, and midnight IST reset status.
-* `/refer` & `/myreferrals`: Personal referral dashboard with one-tap `📋 Copy Invite Link` and `📤 Share Link` buttons (+10 searches & requests per invite).
+* `/refer` & `/myreferrals`: Personal referral dashboard with one-tap `📋 Copy Invite Link` and `📤 Share Link` buttons (+10 searches & requests per invite). `/myreferrals` lists every invited user in a paginated `<table striped>` (User with profile link, Username, User ID, Joined in IST); `/refer` shows the latest 5. The referrer's "new referral joined" DM now names the new user (linked to their profile).
 * `/support`: 10-question verification quiz with colorful Yes/No buttons and single-use invite link generation to join the support community.
 * `/stats`: Live bot metrics displaying total indexed files, ebook counts, audiobook counts, and server diagnostics.
 * `/id`: Identification inspector for users, chats, channels, and forum topics with one-tap `📋 Copy ID` buttons (automatically omits `User Name` and `User ID` when run inside a channel where the sender is anonymous).
@@ -172,3 +172,18 @@ Mira style, one field per line, bold label + monospace value:
 
 ## 🧾 Log Tables (rich messages)
 The helper bot's **Verified & Indexed / Stored** reply and the **Bot Restarted** card (`build_startup_text()`) are now Field | Value tables (restart card: status, helper bots, groups & channels, topics). They are text messages, so Telegram renders real tables; if rich sending is rejected they fall back to monospace blocks. Tests: `python tests/test_log_tables.py`. Not converted yet: error reports (`<pre>`), `/index` progress box, request / user / group logs.
+
+
+## 🆕 New-User Logs (`modules/log/startup_log.py`, `modules/database/user_db.py`)
+The first `/start` of every person on the **Main Bot** or on any **Helper Bot** posts a `<table striped>` card to the Logger Group **USER topic** (`PUBLIC_/TESTING_USER_LOG_TOPIC_ID`): User (profile link), User ID, Username, Bot (+ Main/Helper), `Referred By` (only when started with `?start=ref_<id>`), and an IST timestamp. "First" is tracked in the `bot_starts` table (key `main` or `helper:<bot_id>`), independent of the `users` table; on the first deploy every existing user is seeded for the Main Bot, so old users are not logged as new. Helper bots usually are not in the Logger Group, so the Main Bot (own token) posts helper-start cards. Helper `/start` also registers the person in `users`. No new environment variables.
+
+## 📨 Delivery Cards & Send All (`modules/search/delivery.py`)
+* Delivery cards are sent by the **Main Bot to the user's PM** (never into the Search topic) and delete themselves after `AUTO_DELETE_SECONDS`, like the file copies. If the user never started the Main Bot, ONE short card is posted in the current chat (with an "open bot PM" button) and also self-deletes. Helper bots never send cards.
+* **📨 Send All** delivers the page through ONE helper bot and sends ONE combined `<table striped>` card (# | Title | Author | Size | Ext | Status | Channel link) instead of a card per file plus a completion message.
+* Helper-bot permission audits are cached for 10 minutes (no repeated API calls per file).
+
+## 📝 Line Breaks in Rich Messages (`modules/utility/rich_ui.py`)
+`build_rich_html()` writes `\n` as `<br>` (outside `<pre>`, `<code>`, `<table>`, `<tg-button-row>`) so `/help` and every multi-line card keep their paragraphs. If Telegram ever rejects `<br>`, the bot retries once with raw newlines and turns the conversion off for the rest of the process.
+
+## 🔧 `/index` Fixes (`modules/indexing/index_command.py`)
+Callback data (`idx_sk_none_<rid>`, `idx_pr_dir_<rid>`, ...) is parsed from the end, so Skip / Priority buttons no longer answer "request expired". Pending jobs are saved in `active_index_jobs` (users DB) and restored after a restart. If the Main Bot cannot read the source chat, every Helper Bot is probed and the first one that can read it does the whole indexing job.

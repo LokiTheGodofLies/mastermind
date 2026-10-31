@@ -203,12 +203,10 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if referred_list:
-        text += "👥 <b>Invited Users:</b>\n"
-        for r_id, r_name, r_uname, timestamp in referred_list[:10]:
-            name_display = html.escape(r_name or f"User {r_id}")
-            text += f"• {name_display} (ID: <code>{r_id}</code>)\n"
-        if total_invites > 10:
-            text += f"\n<i>(Showing latest 10 of {total_invites} invites)</i>\n"
+        from modules.allowance.referral import build_referrals_table_html
+        text += "👥 <b>Latest Invited Users</b>\n" + build_referrals_table_html(referred_list[:5]) + "\n"
+        if total_invites > 5:
+            text += f"\n<i>Showing latest 5 of {total_invites} invites — tap 📋 My Referrals for the full list.</i>\n"
     else:
         text += "💡 <i>You haven't invited anyone yet. Share your link to start earning bonuses!</i>"
 
@@ -220,6 +218,7 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [styled_button("📤 Refer More & Share Link", url=share_url, style="success")],
         [styled_button("📋 Copy Invite Link", copy_text=referral_link, style="primary")],
+        [styled_button("📋 My Referrals", callback_data="my_referrals_callback", style="primary")],
         [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

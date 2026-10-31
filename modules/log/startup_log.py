@@ -385,3 +385,120 @@ async def _report_user_block(app, uid, name, uname, bot_title, bot_uname):
         await app.bot.send_message(chat_id=int(log_gid), message_thread_id=int(topic), text=text, parse_mode="HTML")
     except Exception:
         pass
+
+
+def _ist_stamp() -> str:
+    """`DD Mon YYYY, HH:MM IST` (true IST, independent of the server clock)."""
+    return datetime.datetime.now(IST).strftime("%d %b %Y, %H:%M IST")
+
+
+def _user_link(user_id, title) -> str:
+    return f'<a href="tg://user?id={int(user_id)}">{_esc(title or "User")}</a>'
+
+
+def build_new_user_log_text(
+    *,
+    user_id,
+    user_title,
+    username,
+    bot_title,
+    bot_username,
+    is_helper: bool = False,
+    referrer_id=None,
+    referrer_title=None,
+) -> str:
+    """`New user started the bot` card (Field | Details table) for the Logger Group USER topic."""
+    uname = f"@{_esc(username)}" if username else "—"
+    bot_kind = "Helper Bot" if is_helper else "Main Bot"
+    bot_label = f"{_esc(bot_title)} (@{_esc(bot_username)}) · <i>{bot_kind}</i>" if bot_username else f"{_esc(bot_title)} · <i>{bot_kind}</i>"
+    rows = [
+        ["👤 <i>User</i>", _user_link(user_id, user_title)],
+        ["🆔 <i>User ID</i>", f"<code>{int(user_id)}</code>"],
+        ["🏷 <i>Username</i>", uname],
+        ["🤖 <i>Bot</i>", bot_label],
+    ]
+    if referrer_id:
+        rows.append([
+            "🔗 <i>Referred By</i>",
+            f"{_user_link(referrer_id, referrer_title or f'User {referrer_id}')} (<code>{int(referrer_id)}</code>)",
+        ])
+    rows.append(["🕒 <i>Time</i>", _esc(_ist_stamp())])
+    return "🆕 <b>New User Started the Bot</b>\n\n" + _table(["Field", "Details"], rows)
+
+
+async def send_new_user_log(bots, text: str) -> bool:
+    """Posts the new-user card to Logger Group -> USER topic. `bots` are tried in order (the log is
+    NOT forwarded to admin PMs on failure, unlike error reports, so a missing topic never spams people)."""
+    group = logger_group_id()
+    if not group:
+        return False
+    topic = log_topic("USER")
+    targets = []
+    for t in (topic, None):
+        if (int(group), t) not in targets:
+            targets.append((int(group), t))
+    for bot in bots:
+        if bot is None:
+            continue
+        for chat_id, thread in targets:
+            kwargs = dict(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+            if thread:
+                kwargs["message_thread_id"] = int(thread)
+            try:
+                await bot.send_message(**kwargs)
+                return True
+            except TelegramError as e:
+                logger.warning("New-user log to %s (topic %s) failed: %s", chat_id, thread, e)
+    return False
+
+
+async def log_new_user_start(
+    context_bot,
+    user,
+    *,
+    is_helper: bool,
+    referrer_id=None,
+):
+    """Builds and sends the new-user card. Helper bots are usually not members of the Logger Group,
+    so the MAIN bot (own token) sends it first; the calling bot is the fallback. Never raises."""
+    try:
+        from config import bot_token
+        from modules.database.user_db import get_user_info_db
+
+        me = context_bot
+        bot_username = getattr(me, "username", None) or ""
+        bot_title = getattr(me, "first_name", None) or bot_name()
+        if not bot_username:
+            try:
+                info = await me.get_me()
+                bot_username, bot_title = info.username or "", info.first_name or bot_title
+            except Exception:
+                pass
+
+        ref_title = None
+        if referrer_id:
+            info = get_user_info_db(int(referrer_id))
+            ref_title = (info or {}).get("full_name") or None
+
+        text = build_new_user_log_text(
+            user_id=user.id,
+            user_title=user.full_name,
+            username=user.username,
+            bot_title=bot_title,
+            bot_username=bot_username,
+            is_helper=is_helper,
+            referrer_id=referrer_id,
+            referrer_title=ref_title,
+        )
+
+        if is_helper:
+            main_token = bot_token()
+            if main_token:
+                async with Bot(main_token) as main_bot:
+                    if await send_new_user_log([main_bot, context_bot], text):
+                        return True
+                return False
+        return await send_new_user_log([context_bot], text)
+    except Exception as exc:  # logging must never break /start
+        logger.warning("New-user log failed: %s", exc)
+        return False

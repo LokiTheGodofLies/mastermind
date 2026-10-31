@@ -22,6 +22,11 @@ def _init_index_persistence():
                 state TEXT
             )
         ''')
+        for col, ddl in (("is_channel", "INTEGER DEFAULT 0"), ("helper_token", "TEXT")):
+            try:
+                c.execute(f"ALTER TABLE active_index_jobs ADD COLUMN {col} {ddl}")
+            except Exception:
+                pass  # column already exists
         conn.commit()
         conn.close()
     except Exception:
@@ -29,6 +34,60 @@ def _init_index_persistence():
 
 
 _init_index_persistence()
+
+_JOB_COLS = (
+    "rid", "chat_id", "title", "start_id", "end_id", "priority_mode", "requester_id", "requester_name",
+    "prompt_chat", "prompt_msg_id", "state", "is_channel", "helper_token",
+)
+
+
+def _persist_job(job: dict) -> None:
+    """Saves a not-yet-running /index job so its buttons still work after a restart / Render sleep
+    (the in-memory job store is empty then, which used to answer every tap with "request expired")."""
+    try:
+        vals = []
+        for col in _JOB_COLS:
+            v = job.get(col)
+            if col == "is_channel":
+                v = 1 if v else 0
+            vals.append(v)
+        conn = sqlite3.connect(users_db_path())
+        conn.execute(
+            f"INSERT OR REPLACE INTO active_index_jobs ({', '.join(_JOB_COLS)}) VALUES ({', '.join('?' * len(_JOB_COLS))})",
+            vals,
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logging.getLogger(__name__).debug("index job persist failed: %s", exc)
+
+
+def _forget_job(rid: str) -> None:
+    try:
+        conn = sqlite3.connect(users_db_path())
+        conn.execute("DELETE FROM active_index_jobs WHERE rid = ?", (rid,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _load_job(rid: str) -> dict | None:
+    """Restores a pending job (setup stage) from SQLite; running/finished jobs are not restored."""
+    try:
+        conn = sqlite3.connect(users_db_path())
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM active_index_jobs WHERE rid = ?", (rid,)).fetchone()
+        conn.close()
+    except Exception:
+        return None
+    if not row or (row["state"] or "pending") != "pending":
+        return None
+    job = {k: row[k] for k in _JOB_COLS}
+    job["is_channel"] = bool(job.get("is_channel"))
+    job.update(cancel=False, approval_chat=None, approval_msg_id=None, state="pending")
+    job["requester_role"] = get_user_role_db(job["requester_id"]) if job.get("requester_id") else "Admin"
+    return job
 
 from telegram import Bot
 import time
@@ -229,10 +288,10 @@ async def _auto_delete_prompt(bot, job: dict, delay_s: int = 15):
             pass
 
 
-async def _build_helper_pool_bots() -> list[tuple[Bot, str]]:
-    """Initializes reachable helper Bot instances for round-robin indexing."""
+async def _build_helper_pool_bots(tokens: list[str] | None = None) -> list[tuple[Bot, str]]:
+    """Initializes reachable helper Bot instances for round-robin indexing (all helpers, or only `tokens`)."""
     pool: list[tuple[Bot, str]] = []
-    for tok in helper_bot_tokens():
+    for tok in (tokens if tokens is not None else helper_bot_tokens()):
         try:
             hb = Bot(tok)
             await hb.initialize()
@@ -275,7 +334,15 @@ async def _run_index(context, rid, job):
             pass
 
     helper_pool: list[tuple[Bot, str]] = []
-    if job.get("priority_mode") == "helpers":
+    only_helper = bool(job.get("helper_token"))  # main bot cannot see the source chat: helper does ALL the work
+    if only_helper:
+        helper_pool = await _build_helper_pool_bots([job["helper_token"]])
+        if not helper_pool:
+            await _edit_prompt(context, job, "❌ The helper bot that can read this chat is unreachable. Try again later.")
+            job["state"] = "done"
+            _forget_job(rid)
+            return
+    elif job.get("priority_mode") == "helpers":
         helper_pool = await _build_helper_pool_bots()
 
     await _log_lifecycle(context, job, "started", default_bot_label, source_info=source_info)
@@ -294,7 +361,7 @@ async def _run_index(context, rid, job):
 
             try:
                 fwd = await _forward(active_bot, int(storage), job["chat_id"], mid)
-                if fwd is None and active_bot is not bot:
+                if fwd is None and active_bot is not bot and not only_helper:
                     active_bot = bot
                     active_bot_label = default_bot_label
                     fwd = await _forward(bot, int(storage), job["chat_id"], mid)
@@ -400,6 +467,7 @@ async def _run_index(context, rid, job):
                 pass
 
     job["state"] = "done"
+    _forget_job(rid)
     await _edit_prompt(context, job, _status_text(job, stats, final_state))
     await _log_summary(context, job, stats, final_state, default_bot_label, source_info=source_info)
     if job.get("is_channel"):
@@ -521,16 +589,34 @@ async def _show_skip_menu(context, rid: str, job: dict):
 
 
 async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, skip=None, is_channel: bool = False):
+    source_chat = None
+    probe_token = None
+    first_error: Exception | None = None
     try:
         source_chat = await context.bot.get_chat(chat_ref)
-        title = source_chat.title or source_chat.username or str(chat_ref)
-        cid = source_chat.id
     except TelegramError as e:
+        first_error = e
+        # The bot that received the command may not be in the source chat while a helper bot is:
+        # probe every helper bot and let the first one that can read the chat do the indexing.
+        for tok in helper_bot_tokens():
+            try:
+                async with Bot(tok) as hb:
+                    source_chat = await hb.get_chat(chat_ref)
+                probe_token = tok
+                break
+            except Exception:
+                continue
+    if source_chat is None:
         await context.bot.send_message(
             chat_id=prompt_chat,
-            text=f"❌ I can't reach that chat ({e}). Make sure I am a member / admin there.",
+            text=(
+                f"❌ I can't reach that chat ({first_error}). Make sure the Main Bot or a Helper Bot "
+                "is a member / admin there."
+            ),
         )
         return
+    title = source_chat.title or source_chat.username or str(chat_ref)
+    cid = source_chat.id
 
     rid = uuid.uuid4().hex[:8]
     job = {
@@ -547,10 +633,12 @@ async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, s
         "approval_chat": None,
         "approval_msg_id": None,
         "is_channel": is_channel,
+        "helper_token": probe_token,
         "cancel": False,
         "state": "pending",
     }
     _jobs(context)[rid] = job
+    _persist_job(job)
 
     if skip is not None:
         if skip > 0:
@@ -582,6 +670,8 @@ async def _edit_prompt(context, job, text, markup=None):
     if mid is None:
         m = await context.bot.send_message(chat_id=cid, text=text, parse_mode="HTML", reply_markup=markup)
         job["prompt_msg_id"] = m.message_id
+        if job.get("state") == "pending":
+            _persist_job(job)
     else:
         try:
             await context.bot.edit_message_text(
@@ -589,6 +679,8 @@ async def _edit_prompt(context, job, text, markup=None):
             )
         except TelegramError:
             pass
+        if job.get("state") == "pending":
+            _persist_job(job)
 
 
 async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -704,18 +796,25 @@ async def index_flow_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def _begin(context, rid, job):
     job["state"] = "running"
+    _forget_job(rid)  # running jobs are not restored after a restart
     context.application.create_task(_run_index(context, rid, job))
 
 
 async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    try:
-        _, action, rid = q.data.split("_", 2)
-    except (ValueError, AttributeError):
+    # Callback data = idx_<action>_<rid>; actions contain underscores themselves (sk_none, pr_dir, ...),
+    # so the 8-hex request id is taken from the END (a plain split("_", 2) glued it onto the action).
+    m = re.match(r"^idx_(.+)_([0-9a-f]{8})$", (getattr(q, "data", None) or ""))
+    if not m:
         await q.answer()
         return
+    action, rid = m.group(1), m.group(2)
 
     job = _jobs(context).get(rid)
+    if not job:
+        job = _load_job(rid)  # bot restarted since the prompt was sent
+        if job:
+            _jobs(context)[rid] = job
     if not job:
         await q.answer("⌛ This request has expired. Send /index again.", show_alert=True)
         return
@@ -727,6 +826,7 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "cancel":
         job["cancel"] = True
+        _forget_job(rid)
         await q.answer("Indexing cancelled.")
         await _edit_prompt(context, job, f"⛔ Indexing of <b>{html.escape(job['title'])}</b> was cancelled.")
         if job.get("is_channel"):
@@ -750,6 +850,7 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action.startswith("pr_"):
         mode = "direct" if action == "pr_dir" else "helpers"
         job["priority_mode"] = mode
+        _persist_job(job)
         if full:
             await q.answer("Starting index...")
             await _edit_prompt(context, job, f"🚀 Starting index in <mark>{mode}</mark> mode...")
@@ -778,6 +879,7 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("Only Administrators can reject.", show_alert=True)
             return
         job["cancel"] = True
+        _forget_job(rid)
         await q.answer("Rejected.")
         await _edit_prompt(context, job, f"❌ Index request for <b>{html.escape(job['title'])}</b> was rejected.")
         return

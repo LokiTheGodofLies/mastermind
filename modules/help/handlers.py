@@ -101,7 +101,7 @@ COMMAND_DETAILS = {
             "Generates your personal invite link with one-tap <mark>📋 Copy Invite Link</mark> and <mark>📤 Share Link</mark> buttons. Invite friends and earn bonus searches &amp; requests!\n\n"
             "💡 <b>Syntax:</b>\n"
             "• <code>/refer</code> (generates your unique invite link)\n"
-            "• <code>/myreferrals</code> (checks your invite stats and bonus balance)\n\n"
+            "• <code>/myreferrals</code> (invite stats + a table of everyone you invited: user, username, ID, joined)\n\n"
             "🎁 <b>Reward:</b> <mark>+10 searches &amp; +10 requests</mark> per successful invite!"
         ),
     },
@@ -162,6 +162,7 @@ COMMAND_DETAILS = {
             "When you download a file from search results, the bot delivers via two parallel routes:\n\n"
             "1. <b>🤖 Fast PM Delivery:</b> Sent directly to your private chat via helper bots (with 5-minute auto-delete).\n"
             "2. <b>📢 Posting Channel:</b> A temporary copy is posted in the channel (with 5-minute auto-delete).\n\n"
+            "📨 <b>Details card:</b> The bot sends it to your PM (not the group) and it deletes itself too. <mark>📨 Send All</mark> sends one combined table for the whole page.\n\n"
             "⚠️ <b>Important Tip:</b>\n"
             "Forward your received files to your <mark>Saved Messages</mark> before the 5-minute timer expires!"
         ),
@@ -170,25 +171,23 @@ COMMAND_DETAILS = {
         "title": "👥 roles",
         "category": "user",
         "text": (
-            "👥 <b>Community User Roles &amp; Privileges Breakdown</b>\n\n"
+            "👥 <b>Community User Roles &amp; Privileges</b>\n\n"
             "Our community has 6 structured tiers to organize library contributions and governance:\n\n"
-            "👤 <b>Normal User:</b>\n"
-            "• Quota: <mark>10 daily searches &amp; 10 daily requests</mark>.\n"
-            "• Access: /start, /search, /request, /quota, /refer, /support, /stats, /id, rosters.\n\n"
-            "📣 <b>Promoter:</b>\n"
-            "• Quota: <mark>20 daily searches &amp; 20 daily requests</mark>.\n"
-            "• Appointed by Admins to share and promote our community library.\n\n"
-            "🤝 <b>Volunteer:</b>\n"
-            "• Quota: <mark>30 daily searches &amp; 30 daily requests</mark>.\n"
-            "• Pre-approved direct book, audiobook, and archive indexing via Helper Bot DMs.\n\n"
-            "🛡️ <b>Moderator:</b>\n"
-            "• Quota: <mark>40 daily searches &amp; 40 daily requests</mark>.\n"
-            "• Direct indexing + Request Channel status management (In Progress, Completed, Rejected).\n\n"
-            "⚔️ <b>Administrator:</b>\n"
-            "• Quota: <mark>Unlimited searches &amp; requests</mark>.\n"
-            "• Batch range indexing (/index), announcements (/broadcast), fleet audit (/checkhelpers), bans (/ban), gifts (/gift), and team promotions.\n\n"
-            "👑 <b>Creator:</b>\n"
-            "• Supreme governance, admin appointments (/addadmin), in-chat updates (/update), production deployment (/publish), and timestamped SQLite backups."
+            "<table striped>"
+            "<tr><th>Tier</th><th>Daily Quota</th><th>What they can do</th></tr>"
+            "<tr><td>👤 <b>Normal User</b></td><td>10 searches &amp; 10 requests</td>"
+            "<td>/start, /search, /request, /quota, /refer, /support, /stats, /id, rosters</td></tr>"
+            "<tr><td>📣 <b>Promoter</b></td><td>20 searches &amp; 20 requests</td>"
+            "<td>Appointed by Admins to share and promote the library</td></tr>"
+            "<tr><td>🤝 <b>Volunteer</b></td><td>30 searches &amp; 30 requests</td>"
+            "<td>Pre-approved direct book, audiobook and archive indexing via Helper Bot DMs</td></tr>"
+            "<tr><td>🛡️ <b>Moderator</b></td><td>40 searches &amp; 40 requests</td>"
+            "<td>Direct indexing + Request Channel status management (In Progress, Completed, Rejected)</td></tr>"
+            "<tr><td>⚔️ <b>Administrator</b></td><td>Unlimited</td>"
+            "<td>Batch /index, /broadcast, /checkhelpers, /ban, /gift and team promotions</td></tr>"
+            "<tr><td>👑 <b>Creator</b></td><td>Unlimited</td>"
+            "<td>Supreme governance: /addadmin, /update, /publish and timestamped SQLite backups</td></tr>"
+            "</table>"
         ),
     },
 

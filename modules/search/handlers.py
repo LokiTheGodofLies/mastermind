@@ -4,8 +4,10 @@ import logging
 import re
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.error import TelegramError
     from telegram.ext import ContextTypes
 except ImportError:
+    TelegramError = Exception
     class InlineKeyboardButton:
         def __init__(self, text, callback_data=None, url=None, api_kwargs=None):
             self.text = text
@@ -32,7 +34,7 @@ from modules.database.config_db import get_config
 from modules.database.file_db import search_files_db
 from modules.allowance.allowance import can_user_search, deduct_search_quota
 from modules.indexing.book_index import format_series_label, parse_title_and_series
-from modules.search.delivery import deliver_file_dual
+from modules.search.delivery import deliver_batch_combined, deliver_file_dual
 from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
 from modules.utility.small_caps import from_small_caps
 
@@ -475,26 +477,29 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 await q.answer("No files to deliver.", show_alert=True)
                 return
 
-            await q.answer(f"🚀 Delivering {len(batch)} files via dual delivery...", show_alert=False)
+            try:
+                await q.answer(f"🚀 Sending {len(batch)} file(s)... one summary card will arrive in your PM.", show_alert=False)
+            except TelegramError:
+                pass  # stale/expired callback: keep going
 
-            delivered_count = 0
-            for row in batch:
+            # ONE helper bot delivers every file, then ONE combined table card goes to the user's PM
+            # (no per-file cards, no extra "Send All Complete" message in the Search topic).
+            try:
+                await deliver_batch_combined(update, context, batch)
+            except Exception as e:
+                logger.error("Send All failed: %s", e)
                 try:
-                    await deliver_file_dual(update, context, int(row["id"]))
-                    delivered_count += 1
-                    await asyncio.sleep(0.4)
+                    await q.message.reply_text("⚠️ Send All failed. Please try again in a moment.")
                 except Exception:
                     pass
-
-            await q.message.reply_text(
-                f"✅ <b>Send All Complete:</b> Successfully queued <mark>{delivered_count}</mark> file(s) for dual delivery!",
-                parse_mode="HTML",
-            )
 
     # Backward compatibility for file_dl_
     elif d.startswith("file_dl_"):
         row_id = d.replace("file_dl_", "")
-        await q.answer("Preparing dual delivery via helper bot...")
+        try:
+            await q.answer("📥 Sending your file... the details card arrives in your PM.")
+        except TelegramError:
+            pass  # stale/expired callback: still deliver
         try:
             await deliver_file_dual(update, context, int(row_id))
         except Exception as e:

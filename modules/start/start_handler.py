@@ -1,3 +1,4 @@
+import asyncio
 import html
 from config import bot_name, creator_dm_link, creator_id, creator_username, referral_bonus_label
 from datetime import datetime
@@ -5,9 +6,12 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from modules.database.user_db import add_or_update_user_db
+from modules.database.user_db import add_or_update_user_db, record_bot_start_db
 from modules.allowance.referral import process_referral_with_notification
 from modules.utility.rich_ui import styled_button
+
+
+_BG_TASKS: set = set()
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27,6 +31,26 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_or_update_user_db(user.id, user.username, user.full_name, today_str)
 
     args = context.args
+
+    # New-user log (Logger Group -> USER topic): fires once per person, the first time they /start the main bot,
+    # whatever the payload is (plain, referral, download or request deep link).
+    if not update.callback_query:
+        referrer_for_log = None
+        if args and args[0].startswith("ref_"):
+            try:
+                _rid = int(args[0].split("_", 1)[1])
+                if _rid != user.id:
+                    referrer_for_log = _rid
+            except ValueError:
+                pass
+        if record_bot_start_db(user.id, "main", bot_username or ""):
+            from modules.log.startup_log import log_new_user_start
+            _t = asyncio.create_task(
+                log_new_user_start(context.bot, user, is_helper=False, referrer_id=referrer_for_log)
+            )
+            _BG_TASKS.add(_t)
+            _t.add_done_callback(_BG_TASKS.discard)
+
     if args and (args[0].startswith("req_pick_") or args[0] == "req_manual"):
         from modules.request.handlers import request_deeplink_handler
         await request_deeplink_handler(update, context)

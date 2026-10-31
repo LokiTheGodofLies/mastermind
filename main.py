@@ -107,11 +107,16 @@ from modules.utility.check_helpers import (
 )  # noqa: E402
 from modules.database.user_db import get_user_role_db  # noqa: E402
 import html  # noqa: E402
-from modules.log.startup_log import send_startup_notification, error_handler, report_fatal_sync  # noqa: E402
+from modules.log.startup_log import send_startup_notification, error_handler, report_fatal_sync, log_new_user_start  # noqa: E402
+from modules.database.user_db import add_or_update_user_db, record_bot_start_db  # noqa: E402
+from datetime import datetime  # noqa: E402
 
 persistence.sync_startup_log()
 
 logger = logging.getLogger(__name__)
+
+
+_BG_TASKS: set = set()
 
 
 async def _helper_start_command(update, context):
@@ -120,6 +125,15 @@ async def _helper_start_command(update, context):
     user = update.effective_user
     if not msg or not user:
         return
+    # Register the person and log their FIRST /start on this helper bot (Logger Group -> USER topic).
+    try:
+        add_or_update_user_db(user.id, user.username, user.full_name, datetime.now().strftime("%Y-%m-%d"))
+        if record_bot_start_db(user.id, f"helper:{context.bot.id}", context.bot.username or ""):
+            _t = asyncio.create_task(log_new_user_start(context.bot, user, is_helper=True))
+            _BG_TASKS.add(_t)
+            _t.add_done_callback(_BG_TASKS.discard)
+    except Exception as exc:
+        logger.warning("Helper /start user registration failed: %s", exc)
     payload = context.args[0] if (context.args and context.args[0]) else None
     if payload and payload.startswith("dl_"):
         await handle_deeplink_file_delivery(update, context, payload)
@@ -405,6 +419,8 @@ def main():
             pattern=r"^(search_menu|stats_menu|start_menu|quota|quota_menu|quota_shortcut|bot_owner|request_menu|my_referrals_callback|refer_more_callback)$",
         )
     )
+    from modules.allowance.referral import my_referrals_page_callback
+    application.add_handler(CallbackQueryHandler(my_referrals_page_callback, pattern=r"^myref_p_\d+$"))
     application.add_handler(CallbackQueryHandler(help_callback_handler, pattern=r"^(help_|help_button|help_menu)"))
     application.add_handler(CallbackQueryHandler(support_callback_handler, pattern=r"^(support_|quiz_ans_)"))
     application.add_handler(CallbackQueryHandler(search_callback_handler, pattern=r"^(file_dl_|sp_|sf_|sa_|search_page_|search_direct_|join_search_group_quiz|generate_group_invite|search_menu|noop)"))
