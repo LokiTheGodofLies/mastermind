@@ -1642,7 +1642,6 @@ def format_index_channel_card(
     ]
     if duration_str:
         rows.append(f"<tr><td>• <b>Duration:</b></td><td>{e(duration_str)}</td></tr>")
-    rows.append(f"<tr><td>• <b>File Unique ID:</b></td><td><code>{e(file_unique_id)}</code></td></tr>")
     rows.extend(_caption_html_to_table_rows(enriched_caption_html, strip_file_lines=True))
     table_html = "<table striped><tr><th>Field</th><th>Details</th></tr>" + "".join(rows) + "</table>"
     return f"📚 <b>New file added to library</b>\n\n{table_html}"

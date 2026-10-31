@@ -46,7 +46,7 @@ check("audit: failure note, no enriched block", "Caption enrichment failed for t
 check("audit: duration row for media", "Duration</b>:</td><td>14h 22m 10s" in bi.format_index_audit_card("a.m4b", "1 MB", ".m4b", "U", "", 0, "A", "d", "s", "c", True, duration_str="14h 22m 10s"))
 
 card = bi.format_index_channel_card("The Final Empire.epub", "1.45 MB", ".epub", "AQADAgADxqc", CAP)
-check("channel card: header + table + fields", card.startswith("📚 <b>New file added to library</b>") and "<table striped>" in card and all(x in card for x in ("File Name:", "File Size:", "Extension:", "File Unique ID:")))
+check("channel card: header + table + fields", card.startswith("📚 <b>New file added to library</b>") and "<table striped>" in card and all(x in card for x in ("File Name:", "File Size:", "Extension:")) and "File Unique ID" not in card and "AQADAgADxqc" not in card)
 check("channel card: no duration for ebook", "Duration" not in card)
 check("channel card: enriched caption kept in table, file/size lines not duplicated", "Brandon Sanderson" in card and "📁 <b>File:</b>" not in card and "📦 <b>Size:</b>" not in card)
 check("channel card: no audit-only fields", all(x not in card for x in ("Added By", "Timestamp", "Storage", "Original Caption", "Database")))
