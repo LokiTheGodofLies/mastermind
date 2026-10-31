@@ -8,7 +8,9 @@ from telegram.ext import ContextTypes
 
 from config import (
     auto_delete_seconds,
+    bot_token,
     community_link,
+    creator_dm_link,
     helper_bot_tokens,
     posting_channel_id,
     storage_group_id,
@@ -399,8 +401,16 @@ async def deliver_file_dual(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     # If the interaction originated inside a Helper Bot (e.g. deep-link /start),
     # the file is already delivered directly into this chat with auto-delete.
     # Do NOT send the redundant delivery confirmation card inside the helper bot.
-    main_token = bot_token()
-    main_bot_id = int(main_token.split(":")[0]) if main_token else 0
+    main_bot_id = None
+    if context.application and context.application.bot:
+        main_bot_id = context.application.bot.id
+    if not main_bot_id:
+        try:
+            main_token = bot_token()
+            if main_token:
+                main_bot_id = int(main_token.split(":")[0])
+        except Exception:
+            pass
     if context.bot and context.bot.id and main_bot_id and (context.bot.id != main_bot_id):
         return
 
@@ -440,6 +450,23 @@ async def handle_deeplink_file_delivery(update: Update, context: ContextTypes.DE
         await deliver_file_dual(update, context, int(row["id"]))
     except Exception as exc:
         logger.error("Deep-link deliver_file_dual failed: %s", exc)
-        comm_url = community_link()
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=comm_url)]]) if comm_url else None
-        await msg.reply_text(f"❌ Error delivering file: <code>{html.escape(str(exc))}</code>", reply_markup=markup, parse_mode="HTML")
+        err_details = (
+            f"🚨 <b>Deep-Link File Delivery Error</b>\n\n"
+            f"• User: {user.first_name} (<code>{user.id}</code>, @{user.username or 'none'})\n"
+            f"• File Row: <code>{row['id'] if row else 'unknown'}</code>\n"
+            f"• Payload: <code>{html.escape(payload)}</code>\n"
+            f"• Error: <code>{html.escape(str(exc))}</code>"
+        )
+        try:
+            await report_error(context.application, err_details, title="File Delivery Error")
+        except Exception as rep_err:
+            logger.error("Failed to report delivery error: %s", rep_err)
+
+        support_link = creator_dm_link()
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=support_link)]]) if support_link else None
+        user_msg = (
+            "⚠️ <b>We encountered an error while sending your file.</b>\n\n"
+            "Our administrators have been notified and it will be resolved shortly.\n"
+            "Please wait a moment and try again, or tap below to contact support!"
+        )
+        await msg.reply_text(user_msg, reply_markup=markup, parse_mode="HTML")

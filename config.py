@@ -169,6 +169,21 @@ def creator_username():
     return (_clean("CREATOR_USERNAME") or "").lstrip("@")
 
 
+def creator_dm_link() -> str:
+    """Direct Telegram DM link to the bot Creator.
+    Uses CREATOR_USERNAME if set (e.g. heyucutie), otherwise tg://user?id=<cid>."""
+    un = (_clean("CREATOR_USERNAME") or "").lstrip("@").strip()
+    if un:
+        return f"https://t.me/{un}"
+    try:
+        cid = creator_id()
+        if cid:
+            return f"tg://user?id={cid}"
+    except Exception:
+        pass
+    return "https://t.me/heyucutie" 
+
+
 def admin_ids():
     """Set of configured Admin/Creator Telegram user IDs (env ADMIN_IDS + CREATOR_ID)."""
     ids = {creator_id()}

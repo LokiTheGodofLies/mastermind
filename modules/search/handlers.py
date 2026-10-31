@@ -17,6 +17,7 @@ except ImportError:
     class ContextTypes:
         DEFAULT_TYPE = object
 from config import (
+    creator_dm_link,
     bot_name,
     items_per_page,
     search_chat_id,
@@ -446,7 +447,27 @@ async def search_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         try:
             await deliver_file_dual(update, context, int(row_id))
         except Exception as e:
-            await q.message.reply_text(f"❌ Error delivering file: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
+            logger.error("Inline delivery failed: %s", e)
+            try:
+                from modules.log.startup_log import report_error
+                u = update.effective_user
+                err_details = (
+                    f"🚨 <b>Inline Button Delivery Error</b>\n\n"
+                    f"• User: {u.first_name if u else 'User'} (<code>{u.id if u else 0}</code>)\n"
+                    f"• File Row ID: <code>{row_id}</code>\n"
+                    f"• Error: <code>{html.escape(str(e))}</code>"
+                )
+                await report_error(context.application, err_details, title="Inline Button Delivery Error")
+            except Exception:
+                pass
+            support_link = creator_dm_link()
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Support", url=support_link)]]) if support_link else None
+            user_msg = (
+                "⚠️ <b>We encountered an error while sending your file.</b>\n\n"
+                "Our administrators have been notified and it will be resolved shortly.\n"
+                "Please wait a moment and try again, or tap below to contact support!"
+            )
+            await q.message.reply_text(user_msg, reply_markup=markup, parse_mode="HTML")
 
 
 async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
