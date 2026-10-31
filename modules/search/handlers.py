@@ -119,6 +119,36 @@ def _extract_item_fields(row) -> tuple[str, str, str, str, str]:
     return title, series, author, size_str, ext
 
 
+def _item_kind(row) -> str:
+    """'Audiobook', 'Archive' or 'Ebook' for a DB row (same rules as the search filters)."""
+    cat = (row["category"] or "").lower()
+    ext = f".{(row['extension'] or '').lstrip('.').lower()}"
+    if cat == "audiobook" or ext in supported_audiobook_extensions():
+        return "Audiobook"
+    if cat == "archive" or ext in supported_archive_extensions():
+        return "Archive"
+    return "Ebook"
+
+
+def build_result_table_html(idx, title, author, series, size_str, kind, ext) -> str:
+    """Rich-HTML table for ONE search result (field | value rows). Every value is escaped.
+    In a plain-HTML fallback `rich_ui.tables_to_pre()` turns it into a monospace block."""
+    fields = (
+        ("No.", str(idx)),
+        ("Title", title),
+        ("Author", author),
+        ("Series", series),
+        ("Size", size_str),
+        ("Format", kind),
+        ("Ext", f".{ext}" if ext else "-"),
+    )
+    body = "".join(
+        f"<tr><td><b>{html.escape(label)}</b></td><td>{html.escape(str(value))}</td></tr>"
+        for label, value in fields
+    )
+    return f"<table>{body}</table>"
+
+
 async def perform_search(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -127,11 +157,9 @@ async def perform_search(
     filter_mode: str = "all",
 ):
     """
-    Renders search results in Bot API 10.3 Rich Format with colorful in-text buttons:
-      Title
-      Series name or standalone
-      Author name
-      <mark>File size</mark> | <mark>.ext</mark>
+    Renders search results in Bot API 10.3 Rich Format with colorful in-text buttons.
+    Each result is a table, with its buttons directly below it:
+      | No. | Title | Author | Series (or Standalone) | Size | Format (Ebook/Audiobook/Archive) | Ext |
       <tg-button-row> [📥 Download #N] [⚡ Direct Link] </tg-button-row>
     """
     user = update.effective_user
@@ -225,10 +253,10 @@ async def perform_search(
             row_id_val = str(row["id"])
             dl_url = f"https://t.me/{bot_uname}?start=dl_{row_id_val}"
 
-            lines.append(f"<b>{idx}. {html.escape(title)}</b>")
-            lines.append(f"📚 <i>{html.escape(series)}</i>")
-            lines.append(f"✍️ <code>{html.escape(author)}</code>")
-            lines.append(f"📂 <mark>{html.escape(size_str)}</mark> | <mark>.{html.escape(ext)}</mark>")
+            # One table per result (serial, title, author, series, size, format, extension),
+            # then its Download button row directly below it. The buttons are unchanged:
+            # `file_dl_<row id>` (callback) and the `?start=dl_<row id>` deep link.
+            lines.append(build_result_table_html(idx, title, author, series, size_str, _item_kind(row), ext))
             lines.append(
                 tg_button_row_html(
                     [

@@ -18,6 +18,14 @@ A high-performance, modular Telegram bot built using Python and `python-telegram
 
 ---
 
+## 📋 Search Result Tables (`modules/search/handlers.py`, `modules/utility/rich_ui.py`)
+
+* Each search result is a Bot API 10.3 rich `<table>` (`build_result_table_html()`): **No. / Title / Author / Series / Size / Format / Ext**, followed by its own `<tg-button-row>` (`📥 Download #N`, `⚡ Direct Link`). In-text buttons keep the translucent, colored look.
+* **Fallback** (Telegram rejects the rich message): `tables_to_pre()` turns every table into a monospace block (plain letters), buttons move to the keyboard under the message, and long cells are shortened step by step so the message stays under 4096 characters.
+* In-text button URLs are percent-encoded (`_safe_url()`), because a raw space or apostrophe in a link (e.g. the `/start` share link) can make Telegram reject the whole rich message and force the solid keyboard-button fallback.
+* When a rich send/edit is rejected, the reason is now logged as a **WARNING** (`sendRichMessage rejected...` / `editMessageText(rich) rejected...`) so it shows in the Render logs.
+* Tests: `python tests/test_search_table.py`.
+
 ## 🔠 Small Caps Text Engine (`modules/utility/small_caps.py`)
 
 Every message, caption, button label and callback toast the bot sends is converted to small caps automatically, at the last step before it reaches Telegram. **Bot strings stay written in normal text in the source code**; no small-caps glyphs are typed anywhere.
@@ -51,7 +59,7 @@ The system implements a strict 6-tier role hierarchy:
 
 ### 👤 Standard User Commands
 * `/start`: Opens the interactive welcome menu with colorful buttons, processes referral bonuses, and handles deep-link file delivery.
-* `/search <query>`: Tokenized SQL search across filenames, titles, authors, series, and captions with dual-apostrophe matching, pagination, and in-text `📥 Download` + `⚡ Direct Link` buttons under every book.
+* `/search <query>`: Tokenized SQL search across filenames, titles, authors, series, and captions with dual-apostrophe matching, pagination, and and one **table per result** (No., Title, Author, Series or Standalone, Size, Format = Ebook / Audiobook / Archive, Ext) with its in-text `📥 Download #N` + `⚡ Direct Link` buttons directly below it. The Download button is unchanged (`file_dl_<id>` callback and `?start=dl_<id>` deep link, same dual delivery).
 * `/request <title and author>`: Interactive request assistant with Goodreads metadata lookup and colorful `📥 Select` / `📖 Goodreads` buttons, routed to the Request Channel.
 * `/quota`: Displays real-time search/request quota consumption, tier badges, and midnight IST reset status.
 * `/refer` & `/myreferrals`: Personal referral dashboard with one-tap `📋 Copy Invite Link` and `📤 Share Link` buttons (+10 searches & requests per invite).

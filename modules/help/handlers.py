@@ -57,7 +57,7 @@ COMMAND_DETAILS = {
             "• <code>/search</code> Percy Jackson\n"
             "• <code>/search</code> Fifty-Fifty\n"
             "• <code>/search</code> Colleen Hoover\n\n"
-            "✨ <i>Tip: Each search result includes an in-text green <mark>📥 Download</mark> button, a blue <mark>⚡ Direct Link</mark> button, format filters (📚 Ebooks / 🎧 Audio), and a green <mark>📨 Send All</mark> button!</i>"
+            "✨ <i>Tip: Each search result is a table (No., Title, Author, Series, Size, Format, Ext) with an in-text green <mark>📥 Download</mark> button and a blue <mark>⚡ Direct Link</mark> button below it, format filters (📚 Ebooks / 🎧 Audio), and a green <mark>📨 Send All</mark> button!</i>"
         ),
     },
     "request": {

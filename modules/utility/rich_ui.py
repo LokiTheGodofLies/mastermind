@@ -20,6 +20,7 @@ import html
 import logging
 import re
 from typing import Any
+from urllib.parse import quote
 
 try:
     from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -278,6 +279,14 @@ def style_inline_keyboard(
     return InlineKeyboardMarkup(new_rows)
 
 
+def _safe_url(url: str) -> str:
+    """Percent-encodes characters that are not valid inside a URL (spaces, quotes, `<`, `>`,
+    non-ASCII). Already-encoded parts (`%20`) and the URL's own separators are kept. A raw space
+    or apostrophe in a share link can make Telegram reject the WHOLE rich message, which then
+    drops back to the solid keyboard buttons."""
+    return quote(str(url), safe="%:/?#[]@!$&()*+,;=-._~")
+
+
 def tg_button_html(
     text: str,
     *,
@@ -299,7 +308,7 @@ def tg_button_html(
         esc_copy = html.escape(str(copy_text), quote=True)
         return f'<tg-button type="copy_text"{style_attr} text="{esc_copy}">{esc_label}</tg-button>'
     if url:
-        esc_url = html.escape(str(url), quote=True)
+        esc_url = html.escape(_safe_url(url), quote=True)
         return f'<tg-button type="url"{style_attr} url="{esc_url}">{esc_label}</tg-button>'
     esc_cb = html.escape(str(callback_data or "noop"), quote=True)
     return f'<tg-button type="callback_data"{style_attr} data="{esc_cb}">{esc_label}</tg-button>'
@@ -359,6 +368,40 @@ def build_rich_html(
             return f"{base}\n\n{kb_html}"
         return kb_html
     return base
+
+
+_RE_TABLE = re.compile(r"<table\b[^>]*>(.*?)</table>", re.DOTALL | re.IGNORECASE)
+_RE_TR = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.DOTALL | re.IGNORECASE)
+_RE_CELL = re.compile(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", re.DOTALL | re.IGNORECASE)
+
+
+def tables_to_pre(rich_text: str, max_cell: int = 44) -> str:
+    """Plain-HTML fallback for Rich `<table>` blocks: each table becomes a monospace `<pre>` block
+    (two-cell rows as `Label   value`, other rows joined with ` | `). Long cells are cut to
+    `max_cell` characters. Used only when `sendRichMessage` is unavailable or rejected."""
+
+    def _cell(raw: str) -> str:
+        txt = html.unescape(re.sub(r"<[^>]+>", "", raw or "")).strip()
+        txt = re.sub(r"\s+", " ", txt)
+        return txt if len(txt) <= max_cell else txt[: max_cell - 1].rstrip() + "…"
+
+    def _render(match: re.Match) -> str:
+        rows = [[_cell(c) for c in _RE_CELL.findall(tr)] for tr in _RE_TR.findall(match.group(1))]
+        rows = [r for r in rows if r]
+        if not rows:
+            return ""
+        out: list[str] = []
+        if all(len(r) == 2 for r in rows):
+            width = max(len(r[0]) for r in rows)
+            out = [f"{r[0].ljust(width)}  {r[1]}" for r in rows]
+        else:
+            out = [" | ".join(r) for r in rows]
+        return "<pre>" + html.escape("\n".join(out), quote=False) + "</pre>"
+
+    return _RE_TABLE.sub(_render, rich_text or "")
+
+
+_MAX_FALLBACK_VISIBLE = 3600  # Telegram's plain text limit is 4096 characters
 
 
 _RE_TG_BUTTON_ROW = re.compile(r"<tg-button-row[^>]*>(.*?)</tg-button-row>", re.DOTALL | re.IGNORECASE)
@@ -423,6 +466,15 @@ def extract_buttons_and_clean_html_for_fallback(
         return f"<b>{inner}</b>"
 
     cleaned = _RE_TG_BUTTON.sub(_replace_inline_btn, cleaned)
+    # Rich `<table>` blocks do not exist in plain HTML: show them as monospace blocks, and
+    # shorten the cells step by step if the whole message would be too long for one message.
+    if _RE_TABLE.search(cleaned):
+        candidate = cleaned
+        for _cell_limit in (44, 28, 18):
+            candidate = tables_to_pre(cleaned, _cell_limit)
+            if len(re.sub(r"<[^>]+>", "", candidate)) <= _MAX_FALLBACK_VISIBLE:
+                break
+        cleaned = candidate
     if small_caps:
         # Must happen before `<mark>` becomes `<code>`: code spans are deliberately left
         # untouched by the small-caps engine, but badge text should be converted.
@@ -548,7 +600,7 @@ def install_rich_ui_patches() -> None:
                     prefer_small_media=bool(kwargs.get("disable_web_page_preview")),
                 )
             except Exception as rich_exc:
-                logger.debug("sendRichMessage fallback to styled sendMessage: %s", rich_exc)
+                logger.warning("sendRichMessage rejected, using styled sendMessage fallback: %s", rich_exc)
 
         if text and has_rich_tags:
             clean_text, merged_markup = extract_buttons_and_clean_html_for_fallback(
@@ -591,7 +643,7 @@ def install_rich_ui_patches() -> None:
             except Exception as rich_exc:
                 if "message is not modified" in str(rich_exc).lower():
                     raise
-                logger.debug("editRichMessage fallback to styled editMessageText: %s", rich_exc)
+                logger.warning("editMessageText(rich) rejected, using styled editMessageText fallback: %s", rich_exc)
 
         if text and has_rich_tags:
             clean_text, merged_markup = extract_buttons_and_clean_html_for_fallback(
