@@ -2,17 +2,18 @@ import time
 from telegram import Update
 from telegram.ext import ContextTypes
 
+
 def get_android_network_usage():
     try:
         total_rx = 0
         total_tx = 0
-        with open('/proc/net/dev', 'r') as f:
+        with open("/proc/net/dev", "r") as f:
             lines = f.readlines()
         for line in lines[2:]:
-            parts = line.split(':')
+            parts = line.split(":")
             if len(parts) == 2:
                 iface = parts[0].strip()
-                if iface == 'lo':
+                if iface == "lo":
                     continue
                 data = parts[1].split()
                 if len(data) >= 9:
@@ -21,6 +22,7 @@ def get_android_network_usage():
         return total_rx / (1024 * 1024), total_tx / (1024 * 1024)
     except Exception:
         return 0.0, 0.0
+
 
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
@@ -31,10 +33,12 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bytes_recv_mb, bytes_sent_mb = get_android_network_usage()
 
     text = (
-        f"🏓 <b>Pong!</b>\n\n"
-        f"⏱ <b>Latency:</b> <code>{latency} ms</code>\n\n"
-        f"📊 <b>Tablet Network Stats:</b>\n"
-        f"📤 <b>Sent:</b> <code>{bytes_sent_mb:.2f} MB</code>\n"
-        f"📥 <b>Received:</b> <code>{bytes_recv_mb:.2f} MB</code>"
+        f"🏓 <b>Pong! System Latency &amp; Network</b>\n\n"
+        f"<table striped>"
+        f"<tr><th>Metric</th><th>Value</th></tr>"
+        f"<tr><td>⏱ <b>API Latency</b></td><td><code>{latency} ms</code></td></tr>"
+        f"<tr><td>📤 <b>Data Sent (TX)</b></td><td><code>{bytes_sent_mb:.2f} MB</code></td></tr>"
+        f"<tr><td>📥 <b>Data Received (RX)</b></td><td><code>{bytes_recv_mb:.2f} MB</code></td></tr>"
+        f"</table>"
     )
-    await msg.edit_text(text, parse_mode='HTML')
+    await msg.edit_text(text, parse_mode="HTML")

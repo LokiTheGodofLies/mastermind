@@ -31,25 +31,25 @@ TARGET_OPTIONS = [
 
 
 def _build_broadcast_keyboard(target: str, is_pin: bool, has_message: bool) -> InlineKeyboardMarkup:
-    """Builds colorful Bot API 10.3 toggle menu for broadcast dashboard."""
+    """Builds transparent colorful Bot API 10.3 toggle menu for broadcast dashboard."""
     kb = []
 
     r1 = []
     for t_id, t_lbl in TARGET_OPTIONS[:3]:
         active = " ✅" if t_id == target else ""
-        b_style = "success" if t_id == target else "primary"
+        b_style = "success" if t_id == target else "danger"
         r1.append(styled_button(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}", style=b_style))
     kb.append(r1)
 
     r2 = []
     for t_id, t_lbl in TARGET_OPTIONS[3:]:
         active = " ✅" if t_id == target else ""
-        b_style = "success" if t_id == target else "primary"
+        b_style = "success" if t_id == target else "danger"
         r2.append(styled_button(f"{t_lbl}{active}", callback_data=f"bc_target_{t_id}", style=b_style))
     kb.append(r2)
 
     pin_status = "✅ ON" if is_pin else "❌ OFF"
-    pin_style = "success" if is_pin else "primary"
+    pin_style = "success" if is_pin else "danger"
     kb.append([styled_button(f"📌 Pin in Chats: {pin_status}", callback_data="bc_toggle_pin", style=pin_style)])
 
     if has_message:
@@ -64,11 +64,11 @@ def _build_broadcast_keyboard(target: str, is_pin: bool, has_message: bool) -> I
 
 
 def _build_running_keyboard(is_paused: bool) -> InlineKeyboardMarkup:
-    """Builds colorful inline control buttons for an active broadcast loop."""
+    """Builds transparent colorful inline control buttons for an active broadcast loop."""
     pause_btn = (
         styled_button("▶️ Resume", callback_data="bc_resume", style="success")
         if is_paused
-        else styled_button("⏸ Pause", callback_data="bc_pause", style="primary")
+        else styled_button("⏸ Pause", callback_data="bc_pause", style="success")
     )
     return InlineKeyboardMarkup([
         [pause_btn, styled_button("🛑 Cancel Broadcast", callback_data="bc_stop_active", style="danger")]
@@ -76,21 +76,26 @@ def _build_running_keyboard(is_paused: bool) -> InlineKeyboardMarkup:
 
 
 def _build_broadcast_text(target: str, is_pin: bool, msg_text: str | None) -> str:
-    """Builds formatted dashboard text for broadcast menu."""
+    """Builds formatted dashboard text with a <table striped> for broadcast menu."""
     target_names = {
         "all": "All (Users, Groups & Channels)",
         "users": "All Bot Users (Main Bot)",
-        "helpers": "All Bot Users (Via Helper Bots Pool)",
+        "helpers": "All Bot Users (Helper Pool)",
         "groups": "All Registered Groups",
         "channels": "All Registered Channels",
     }
     t_name = target_names.get(target, target.capitalize())
-    pin_str = "Yes" if is_pin else "No"
+    pin_str = "✅ Yes" if is_pin else "❌ No"
+    msg_status = "✅ Attached" if msg_text else "⚠️ Not Attached"
 
     header = (
         "📢 <b>Broadcast Control Panel</b>\n\n"
-        f"🎯 <b>Target Audience:</b> <mark>{html.escape(t_name)}</mark>\n"
-        f"📌 <b>Auto-Pin:</b> <mark>{pin_str}</mark>\n"
+        "<table striped>"
+        "<tr><th>Setting</th><th>Value</th></tr>"
+        f"<tr><td>🎯 <b>Target Audience</b></td><td><code>{html.escape(t_name)}</code></td></tr>"
+        f"<tr><td>📌 <b>Auto-Pin</b></td><td>{pin_str}</td></tr>"
+        f"<tr><td>💬 <b>Message</b></td><td>{msg_status}</td></tr>"
+        "</table>\n"
     )
 
     if msg_text:
@@ -172,11 +177,14 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
             if _active_broadcast_cancelled:
                 await status_msg.edit_text(
                     f"🛑 <b>Broadcast Cancelled by Admin</b>\n\n"
-                    f"🎯 <b>Target:</b> <mark>{html.escape(target)}</mark>\n"
-                    f"👥 <b>Processed:</b> <code>{idx - 1}/{total}</code>\n"
-                    f"✅ <b>Delivered:</b> <code>{sent}</code>\n"
-                    f"❌ <b>Failed:</b> <code>{failed}</code>\n"
-                    f"📌 <b>Pinned:</b> <code>{pinned}</code>",
+                    f"<table striped>"
+                    f"<tr><th>Metric</th><th>Value</th></tr>"
+                    f"<tr><td>🎯 <b>Target</b></td><td><code>{html.escape(target)}</code></td></tr>"
+                    f"<tr><td>👥 <b>Processed</b></td><td><code>{idx - 1}/{total}</code></td></tr>"
+                    f"<tr><td>✅ <b>Delivered</b></td><td><code>{sent}</code></td></tr>"
+                    f"<tr><td>❌ <b>Failed</b></td><td><code>{failed}</code></td></tr>"
+                    f"<tr><td>📌 <b>Pinned</b></td><td><code>{pinned}</code></td></tr>"
+                    f"</table>",
                     parse_mode="HTML",
                 )
                 return
@@ -208,13 +216,18 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
 
             if idx == 1 or idx % 5 == 0 or idx == total:
                 state_lbl = "⏸ <b>Broadcast Paused</b>" if _active_broadcast_paused else "📡 <b>Broadcasting in Progress...</b>"
+                pin_row = f"<tr><td>📌 <b>Pinned</b></td><td><code>{pinned}</code></td></tr>" if should_pin else ""
                 try:
                     await status_msg.edit_text(
                         f"{state_lbl}\n\n"
-                        f"🎯 <b>Target:</b> <mark>{html.escape(target)}</mark>\n"
-                        f"⏳ <b>Progress:</b> <code>{idx}/{total}</code> ({(idx / total) * 100:.1f}%)\n"
-                        f"✅ <b>Sent:</b> <code>{sent}</code> | ❌ <b>Failed:</b> <code>{failed}</code>"
-                        + (f" | 📌 <b>Pinned:</b> <code>{pinned}</code>" if should_pin else ""),
+                        f"<table striped>"
+                        f"<tr><th>Metric</th><th>Value</th></tr>"
+                        f"<tr><td>🎯 <b>Target</b></td><td><code>{html.escape(target)}</code></td></tr>"
+                        f"<tr><td>⏳ <b>Progress</b></td><td><code>{idx}/{total} ({(idx / total) * 100:.1f}%)</code></td></tr>"
+                        f"<tr><td>✅ <b>Sent</b></td><td><code>{sent}</code></td></tr>"
+                        f"<tr><td>❌ <b>Failed</b></td><td><code>{failed}</code></td></tr>"
+                        f"{pin_row}"
+                        f"</table>",
                         parse_mode="HTML",
                         reply_markup=_build_running_keyboard(_active_broadcast_paused),
                     )
@@ -231,11 +244,14 @@ async def _execute_broadcast(context: ContextTypes.DEFAULT_TYPE, sender_id: int,
 
     summary = (
         f"📢 <b>Broadcast Completed</b>\n\n"
-        f"🎯 <b>Target:</b> <mark>{html.escape(target)}</mark>\n"
-        f"👥 <b>Total Recipients:</b> <code>{total}</code>\n"
-        f"✅ <b>Delivered:</b> <code>{sent}</code>\n"
-        f"❌ <b>Failed:</b> <code>{failed}</code>\n"
-        f"📌 <b>Pinned:</b> <code>{pinned}</code>"
+        f"<table striped>"
+        f"<tr><th>Metric</th><th>Value</th></tr>"
+        f"<tr><td>🎯 <b>Target</b></td><td><code>{html.escape(target)}</code></td></tr>"
+        f"<tr><td>👥 <b>Total Recipients</b></td><td><code>{total}</code></td></tr>"
+        f"<tr><td>✅ <b>Delivered</b></td><td><code>{sent}</code></td></tr>"
+        f"<tr><td>❌ <b>Failed</b></td><td><code>{failed}</code></td></tr>"
+        f"<tr><td>📌 <b>Pinned</b></td><td><code>{pinned}</code></td></tr>"
+        f"</table>"
     )
     await status_msg.edit_text(summary, parse_mode="HTML")
 
@@ -349,27 +365,18 @@ async def broadcast_callback_handler(update: Update, context: ContextTypes.DEFAU
     if data == "bc_toggle_pin":
         pending["pin"] = not pending.get("pin", False)
         context.user_data["pending_broadcast"] = pending
-        text = _build_broadcast_text(pending["target"], pending.get("pin", False), pending.get("text"))
-        kb = _build_broadcast_keyboard(pending["target"], pending.get("pin", False), bool(pending.get("text")))
+        text = _build_broadcast_text(pending["target"], pending["pin"], pending.get("text"))
+        kb = _build_broadcast_keyboard(pending["target"], pending["pin"], bool(pending.get("text")))
         await q.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
         return
 
     if data == "bc_confirm":
-        if not pending.get("text"):
-            await q.answer("⚠️ No broadcast message provided yet!", show_alert=True)
+        msg_text = pending.get("text")
+        if not msg_text:
+            await q.answer("⚠️ Attach a message first!", show_alert=True)
             return
-
-        status_msg = await q.message.edit_text(
-            "⏳ Initializing broadcast...",
-            reply_markup=_build_running_keyboard(False),
-        )
-        asyncio.create_task(
-            _execute_broadcast(
-                context=context,
-                sender_id=user_id,
-                target=pending["target"],
-                msg_text=pending["text"],
-                should_pin=pending.get("pin", False),
-                status_msg=status_msg,
-            )
-        )
+        target = pending.get("target", "all")
+        should_pin = pending.get("pin", False)
+        context.user_data.pop("pending_broadcast", None)
+        status_msg = await q.message.edit_text("📡 <b>Starting broadcast...</b>", parse_mode="HTML")
+        context.application.create_task(_execute_broadcast(context, user_id, target, msg_text, should_pin, status_msg))

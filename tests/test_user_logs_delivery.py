@@ -224,5 +224,92 @@ check("index job persisted and restored after 'restart'", back and back["end_id"
 ic._forget_job(rid)
 check("index job forgotten", ic._load_job(rid) is None)
 
+
+# ---------------------------------------------------------------- Build 1735: Ongoing /index process, /help transparent colorful buttons + tables, and tables across modules
+from modules.help import handlers as hh
+from modules.stats import handlers as st_h
+from modules.request import handlers as rq_h
+from modules.allowance import allowance as al_h
+from modules.id import handlers as id_h
+from modules.roster import handlers as ro_h
+from modules.utility import ping as pg_h
+from modules.broadcast import handlers as bc_h
+
+# 1) Ongoing /index process persistence (running & paused) + <table striped> progress + Pause/Resume callbacks
+rid2 = "cd34ef56"
+for action in ("pause", "resume"):
+    m = re.match(r"^idx_(.+)_([0-9a-f]{8})$", f"idx_{action}_{rid2}")
+    check(f"index callback parse idx_{action}_<rid>", bool(m) and m.group(1) == action and m.group(2) == rid2)
+
+running_job = {
+    "rid": rid2,
+    "chat_id": -100777,
+    "title": "Ongoing Source",
+    "start_id": 10,
+    "end_id": 100,
+    "current_mid": 35,
+    "skipped_range": 10,
+    "priority_mode": "helpers",
+    "requester_id": 8853305382,
+    "requester_name": "Loki",
+    "prompt_chat": -100777,
+    "prompt_msg_id": 99,
+    "state": "running",
+    "is_channel": False,
+    "helper_token": None,
+    "stats": {"fetched": 25, "ok": 20, "dup": 2, "deleted": 1, "skipped": 1, "filtered": 1},
+}
+ic._persist_job(running_job)
+restored_running = ic._load_job(rid2)
+check(
+    "running index job persisted & restored (not deleted on start)",
+    restored_running is not None
+    and restored_running["state"] == "running"
+    and restored_running["current_mid"] == 35
+    and restored_running["skipped_range"] == 10
+    and restored_running["stats"]["ok"] == 20,
+    restored_running,
+)
+st_card = ic._status_text(restored_running, restored_running["stats"], "running (#35)")
+check(
+    "ongoing index _status_text is <table striped> with Skipped row",
+    "<table striped>" in st_card and "Skipped" in st_card and "<code>11</code>" in st_card,
+    st_card,
+)
+rm_run = ic._running_markup(rid2, paused=False)
+rm_pause = ic._running_markup(rid2, paused=True)
+check(
+    "ongoing index markup toggles Pause / Resume buttons",
+    rm_run.inline_keyboard[0][0].callback_data == f"idx_pause_{rid2}"
+    and rm_pause.inline_keyboard[0][0].callback_data == f"idx_resume_{rid2}",
+)
+ic._forget_job(rid2)
+
+# 2) /help menu transparent colorful buttons (success/danger, no opaque blue primary) + <table striped> everywhere
+main_help_text, main_help_kb = hh.build_main_help_menu(1)
+main_styles = [b.api_kwargs.get("style") for r in main_help_kb.inline_keyboard for b in r]
+check(
+    "main help menu has <table striped> and transparent colorful buttons (success/danger)",
+    "<table striped>" in main_help_text and set(main_styles) <= {"success", "danger"} and len(set(main_styles)) == 2,
+    main_styles,
+)
+for cat in ("user", "volunteer", "moderator", "admin", "creator"):
+    ct, ckb = hh.build_paginated_category_menu(cat, 1)
+    c_styles = [b.api_kwargs.get("style") for r in ckb.inline_keyboard for b in r]
+    check(
+        f"help category {cat!r} has <table striped> and transparent colorful buttons",
+        "<table striped>" in ct and set(c_styles) <= {"success", "danger"},
+        c_styles,
+    )
+all_cards_have_tables = all("<table striped>" in v["text"] for v in hh.COMMAND_DETAILS.values())
+check("all 37 COMMAND_DETAILS cards contain <table striped>", all_cards_have_tables)
+
+# 3) Request guide & broadcast & roster & quota tables
+check("REQUEST_GUIDE_TEXT has <table striped>", "<table striped>" in rq_h.REQUEST_GUIDE_TEXT)
+bc_txt = bc_h._build_broadcast_text("all", True, "Hello community")
+check("broadcast control panel has <table striped>", "<table striped>" in bc_txt)
+ro_txt = ro_h._build_roster_view("🛡️ <b>Admins</b>", [{"user_id": 1, "full_name": "Loki", "username": "loki", "role": "Creator"}], "None", "Footer")
+check("roster view has <table striped>", "<table striped>" in ro_txt)
+
 print(f"\nFAILS: {fails}")
 sys.exit(1 if fails else 0)

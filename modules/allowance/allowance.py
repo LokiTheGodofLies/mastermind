@@ -113,7 +113,15 @@ def gift_quota(admin_user_id, target_user_id, search_bonus=0, request_bonus=0):
         return False, "❌ You do not have permission to use the gift command."
 
     add_quota_limits_db(target_user_id, search_bonus, request_bonus)
-    return True, f"🎁 Successfully added <mark>+{search_bonus}</mark> search limit and <mark>+{request_bonus}</mark> request limit to user <code>{target_user_id}</code>."
+    return True, (
+        "🎁 <b>Bonus Allowance Granted</b>\n\n"
+        "<table striped>"
+        "<tr><th>Field</th><th>Value</th></tr>"
+        f"<tr><td>👤 <b>Target User ID</b></td><td><code>{target_user_id}</code></td></tr>"
+        f"<tr><td>🔍 <b>Search Bonus</b></td><td><code>+{search_bonus}</code></td></tr>"
+        f"<tr><td>📥 <b>Request Bonus</b></td><td><code>+{request_bonus}</code></td></tr>"
+        "</table>"
+    )
 
 
 async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,24 +137,31 @@ async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif summary["unlimited"]:
         text = (
             f"📊 <b>Daily Allowance Dashboard</b>\n\n"
-            f"👤 <b>Your Role:</b> <mark>{html.escape(str(summary['role']))}</mark>\n"
-            f"♾️ <b>Status:</b> <mark>Unlimited</mark> searches and requests."
+            f"<table striped>"
+            f"<tr><th>Field</th><th>Status</th></tr>"
+            f"<tr><td>👤 <b>Your Role</b></td><td><code>{html.escape(str(summary['role']))}</code></td></tr>"
+            f"<tr><td>🔍 <b>Searches</b></td><td><code>♾️ Unlimited</code></td></tr>"
+            f"<tr><td>📥 <b>Requests</b></td><td><code>♾️ Unlimited</code></td></tr>"
+            f"</table>"
         )
     else:
         text = (
             f"📊 <b>Daily Allowance Dashboard</b>\n\n"
-            f"👤 <b>Your Role:</b> <mark>{html.escape(str(summary['role']))}</mark>\n\n"
-            f"🔍 <b>Searches Remaining:</b> <mark>{summary['searches_left']} / {summary['searches_limit']}</mark>\n"
-            f"📥 <b>Requests Remaining:</b> <mark>{summary['requests_left']} / {summary['requests_limit']}</mark>\n\n"
-            f"<i>(Quotas reset automatically every day at midnight IST)</i>"
+            f"<table striped>"
+            f"<tr><th>Allowance</th><th>Balance</th></tr>"
+            f"<tr><td>👤 <b>Your Role</b></td><td><code>{html.escape(str(summary['role']))}</code></td></tr>"
+            f"<tr><td>🔍 <b>Searches Remaining</b></td><td><code>{summary['searches_left']} / {summary['searches_limit']}</code></td></tr>"
+            f"<tr><td>📥 <b>Requests Remaining</b></td><td><code>{summary['requests_left']} / {summary['requests_limit']}</code></td></tr>"
+            f"<tr><td>🕒 <b>Daily Reset</b></td><td>Midnight IST</td></tr>"
+            f"</table>"
         )
 
     markup = InlineKeyboardMarkup([
         [
             styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
-            styled_button("🎁 Refer & Earn", callback_data="refer_more_callback", style="primary"),
+            styled_button("🎁 Refer & Earn", callback_data="refer_more_callback", style="danger"),
         ],
-        [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
+        [styled_button("« Back to Start", callback_data="start_menu", style="danger")],
     ])
 
     if update.callback_query:
@@ -195,11 +210,19 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_invites = stats["total_invites"]
     referred_list = stats["referred_list"]
 
+    summary_table = (
+        "<table striped>"
+        "<tr><th>Referral Metric</th><th>Value</th></tr>"
+        f"<tr><td>📊 <b>Total Friends Invited</b></td><td><code>{total_invites}</code></td></tr>"
+        f"<tr><td>🎁 <b>Bonus Earned</b></td><td><code>{html.escape(str(referral_earned_label(total_invites)))}</code></td></tr>"
+        f"<tr><td>✨ <b>Reward Per Invite</b></td><td><code>{html.escape(str(referral_bonus_label()))}</code></td></tr>"
+        "</table>"
+    )
+
     text = (
         f"🔗 <b>Your Referral Dashboard</b>\n\n"
         f"📌 <b>Your Link:</b>\n<code>{html.escape(referral_link)}</code>\n\n"
-        f"📊 <b>Total Friends Invited:</b> <mark>{total_invites}</mark>\n"
-        f"🎁 <b>Bonus Earned:</b> <mark>{html.escape(str(referral_earned_label(total_invites)))}</mark>\n\n"
+        f"{summary_table}\n\n"
     )
 
     if referred_list:
@@ -210,16 +233,14 @@ async def refer_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text += "💡 <i>You haven't invited anyone yet. Share your link to start earning bonuses!</i>"
 
-    text += f"\n\n<i>When a new user starts via your link, both of you get {html.escape(str(referral_bonus_label()))}!</i>"
-
     share_text = f"Join {bot_name()} Bot and let's earn bonus searches & requests!"
     share_url = f"https://t.me/share/url?url={referral_link}&text={share_text}"
 
     keyboard = [
         [styled_button("📤 Refer More & Share Link", url=share_url, style="success")],
-        [styled_button("📋 Copy Invite Link", copy_text=referral_link, style="primary")],
-        [styled_button("📋 My Referrals", callback_data="my_referrals_callback", style="primary")],
-        [styled_button("« Back to Start", callback_data="start_menu", style="primary")],
+        [styled_button("📋 Copy Invite Link", copy_text=referral_link, style="danger")],
+        [styled_button("📋 My Referrals", callback_data="my_referrals_callback", style="success")],
+        [styled_button("« Back to Start", callback_data="start_menu", style="danger")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 

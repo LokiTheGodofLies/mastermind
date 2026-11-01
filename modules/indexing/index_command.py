@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from config import users_db_path
 
@@ -22,7 +23,12 @@ def _init_index_persistence():
                 state TEXT
             )
         ''')
-        for col, ddl in (("is_channel", "INTEGER DEFAULT 0"), ("helper_token", "TEXT")):
+        for col, ddl in (
+            ("is_channel", "INTEGER DEFAULT 0"),
+            ("helper_token", "TEXT"),
+            ("skipped_range", "INTEGER DEFAULT 0"),
+            ("stats_json", "TEXT"),
+        ):
             try:
                 c.execute(f"ALTER TABLE active_index_jobs ADD COLUMN {col} {ddl}")
             except Exception:
@@ -36,20 +42,28 @@ def _init_index_persistence():
 _init_index_persistence()
 
 _JOB_COLS = (
-    "rid", "chat_id", "title", "start_id", "end_id", "priority_mode", "requester_id", "requester_name",
-    "prompt_chat", "prompt_msg_id", "state", "is_channel", "helper_token",
+    "rid", "chat_id", "title", "start_id", "end_id", "current_mid", "priority_mode",
+    "requester_id", "requester_name", "prompt_chat", "prompt_msg_id", "state",
+    "is_channel", "helper_token", "skipped_range", "stats_json",
 )
 
 
 def _persist_job(job: dict) -> None:
-    """Saves a not-yet-running /index job so its buttons still work after a restart / Render sleep
-    (the in-memory job store is empty then, which used to answer every tap with "request expired")."""
+    """Saves a pending, running, or paused /index job so its buttons and ongoing loop
+    survive restarts / Render redeploys."""
     try:
+        _init_index_persistence()
         vals = []
         for col in _JOB_COLS:
-            v = job.get(col)
             if col == "is_channel":
-                v = 1 if v else 0
+                v = 1 if job.get("is_channel") else 0
+            elif col == "skipped_range":
+                v = int(job.get("skipped_range") or 0)
+            elif col == "stats_json":
+                st = job.get("stats")
+                v = json.dumps(st) if isinstance(st, dict) else (job.get("stats_json") or None)
+            else:
+                v = job.get(col)
             vals.append(v)
         conn = sqlite3.connect(users_db_path())
         conn.execute(
@@ -72,22 +86,45 @@ def _forget_job(rid: str) -> None:
         pass
 
 
+def _row_to_job(row) -> dict | None:
+    if not row:
+        return None
+    st = (row["state"] or "pending").lower()
+    if st not in ("pending", "running", "paused"):
+        return None
+    keys = row.keys()
+    job = {k: (row[k] if k in keys else None) for k in _JOB_COLS}
+    job["is_channel"] = bool(job.get("is_channel"))
+    job["skipped_range"] = int(job.get("skipped_range") or 0)
+    raw_stats = job.get("stats_json")
+    if raw_stats:
+        try:
+            job["stats"] = json.loads(raw_stats)
+        except Exception:
+            job["stats"] = None
+    job.update(
+        cancel=False,
+        paused=(st == "paused"),
+        approval_chat=None,
+        approval_msg_id=None,
+        state=st,
+    )
+    job["requester_role"] = get_user_role_db(job["requester_id"]) if job.get("requester_id") else "Admin"
+    return job
+
+
 def _load_job(rid: str) -> dict | None:
-    """Restores a pending job (setup stage) from SQLite; running/finished jobs are not restored."""
+    """Restores a pending, running, or paused job from SQLite."""
     try:
+        _init_index_persistence()
         conn = sqlite3.connect(users_db_path())
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM active_index_jobs WHERE rid = ?", (rid,)).fetchone()
         conn.close()
     except Exception:
         return None
-    if not row or (row["state"] or "pending") != "pending":
-        return None
-    job = {k: row[k] for k in _JOB_COLS}
-    job["is_channel"] = bool(job.get("is_channel"))
-    job.update(cancel=False, approval_chat=None, approval_msg_id=None, state="pending")
-    job["requester_role"] = get_user_role_db(job["requester_id"]) if job.get("requester_id") else "Admin"
-    return job
+    return _row_to_job(row)
+
 
 from telegram import Bot
 import time
@@ -229,32 +266,50 @@ def _status_text(job: dict, stats: dict, phase: str = "running") -> str:
     total = max(1, job["end_id"] - job["start_id"] + 1)
     done = stats["fetched"]
     pct = min(100, int((done / total) * 100))
-    bar_len = 16
+    bar_len = 12
     filled = int(bar_len * (pct / 100))
     bar = "█" * filled + "▒" * (bar_len - filled)
+    skipped_total = int(job.get("skipped_range", 0) or 0) + int(stats.get("skipped", 0) or 0)
+    mode_lbl = str(job.get("priority_mode") or "direct")
 
+    rows = [
+        f"<tr><td>📂 <b>Chat</b></td><td>{html.escape(str(job.get('title') or 'Chat'))[:38]}</td></tr>",
+        f"<tr><td>🔢 <b>Range</b></td><td><code>{job['start_id']} → {job['end_id']}</code></td></tr>",
+        f"<tr><td>⚡ <b>Mode</b></td><td><code>{html.escape(mode_lbl)}</code></td></tr>",
+        f"<tr><td>⚙️ <b>Phase</b></td><td><code>{html.escape(str(phase))}</code></td></tr>",
+        f"<tr><td>📊 <b>Progress</b></td><td><code>[{bar}] {pct}%</code></td></tr>",
+        f"<tr><td>📥 <b>Fetched</b></td><td><code>{done}/{total}</code></td></tr>",
+        f"<tr><td>✅ <b>Indexed / Healed</b></td><td><code>{stats['ok']}</code></td></tr>",
+        f"<tr><td>♻️ <b>Duplicates</b></td><td><code>{stats['dup']}</code></td></tr>",
+        f"<tr><td>⏭ <b>Skipped</b></td><td><code>{skipped_total}</code></td></tr>",
+        f"<tr><td>🚫 <b>Filtered</b></td><td><code>{stats['filtered']}</code></td></tr>",
+        f"<tr><td>🗑 <b>Deleted</b></td><td><code>{stats['deleted']}</code></td></tr>",
+        f"<tr><td>⚠️ <b>Errors</b></td><td><code>{stats['skipped']}</code></td></tr>",
+    ]
     return (
-        f"╭─────────❪ <b>INDEXING</b> ❫──〇\n"
-        f"│ 📂 <b>Chat:</b> {html.escape(job['title'])}\n"
-        f"│ 🔢 <b>Range:</b> <mark>{job['start_id']} → {job['end_id']}</mark>\n"
-        f"│ ⚙️ <b>Phase:</b> <mark>{html.escape(phase)}</mark>\n"
-        f"│ 📊 <b>Progress:</b> <code>[{bar}] {pct}%</code>\n"
-        f"│\n"
-        f"│ 📥 Fetched: <code>{stats['fetched']}/{total}</code>\n"
-        f"│ ✅ Indexed / Healed: <code>{stats['ok']}</code>\n"
-        f"│ ♻️ Verified Duplicates: <code>{stats['dup']}</code>\n"
-        f"│ 🚫 Filtered: <code>{stats['filtered']}</code>\n"
-        f"│ 🗑 Deleted: <code>{stats['deleted']}</code>\n"
-        f"│ ⚠️ Errors: <code>{stats['skipped']}</code>\n"
-        f"│╰─────────────────────────➤\n"
-        f"╰─────────❪ <b>PROGRESSING</b> ❫──〇⚙️"
+        "⚙️ <b>Ongoing Indexing Process</b>\n\n"
+        "<table striped><tr><th>Metric</th><th>Value</th></tr>"
+        + "".join(rows)
+        + "</table>"
     )
+
+
+def _running_markup(rid: str, paused: bool = False) -> InlineKeyboardMarkup:
+    toggle_btn = (
+        styled_button("▶️ Resume", callback_data=f"idx_resume_{rid}", style="success")
+        if paused
+        else styled_button("⏸ Pause", callback_data=f"idx_pause_{rid}", style="success")
+    )
+    return InlineKeyboardMarkup([
+        [
+            toggle_btn,
+            styled_button("⛔ Cancel Indexing", callback_data=f"idx_cancel_{rid}", style="danger"),
+        ]
+    ])
 
 
 def _cancel_markup(rid):
-    return InlineKeyboardMarkup(
-        [[styled_button("⛔ Cancel Indexing", callback_data=f"idx_cancel_{rid}", style="danger")]]
-    )
+    return _running_markup(rid, paused=False)
 
 
 async def _forward(bot, to_chat, from_chat, message_id):
@@ -309,12 +364,17 @@ async def _run_index(context, rid, job):
     batch = max_index_batch()
     sleep_s = index_sleep_seconds()
 
-    stats = {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}
+    default_stats = {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}
+    stats = dict(job.get("stats") or default_stats)
+    for k, v in default_stats.items():
+        stats.setdefault(k, v)
+    job["stats"] = stats
     final_state = "completed ✅"
 
     if not storage:
         await _edit_prompt(context, job, "❌ PUBLIC_/TESTING_STORAGE_GROUP_ID is not set. Cannot index.")
         job["state"] = "done"
+        _forget_job(rid)
         return
 
     log_group_id = logger_group_id()
@@ -345,14 +405,38 @@ async def _run_index(context, rid, job):
     elif job.get("priority_mode") == "helpers":
         helper_pool = await _build_helper_pool_bots()
 
-    await _log_lifecycle(context, job, "started", default_bot_label, source_info=source_info)
+    start_mid = max(int(job["start_id"]), int(job.get("current_mid") or job["start_id"]))
+    is_resumed_after_restart = start_mid > int(job["start_id"]) and stats["fetched"] > 0
+
+    await _log_lifecycle(
+        context,
+        job,
+        "resumed" if is_resumed_after_restart else "started",
+        default_bot_label,
+        stats=stats if is_resumed_after_restart else None,
+        source_info=source_info,
+    )
+
+    # Immediately show the ongoing progress table & controls before iterating
+    initial_phase = "paused ⏸" if job.get("paused") else "running"
+    await _edit_prompt(
+        context,
+        job,
+        _status_text(job, stats, initial_phase),
+        _running_markup(rid, bool(job.get("paused"))),
+    )
+    last_ui_update = time.monotonic()
 
     try:
-        for mid in range(job["start_id"], job["end_id"] + 1):
-            if job["cancel"]:
+        for mid in range(start_mid, job["end_id"] + 1):
+            while job.get("paused") and not job.get("cancel"):
+                await asyncio.sleep(0.5)
+
+            if job.get("cancel"):
                 final_state = "cancelled ⛔"
                 break
 
+            job["current_mid"] = mid
             stats["fetched"] += 1
             active_bot = bot
             active_bot_label = default_bot_label
@@ -402,20 +486,25 @@ async def _run_index(context, rid, job):
                                     tg_button_html(
                                         f"📦 Open Storage Message #{res['storage_message_id']}",
                                         url=storage_link,
-                                        style="primary",
+                                        style="success",
                                     )
                                 ])
+                                err_table = (
+                                    "<table striped>"
+                                    "<tr><th>Field</th><th>Details</th></tr>"
+                                    f"<tr><td>📁 <b>File</b></td><td><code>{html.escape(info['file_name'])}</code></td></tr>"
+                                    f"<tr><td>🔑 <b>Unique ID</b></td><td><code>{html.escape(info['file_unique_id'])}</code></td></tr>"
+                                    f"<tr><td>🤖 <b>Indexed By</b></td><td><code>{html.escape(active_bot_label)}</code></td></tr>"
+                                    f"<tr><td>🌐 <b>Source</b></td><td>{source_info}</td></tr>"
+                                    f"<tr><td>1. 🗄 <b>Database</b></td><td>{res['db_badge']}</td></tr>"
+                                    f"<tr><td>2. 📦 <b>Storage</b></td><td>{res['storage_badge']}</td></tr>"
+                                    f"<tr><td>3. 📝 <b>Caption</b></td><td>{res['caption_badge']}</td></tr>"
+                                    "</table>"
+                                )
                                 err_text = (
                                     f"⚠️ <b>Caption Enrichment Failed (&lt;2 Parameters Matched)</b>\n\n"
-                                    f"📁 <b>File:</b> <code>{html.escape(info['file_name'])}</code>\n"
-                                    f"🔑 <b>Unique ID:</b> <mark>{info['file_unique_id']}</mark>\n"
-                                    f"🤖 <b>Indexed By:</b> <code>{html.escape(active_bot_label)}</code>\n"
-                                    f"🌐 <b>Source:</b> {source_info}\n\n"
-                                    f"<b>3-Stage Check:</b>\n"
-                                    f"1. 🗄 <b>Database:</b> {res['db_badge']}\n"
-                                    f"2. 📦 <b>Storage:</b> {res['storage_badge']}\n"
-                                    f"3. 📝 <b>Caption:</b> {res['caption_badge']}\n\n"
-                                    f"<i>Admins please edit the storage message caption manually. The bot will automatically capture your edit and update the database.</i>\n\n"
+                                    f"{err_table}\n\n"
+                                    f"<i>Admins please edit the storage message caption via ✏️ Edit Caption.</i>\n\n"
                                     f"{storage_btn_row}"
                                 )
                                 await active_bot.send_message(
@@ -449,13 +538,26 @@ async def _run_index(context, rid, job):
                 logger.warning(f"[INDEX] message {mid} failed: {e}")
                 stats["skipped"] += 1
 
+            job["current_mid"] = mid + 1
+            job["stats"] = stats
+            _persist_job(job)
+
+            now_mono = time.monotonic()
             if stats["fetched"] % batch == 0 and mid < job["end_id"]:
                 await _edit_prompt(
                     context, job,
                     _status_text(job, stats, f"sleeping ({sleep_s}s)"),
-                    _cancel_markup(rid),
+                    _running_markup(rid, bool(job.get("paused"))),
                 )
+                last_ui_update = time.monotonic()
                 await asyncio.sleep(sleep_s)
+            elif (stats["fetched"] == 1 or stats["fetched"] % 5 == 0 or (now_mono - last_ui_update) >= 4.0) and mid < job["end_id"]:
+                await _edit_prompt(
+                    context, job,
+                    _status_text(job, stats, "paused ⏸" if job.get("paused") else f"running (#{mid})"),
+                    _running_markup(rid, bool(job.get("paused"))),
+                )
+                last_ui_update = time.monotonic()
     except Exception as e:
         logger.exception("[INDEX] job crashed")
         final_state = f"stopped: {e}"
@@ -502,10 +604,12 @@ async def _log_lifecycle(context, job, kind: str, bot_label: str = "Bot", stats:
     ]
     if stats is not None:
         total = max(1, job["end_id"] - job["start_id"] + 1)
+        skipped_total = int(job.get("skipped_range", 0) or 0) + int(stats.get("skipped", 0) or 0)
         rows += [
             f"<tr><td>📥 <b>Fetched</b></td><td><code>{stats['fetched']}/{total}</code></td></tr>",
             f"<tr><td>✅ <b>Indexed / Healed</b></td><td><code>{stats['ok']}</code></td></tr>",
             f"<tr><td>♻️ <b>Verified Duplicates</b></td><td><code>{stats['dup']}</code></td></tr>",
+            f"<tr><td>⏭ <b>Skipped</b></td><td><code>{skipped_total}</code></td></tr>",
             f"<tr><td>🚫 <b>Filtered</b></td><td><code>{stats['filtered']}</code></td></tr>",
             f"<tr><td>🗑 <b>Deleted</b></td><td><code>{stats['deleted']}</code></td></tr>",
             f"<tr><td>⚠️ <b>Errors</b></td><td><code>{stats['skipped']}</code></td></tr>",
@@ -533,10 +637,14 @@ async def _log_summary(context, job, stats, final_state, bot_label: str = "Bot",
 
 async def _send_approval(context, rid, job):
     text = (
-        "🔔 <b>Index approval request</b>\n\n"
-        f"👤 By: {html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>) — {html.escape(job['requester_role'])}\n"
-        f"📂 Chat: <b>{html.escape(job['title'])}</b>\n"
-        f"🔢 Messages: <mark>{job['start_id']} → {job['end_id']}</mark>"
+        "🔔 <b>Index Approval Request</b>\n\n"
+        "<table striped>"
+        "<tr><th>Field</th><th>Details</th></tr>"
+        f"<tr><td>👤 <b>Requested By</b></td><td>{html.escape(job['requester_name'])} (<code>{job['requester_id']}</code>)</td></tr>"
+        f"<tr><td>🛡 <b>Role</b></td><td><code>{html.escape(job['requester_role'])}</code></td></tr>"
+        f"<tr><td>📂 <b>Chat</b></td><td><b>{html.escape(job['title'])}</b></td></tr>"
+        f"<tr><td>🔢 <b>Messages</b></td><td><code>{job['start_id']} → {job['end_id']}</code></td></tr>"
+        "</table>"
     )
     markup = InlineKeyboardMarkup([[
         styled_button("✅ Approve", callback_data=f"idx_apr_{rid}", style="success"),
@@ -569,20 +677,25 @@ async def _send_approval(context, rid, job):
 
 
 async def _show_skip_menu(context, rid: str, job: dict):
+    total_msgs = max(1, job["end_id"] - job["start_id"] + 1)
     markup = InlineKeyboardMarkup([
         [styled_button("⏩ No Skip (Index All)", callback_data=f"idx_sk_none_{rid}", style="success")],
         [
-            styled_button("⏭ Skip Top 10", callback_data=f"idx_sk_top_{rid}", style="primary"),
-            styled_button("⏮ Skip Bottom 10", callback_data=f"idx_sk_bot_{rid}", style="primary"),
+            styled_button("⏭ Skip Top 10", callback_data=f"idx_sk_top_{rid}", style="success"),
+            styled_button("⏮ Skip Bottom 10", callback_data=f"idx_sk_bot_{rid}", style="danger"),
         ],
-        [styled_button("✂️ Custom Range", callback_data=f"idx_sk_custom_{rid}", style="primary")],
+        [styled_button("✂️ Custom Range", callback_data=f"idx_sk_custom_{rid}", style="success")],
         [styled_button("⛔ Cancel", callback_data=f"idx_cancel_{rid}", style="danger")],
     ])
     await _edit_prompt(
         context, job,
         f"🔢 <b>Message Skip &amp; Range Selection</b>\n\n"
-        f"📂 <b>Chat:</b> <b>{html.escape(job['title'])}</b>\n"
-        f"🔢 <b>Range:</b> <mark>{job['start_id']} → {job['end_id']}</mark>\n\n"
+        f"<table striped>"
+        f"<tr><th>Field</th><th>Value</th></tr>"
+        f"<tr><td>📂 <b>Chat</b></td><td>{html.escape(job['title'])[:38]}</td></tr>"
+        f"<tr><td>🔢 <b>Range</b></td><td><code>{job['start_id']} → {job['end_id']}</code></td></tr>"
+        f"<tr><td>📊 <b>Total Messages</b></td><td><code>{total_msgs}</code></td></tr>"
+        f"</table>\n\n"
         f"Select an option below to filter messages before starting:",
         markup,
     )
@@ -619,12 +732,22 @@ async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, s
     cid = source_chat.id
 
     rid = uuid.uuid4().hex[:8]
+    s_id = max(1, start_id)
+    e_id = max(1, end_id)
+    skipped_cnt = 0
+    if skip is not None and skip > 0:
+        new_start = min(e_id, s_id + skip)
+        skipped_cnt = max(0, new_start - s_id)
+        s_id = new_start
+
     job = {
         "rid": rid,
         "chat_id": cid,
         "title": title,
-        "start_id": max(1, start_id),
-        "end_id": max(1, end_id),
+        "start_id": s_id,
+        "end_id": e_id,
+        "current_mid": s_id,
+        "skipped_range": skipped_cnt,
         "requester_id": user.id if user else 0,
         "requester_name": user.full_name if user else (f"{title} (Channel Admin)" if is_channel else "Anon Admin"),
         "requester_role": get_user_role_db(user.id) if user else "Admin",
@@ -635,30 +758,36 @@ async def _open_prompt(context, prompt_chat, user, chat_ref, start_id, end_id, s
         "is_channel": is_channel,
         "helper_token": probe_token,
         "cancel": False,
+        "paused": False,
         "state": "pending",
     }
     _jobs(context)[rid] = job
     _persist_job(job)
 
     if skip is not None:
-        if skip > 0:
-            job["start_id"] = min(job["end_id"], job["start_id"] + skip)
         await _show_priority_menu(context, rid, job)
     else:
         await _show_skip_menu(context, rid, job)
 
 
 async def _show_priority_menu(context, rid: str, job: dict):
+    total_msgs = max(1, job["end_id"] - job["start_id"] + 1)
+    skipped_cnt = int(job.get("skipped_range", 0) or 0)
     markup = InlineKeyboardMarkup([
         [styled_button("🚀 Priority Mode (Direct)", callback_data=f"idx_pr_dir_{rid}", style="success")],
-        [styled_button("🤝 Helper Pool (Round-Robin)", callback_data=f"idx_pr_hlp_{rid}", style="primary")],
+        [styled_button("🤝 Helper Pool (Round-Robin)", callback_data=f"idx_pr_hlp_{rid}", style="success")],
         [styled_button("⛔ Cancel", callback_data=f"idx_cancel_{rid}", style="danger")],
     ])
     await _edit_prompt(
         context, job,
         f"⚡ <b>Delivery &amp; Indexing Priority Setup</b>\n\n"
-        f"📂 <b>Chat:</b> <b>{html.escape(job['title'])}</b>\n"
-        f"🔢 <b>Range:</b> <mark>{job['start_id']} → {job['end_id']}</mark>\n\n"
+        f"<table striped>"
+        f"<tr><th>Field</th><th>Value</th></tr>"
+        f"<tr><td>📂 <b>Chat</b></td><td>{html.escape(job['title'])[:38]}</td></tr>"
+        f"<tr><td>🔢 <b>Range</b></td><td><code>{job['start_id']} → {job['end_id']}</code></td></tr>"
+        f"<tr><td>📊 <b>Messages Queued</b></td><td><code>{total_msgs}</code></td></tr>"
+        f"<tr><td>⏭ <b>Range Skipped</b></td><td><code>{skipped_cnt}</code></td></tr>"
+        f"</table>\n\n"
         f"Select indexing mode:",
         markup,
     )
@@ -670,7 +799,7 @@ async def _edit_prompt(context, job, text, markup=None):
     if mid is None:
         m = await context.bot.send_message(chat_id=cid, text=text, parse_mode="HTML", reply_markup=markup)
         job["prompt_msg_id"] = m.message_id
-        if job.get("state") == "pending":
+        if job.get("state") in ("pending", "running", "paused"):
             _persist_job(job)
     else:
         try:
@@ -679,7 +808,7 @@ async def _edit_prompt(context, job, text, markup=None):
             )
         except TelegramError:
             pass
-        if job.get("state") == "pending":
+        if job.get("state") in ("pending", "running", "paused"):
             _persist_job(job)
 
 
@@ -735,8 +864,12 @@ async def index_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["idx_flow"] = {"step": "link", "skip": skip}
         await msg.reply_text(
             "📚 <b>Index Setup Wizard</b>\n\n"
-            "Send the <b>last message link</b> of the source chat, or forward its last message.\n"
-            "To index a range, send <b>two links</b>: first message, then last message.\n\n"
+            "<table striped>"
+            "<tr><th>Option</th><th>How to Use</th></tr>"
+            "<tr><td>🔗 Single Link</td><td>Send last message link (indexes from #1)</td></tr>"
+            "<tr><td>🔢 Custom Range</td><td>Send first link and last link together</td></tr>"
+            "<tr><td>📨 Forward</td><td>Forward the last message from the source chat</td></tr>"
+            "</table>\n\n"
             "• Example: <mark>https://t.me/c/1234567890/150</mark>\n"
             "• Send <code>/index</code> again to restart.",
             parse_mode="HTML",
@@ -796,8 +929,40 @@ async def index_flow_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def _begin(context, rid, job):
     job["state"] = "running"
-    _forget_job(rid)  # running jobs are not restored after a restart
+    job.setdefault("paused", False)
+    job.setdefault("current_mid", job["start_id"])
+    _persist_job(job)
     context.application.create_task(_run_index(context, rid, job))
+
+
+async def resume_active_index_jobs(application) -> int:
+    """Resumes any running or paused /index jobs persisted in SQLite after a bot restart."""
+    resumed = 0
+    try:
+        _init_index_persistence()
+        conn = sqlite3.connect(users_db_path())
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM active_index_jobs WHERE state IN ('running', 'paused')"
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        logger.debug("Could not query active_index_jobs on startup: %s", exc)
+        return 0
+
+    from types import SimpleNamespace
+    for row in rows:
+        job = _row_to_job(row)
+        if not job:
+            continue
+        rid = job["rid"]
+        if rid in _GLOBAL_INDEX_JOBS:
+            continue
+        _GLOBAL_INDEX_JOBS[rid] = job
+        ctx = SimpleNamespace(bot=application.bot, application=application, bot_data=application.bot_data)
+        application.create_task(_run_index(ctx, rid, job))
+        resumed += 1
+    return resumed
 
 
 async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -826,6 +991,7 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "cancel":
         job["cancel"] = True
+        job["paused"] = False
         _forget_job(rid)
         await q.answer("Indexing cancelled.")
         await _edit_prompt(context, job, f"⛔ Indexing of <b>{html.escape(job['title'])}</b> was cancelled.")
@@ -833,15 +999,50 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             asyncio.create_task(_auto_delete_prompt(context.bot, job, 10))
         return
 
+    if action == "pause":
+        if not full:
+            await q.answer("Only Administrators can pause indexing.", show_alert=True)
+            return
+        job["paused"] = True
+        job["state"] = "paused"
+        _persist_job(job)
+        stats = job.get("stats") or {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}
+        await q.answer("⏸ Indexing paused.")
+        await _edit_prompt(context, job, _status_text(job, stats, "paused ⏸"), _running_markup(rid, True))
+        bot_lbl = f"@{context.bot.username}" if getattr(context.bot, "username", None) else "Bot"
+        await _log_lifecycle(context, job, "paused", bot_lbl, stats=stats)
+        return
+
+    if action == "resume":
+        if not full:
+            await q.answer("Only Administrators can resume indexing.", show_alert=True)
+            return
+        job["paused"] = False
+        job["state"] = "running"
+        _persist_job(job)
+        stats = job.get("stats") or {"fetched": 0, "ok": 0, "dup": 0, "deleted": 0, "skipped": 0, "filtered": 0}
+        await q.answer("▶️ Indexing resumed.")
+        await _edit_prompt(context, job, _status_text(job, stats, "running"), _running_markup(rid, False))
+        bot_lbl = f"@{context.bot.username}" if getattr(context.bot, "username", None) else "Bot"
+        await _log_lifecycle(context, job, "resumed", bot_lbl, stats=stats)
+        return
+
     if action.startswith("sk_"):
         mode = action[3:]
         if mode == "none":
             await _show_priority_menu(context, rid, job)
         elif mode == "top":
+            old_start = job["start_id"]
             job["start_id"] = min(job["end_id"], job["start_id"] + 10)
+            job["current_mid"] = job["start_id"]
+            job["skipped_range"] = int(job.get("skipped_range", 0) or 0) + max(0, job["start_id"] - old_start)
+            _persist_job(job)
             await _show_priority_menu(context, rid, job)
         elif mode == "bot":
+            old_end = job["end_id"]
             job["end_id"] = max(job["start_id"], job["end_id"] - 10)
+            job["skipped_range"] = int(job.get("skipped_range", 0) or 0) + max(0, old_end - job["end_id"])
+            _persist_job(job)
             await _show_priority_menu(context, rid, job)
         elif mode == "custom":
             await _edit_prompt(context, job, "Send <code>/index &lt;first_link&gt; &lt;last_link&gt;</code> for custom ranges.")
@@ -853,7 +1054,6 @@ async def index_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _persist_job(job)
         if full:
             await q.answer("Starting index...")
-            await _edit_prompt(context, job, f"🚀 Starting index in <mark>{mode}</mark> mode...")
             _begin(context, rid, job)
         elif partial:
             sent = await _send_approval(context, rid, job)

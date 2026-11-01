@@ -96,7 +96,7 @@ from modules.indexing.book_index import (
     handle_storage_caption_edit,
     storage_caption_reply_handler,
 )  # noqa: E402
-from modules.indexing.index_command import index_command, index_callback, index_flow_handler  # noqa: E402
+from modules.indexing.index_command import index_command, index_callback, index_flow_handler, resume_active_index_jobs  # noqa: E402
 from modules.broadcast.handlers import broadcast_command, cancelbroadcast_command, broadcast_callback_handler  # noqa: E402
 from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
 from modules.message.message_handler import handle_normal_text  # noqa: E402
@@ -203,9 +203,12 @@ async def handle_main_bot_file_rejection(update: Update, context: ContextTypes.D
             user_desc = f"{html.escape(user.full_name)} (<code>{user.id}</code>)" if user else "Unknown"
             info_text = (
                 f"🚨 <b>File Received on Main Bot (Auto-Rejected)</b>\n\n"
-                f"• Sender: {user_desc}\n"
-                f"• Chat ID: <code>{msg.chat_id}</code>\n\n"
-                f"<i>Main bot does not accept or index files. Message forwarded to error log and deleted from chat.</i>"
+                f"<table striped>"
+                f"<tr><th>Field</th><th>Details</th></tr>"
+                f"<tr><td>👤 <b>Sender</b></td><td>{user_desc}</td></tr>"
+                f"<tr><td>🏷️ <b>Chat ID</b></td><td><code>{msg.chat_id}</code></td></tr>"
+                f"<tr><td>⚙️ <b>Action</b></td><td>Forwarded to Error Log &amp; Deleted</td></tr>"
+                f"</table>"
             )
             await context.bot.send_message(
                 chat_id=int(log_gid),
@@ -340,6 +343,7 @@ def main():
         await send_startup_notification(app)
         app.bot_data["backup_task"] = asyncio.create_task(persistence.backup_loop())
         app.bot_data["helper_apps"] = await _start_helper_apps()
+        await resume_active_index_jobs(app)
 
     async def post_stop(app):
         await _stop_helper_apps(app.bot_data.get("helper_apps") or [])

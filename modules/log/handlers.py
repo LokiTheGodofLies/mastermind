@@ -1,3 +1,4 @@
+import html
 from modules.database.user_db import register_chat_db
 import os
 import tempfile
@@ -19,6 +20,7 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     log_content = ""
     filename = "mastermind_logs.txt"
+    scope_desc = "Last 10 lines"
     if not args:
         log_content = get_logs_by_count(10)
         filename = "logs_last_10.txt"
@@ -29,6 +31,7 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mins = int(param[:-1])
                 log_content = get_logs_by_time(mins)
                 filename = f"logs_last_{mins}_min.txt"
+                scope_desc = f"Last {mins} minutes"
             except ValueError:
                 await update.message.reply_text("⚠️ Invalid time format. Use e.g., `/log 10m`", parse_mode="Markdown")
                 return
@@ -40,6 +43,7 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     count = cap
                 log_content = get_logs_by_count(count)
                 filename = f"logs_last_{count}.txt"
+                scope_desc = f"Last {count} lines"
             except ValueError:
                 await update.message.reply_text("⚠️ Invalid argument. Use a number (e.g., `/log 50`) or duration (e.g., `/log 10m`).", parse_mode="Markdown")
                 return
@@ -50,7 +54,12 @@ async def log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_document(
             document=tf,
             filename=filename,
-            caption=f"📋 <b>Memory Logs Generated Successfully</b>\nRequested by: <code>{role}</code>",
+            caption=(
+                f"📋 <b>Memory Logs Generated Successfully</b>\n"
+                f"• File: <code>{html.escape(filename)}</code>\n"
+                f"• Scope: <code>{html.escape(scope_desc)}</code>\n"
+                f"• Requested by: <code>{html.escape(str(role))}</code>"
+            ),
             parse_mode="HTML",
         )
     if os.path.exists(temp_file_path):
@@ -68,7 +77,7 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
     if not log_group_id:
         return
     chat_type = chat.type
-    chat_title = chat.title
+    chat_title = chat.title or "Untitled Chat"
     chat_username = f"@{chat.username}" if chat.username else "No Username"
     chat_id = chat.id
     actor_user = result.from_user
@@ -85,19 +94,18 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
     if not (was_added or was_removed or was_promoted or was_demoted or permission_changed):
         return
     if was_added:
-        log_label = "👥 **Bot Added to Group/Supergroup**" if chat_type != "channel" else "📢 **Bot Added to Channel**"
+        log_label = "👥 <b>Bot Added to Group/Supergroup</b>" if chat_type != "channel" else "📢 <b>Bot Added to Channel</b>"
     elif was_removed:
-        log_label = "❌ **Bot Removed / Left Chat**"
+        log_label = "❌ <b>Bot Removed / Left Chat</b>"
     elif was_promoted:
-        log_label = "👑 **Bot Promoted to Administrator**"
+        log_label = "👑 <b>Bot Promoted to Administrator</b>"
     elif was_demoted:
-        log_label = "🔽 **Bot Demoted from Administrator**"
+        log_label = "🔽 <b>Bot Demoted from Administrator</b>"
     elif permission_changed:
-        log_label = "⚙️ **Bot Admin Permissions Changed**"
+        log_label = "⚙️ <b>Bot Admin Permissions Changed</b>"
     else:
         return
     role_description = "👑 Administrator" if new_status == "administrator" else "Regular Member"
-    permissions_list = []
     # Register chat in database for broadcasts
     register_chat_db(chat_id, chat_type, chat_title, chat.username)
 
@@ -113,29 +121,37 @@ async def handle_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TY
         "can_promote_members": "👑 Add Admins",
     }
     new_member = result.new_chat_member
-    perms_lines = []
-    if new_status == "administrator":
-        for attr, label in perm_mapping.items():
-            val = "✅" if getattr(new_member, attr, False) else "❌"
-            perms_lines.append(f"• {label}: {val}")
 
-    perms_str = "\n".join(perms_lines) if perms_lines else "None / Default"
-    log_message = (
-        f"{log_label}\n\n"
-        f"🏷 **Title:** {chat_title}\n"
-        f"🆔 **Chat ID:** `{chat_id}`\n"
-        f"🔗 **Username:** {chat_username}\n"
-        f"🌐 **Type:** {chat_type.capitalize()}\n"
-        f"🛡 **Bot Role:** {role_description}\n"
-        f"👤 **Triggered By:** {actor_name} (`{actor_id}`)\n"
+    info_table = (
+        "<table striped>"
+        "<tr><th>Field</th><th>Details</th></tr>"
+        f"<tr><td>🏷 <b>Title</b></td><td>{html.escape(chat_title)}</td></tr>"
+        f"<tr><td>🆔 <b>Chat ID</b></td><td><code>{chat_id}</code></td></tr>"
+        f"<tr><td>🔗 <b>Username</b></td><td>{html.escape(chat_username)}</td></tr>"
+        f"<tr><td>🌐 <b>Type</b></td><td>{html.escape(chat_type.capitalize())}</td></tr>"
+        f"<tr><td>🛡 <b>Bot Role</b></td><td>{html.escape(role_description)}</td></tr>"
+        f"<tr><td>👤 <b>Triggered By</b></td><td>{html.escape(actor_name)} (<code>{actor_id}</code>)</td></tr>"
+        "</table>"
     )
+    parts = [log_label, "", info_table]
+
     if new_status == "administrator":
-        log_message += f"\n📋 **Permissions:**\n{perms_str}\n"
+        perm_rows = []
+        for attr, label in perm_mapping.items():
+            val = "✅ Allowed" if getattr(new_member, attr, False) else "❌ Off"
+            perm_rows.append(f"<tr><td>{label}</td><td>{val}</td></tr>")
+        parts.extend([
+            "",
+            "📋 <b>Administrator Permissions</b>",
+            "<table striped><tr><th>Permission</th><th>Status</th></tr>" + "".join(perm_rows) + "</table>",
+        ])
+
+    log_message = "\n".join(parts)
     try:
         kwargs = {
             "chat_id": int(log_group_id),
             "text": log_message,
-            "parse_mode": "Markdown",
+            "parse_mode": "HTML",
             "message_thread_id": int(topic_id),
         }
         await context.bot.send_message(**kwargs)

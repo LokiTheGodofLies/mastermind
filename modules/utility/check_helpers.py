@@ -49,27 +49,27 @@ async def _audit_single_bot_permissions(
     log_gid: int | None,
 ) -> tuple[bool, list[str]]:
     """Audits a single bot (Main Bot or Helper Bot) across Storage Group, Posting Channel,
-    Index Logs Channel, and Logger Group."""
+    Index Logs Channel, and Logger Group, formatted as a <table striped>."""
     bot_ok = True
-    lines: list[str] = []
+    rows: list[str] = []
     me = await bot_inst.get_me()
     username = me.username or label_prefix
-    lines.append(f"<b>{label_prefix} — @{html.escape(username)} (ID: <code>{me.id}</code>)</b>")
+    header = f"<b>{label_prefix} — @{html.escape(username)} (ID: <code>{me.id}</code>)</b>"
 
     # 1. Storage Group
     if storage_id:
         try:
             sm = await bot_inst.get_chat_member(int(storage_id), me.id)
             if sm.status in ("member", "administrator", "creator"):
-                lines.append("• 📦 Storage Group: <mark>✅ Present</mark>")
+                rows.append("<tr><td>📦 <b>Storage Group</b></td><td>✅ Present</td></tr>")
             else:
                 bot_ok = False
-                lines.append(f"• 📦 Storage Group: ❌ Not a member (status: <code>{sm.status}</code>)")
+                rows.append(f"<tr><td>📦 <b>Storage Group</b></td><td>❌ {html.escape(str(sm.status))}</td></tr>")
         except Exception as exc:
             bot_ok = False
-            lines.append(f"• 📦 Storage Group: ❌ Error (<code>{html.escape(str(exc))}</code>)")
+            rows.append(f"<tr><td>📦 <b>Storage Group</b></td><td>❌ {html.escape(str(exc)[:30])}</td></tr>")
     else:
-        lines.append("• 📦 Storage Group: ⚠️ Not configured")
+        rows.append("<tr><td>📦 <b>Storage Group</b></td><td>⚠️ Not configured</td></tr>")
 
     # 2. Posting Channel
     if chan_id:
@@ -78,59 +78,57 @@ async def _audit_single_bot_permissions(
             if pm.status in ("administrator", "creator"):
                 can_post = getattr(pm, "can_post_messages", True)
                 can_delete = getattr(pm, "can_delete_messages", True)
-                perms_detail = [
-                    "Post: ✅" if can_post else "Post: ❌",
-                    "Delete: ✅" if can_delete else "Delete: ❌",
-                ]
+                perms_detail = f"Post:{'✅' if can_post else '❌'} Del:{'✅' if can_delete else '❌'}"
                 if not (can_post and can_delete):
                     bot_ok = False
-                lines.append(f"• 📢 Posting Channel: <mark>✅ Admin</mark> ({', '.join(perms_detail)})")
+                rows.append(f"<tr><td>📢 <b>Posting Channel</b></td><td>✅ Admin ({perms_detail})</td></tr>")
             else:
                 bot_ok = False
-                lines.append(f"• 📢 Posting Channel: ❌ Not admin (status: <code>{pm.status}</code>) — must be Admin with Post &amp; Delete rights")
+                rows.append(f"<tr><td>📢 <b>Posting Channel</b></td><td>❌ Not Admin ({html.escape(str(pm.status))})</td></tr>")
         except Exception as exc:
             bot_ok = False
-            lines.append(f"• 📢 Posting Channel: ❌ Not accessible (<code>{html.escape(str(exc))}</code>)")
+            rows.append(f"<tr><td>📢 <b>Posting Channel</b></td><td>❌ {html.escape(str(exc)[:30])}</td></tr>")
     else:
-        lines.append("• 📢 Posting Channel: ⚠️ Not configured")
+        rows.append("<tr><td>📢 <b>Posting Channel</b></td><td>⚠️ Not configured</td></tr>")
 
-    # 3. Index Logs Channel (must be present & Admin with Post Messages rights)
+    # 3. Index Logs Channel
     if idx_chan_id:
         try:
             im = await bot_inst.get_chat_member(int(idx_chan_id), me.id)
             if im.status in ("administrator", "creator"):
                 can_post = getattr(im, "can_post_messages", True)
                 if can_post:
-                    lines.append("• 📥 Index Logs Channel: <mark>✅ Admin (Post: ✅)</mark>")
+                    rows.append("<tr><td>📥 <b>Index Channel</b></td><td>✅ Admin (Post:✅)</td></tr>")
                 else:
                     bot_ok = False
-                    lines.append("• 📥 Index Logs Channel: ❌ Admin but missing Post Messages permission")
+                    rows.append("<tr><td>📥 <b>Index Channel</b></td><td>❌ Missing Post right</td></tr>")
             elif im.status == "member":
                 bot_ok = False
-                lines.append("• 📥 Index Logs Channel: ⚠️ Member only — promote to Admin with Post Messages rights")
+                rows.append("<tr><td>📥 <b>Index Channel</b></td><td>⚠️ Member (Needs Admin)</td></tr>")
             else:
                 bot_ok = False
-                lines.append(f"• 📥 Index Logs Channel: ❌ Not present (status: <code>{im.status}</code>) — add as Admin")
+                rows.append(f"<tr><td>📥 <b>Index Channel</b></td><td>❌ {html.escape(str(im.status))}</td></tr>")
         except Exception as exc:
             bot_ok = False
-            lines.append(f"• 📥 Index Logs Channel: ❌ Not accessible (<code>{html.escape(str(exc))}</code>) — add bot as Admin")
+            rows.append(f"<tr><td>📥 <b>Index Channel</b></td><td>❌ {html.escape(str(exc)[:30])}</td></tr>")
     else:
-        lines.append("• 📥 Index Logs Channel: ⚠️ PUBLIC_/TESTING_INDEX_CHANNEL_ID not configured")
+        rows.append("<tr><td>📥 <b>Index Channel</b></td><td>⚠️ Not configured</td></tr>")
 
-    # 4. Logger Supergroup (for Index Topic 590/12 & Error Topic 595/17)
+    # 4. Logger Supergroup
     if log_gid:
         try:
             lm = await bot_inst.get_chat_member(int(log_gid), me.id)
             if lm.status in ("member", "administrator", "creator"):
-                lines.append("• 🪵 Logger Group: <mark>✅ Present</mark>")
+                rows.append("<tr><td>🪵 <b>Logger Group</b></td><td>✅ Present</td></tr>")
             else:
                 bot_ok = False
-                lines.append(f"• 🪵 Logger Group: ❌ Not a member (status: <code>{lm.status}</code>)")
+                rows.append(f"<tr><td>🪵 <b>Logger Group</b></td><td>❌ {html.escape(str(lm.status))}</td></tr>")
         except Exception as exc:
             bot_ok = False
-            lines.append(f"• 🪵 Logger Group: ❌ Not accessible (<code>{html.escape(str(exc))}</code>)")
+            rows.append(f"<tr><td>🪵 <b>Logger Group</b></td><td>❌ {html.escape(str(exc)[:30])}</td></tr>")
 
-    return bot_ok, lines
+    table_html = "<table striped><tr><th>Target Chat</th><th>Status</th></tr>" + "".join(rows) + "</table>"
+    return bot_ok, [header, table_html]
 
 
 # ---------------------------------------------------------------------------

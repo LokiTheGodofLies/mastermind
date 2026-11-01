@@ -118,10 +118,15 @@ async def _process_ban(update: Update, context: ContextTypes.DEFAULT_TYPE, ban_t
         "support": "Banned everywhere except support chat",
     }
 
+    import html as _html
     await update.message.reply_text(
-        f"✅ Ban applied to <b>{target_display}</b> (<code>{target_id}</code>).\n"
-        f"🔒 <b>Type:</b> {type_descriptions.get(ban_type, ban_type.upper())}\n"
-        f"📝 <b>Reason:</b> {reason}",
+        f"🚫 <b>Restriction Applied</b>\n\n"
+        f"<table striped>"
+        f"<tr><th>Field</th><th>Details</th></tr>"
+        f"<tr><td>👤 <b>Target</b></td><td><b>{_html.escape(str(target_display))}</b> (<code>{target_id}</code>)</td></tr>"
+        f"<tr><td>🔒 <b>Scope</b></td><td>{_html.escape(type_descriptions.get(ban_type, ban_type.upper()))}</td></tr>"
+        f"<tr><td>📝 <b>Reason</b></td><td>{_html.escape(str(reason))}</td></tr>"
+        f"</table>",
         parse_mode="HTML"
     )
 

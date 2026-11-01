@@ -23,7 +23,7 @@ def _get_ram_usage() -> str:
         total_mb = mem.get("MemTotal", 0) / 1024
         avail_mb = mem.get("MemAvailable", 0) / 1024
         used_mb = total_mb - avail_mb
-        return f"{used_mb:.1f} MB / {total_mb:.1f} MB ({used_mb * 100 / total_mb:.1f}%)"
+        return f"{used_mb:.1f} / {total_mb:.1f} MB ({used_mb * 100 / total_mb:.1f}%)"
     except Exception:
         return "N/A"
 
@@ -53,35 +53,58 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     f_stats = get_file_stats_counts_db()
     u_stats = get_db_stats_counts()
 
-    lines = [
-        f"{header_text}\n",
-        "📚 <b>Library Catalog:</b>",
-        f"• Total Files: <mark>{f_stats['total']}</mark>",
-        f"• Ebooks: <code>{f_stats['ebooks']}</code>",
-        f"• Audiobooks: <code>{f_stats['audiobooks']}</code>\n",
-        "👥 <b>Community Reach:</b>",
-        f"• Unique Users: <mark>{u_stats['users']}</mark>",
-        f"• Connected Groups: <code>{u_stats['groups']}</code>",
-        f"• Connected Channels: <code>{u_stats['channels']}</code>",
+    lib_table = (
+        "<table striped>"
+        "<tr><th>Library Catalog</th><th>Count</th></tr>"
+        f"<tr><td>📚 <b>Total Files</b></td><td><code>{f_stats['total']}</code></td></tr>"
+        f"<tr><td>📖 <b>Ebooks</b></td><td><code>{f_stats['ebooks']}</code></td></tr>"
+        f"<tr><td>🎧 <b>Audiobooks</b></td><td><code>{f_stats['audiobooks']}</code></td></tr>"
+        "</table>"
+    )
+
+    reach_table = (
+        "<table striped>"
+        "<tr><th>Community Reach</th><th>Count</th></tr>"
+        f"<tr><td>👤 <b>Unique Users</b></td><td><code>{u_stats['users']}</code></td></tr>"
+        f"<tr><td>👥 <b>Connected Groups</b></td><td><code>{u_stats['groups']}</code></td></tr>"
+        f"<tr><td>📢 <b>Connected Channels</b></td><td><code>{u_stats['channels']}</code></td></tr>"
+        "</table>"
+    )
+
+    parts = [
+        header_text,
+        "",
+        "📚 <b>Library Catalog</b>",
+        lib_table,
+        "",
+        "👥 <b>Community Reach</b>",
+        reach_table,
     ]
 
     if is_admin:
-        lines.append("")
-        lines.append(f"👑 <b>{role} System Diagnostic:</b>")
-        lines.append(f"• Active Access Role: <mark>{role}</mark>")
-        lines.append(f"• Database Storage: <code>{_get_db_sizes()}</code>")
-        lines.append(f"• Server RAM Usage: <code>{_get_ram_usage()}</code>")
-
-        # Measure round-trip ping latency
         t0 = time.time()
         try:
             await context.bot.get_me()
-            ping_ms = round((time.time() - t0) * 1000)
-            lines.append(f"• Telegram API Ping: <mark>{ping_ms} ms</mark>")
+            ping_str = f"{round((time.time() - t0) * 1000)} ms"
         except Exception:
-            lines.append("• Telegram API Ping: <code>Error</code>")
+            ping_str = "Error"
 
-    stats_text = "\n".join(lines)
+        diag_table = (
+            "<table striped>"
+            "<tr><th>System Diagnostic</th><th>Value</th></tr>"
+            f"<tr><td>🛡 <b>Access Role</b></td><td><code>{html.escape(str(role))}</code></td></tr>"
+            f"<tr><td>💾 <b>Database Storage</b></td><td><code>{_get_db_sizes()}</code></td></tr>"
+            f"<tr><td>🖥 <b>Server RAM</b></td><td><code>{_get_ram_usage()}</code></td></tr>"
+            f"<tr><td>🏓 <b>Telegram API Ping</b></td><td><code>{ping_str}</code></td></tr>"
+            "</table>"
+        )
+        parts.extend([
+            "",
+            f"👑 <b>{html.escape(str(role))} System Diagnostic</b>",
+            diag_table,
+        ])
+
+    stats_text = "\n".join(parts)
 
     media_type = get_config("stats_media_type", default="none")
     media_url = get_config("stats_media_url", default="")
@@ -89,7 +112,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
-            styled_button("« Back to Start", callback_data="start_menu", style="primary"),
+            styled_button("« Back to Start", callback_data="start_menu", style="danger"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

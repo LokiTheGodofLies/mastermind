@@ -373,14 +373,16 @@ async def _report_user_block(app, uid, name, uname, bot_title, bot_uname):
     topic = log_topic("USER") or 2
     if not log_gid:
         return
-    uname_part = f" (@{html.escape(uname)})" if uname and uname.lower() != "none" else ""
-    name_part = f"{html.escape(name)}{uname_part} " if name and name != "Unknown" else f"{uname_part.strip()} " if uname_part else ""
-    text = (
-        "🚫 <b>Bot Blocked by User</b>\n\n"
-        f"• <b>User ID:</b> {name_part}[<code>{uid}</code>]\n"
-        f"• <b>Blocked Bot:</b> {html.escape(bot_title)} (@{html.escape(bot_uname)})\n"
-        f"• <b>Timestamp:</b> {datetime.datetime.now(IST).strftime('%d-%m-%Y | %I:%M:%S %p IST')}"
-    )
+    uname_str = f"@{_esc(uname)}" if uname and uname.lower() != "none" else "—"
+    user_disp = _user_link(uid, name if (name and name != "Unknown") else f"User {uid}")
+    rows = [
+        ["👤 <i>User</i>", user_disp],
+        ["🆔 <i>User ID</i>", f"<code>{uid}</code>"],
+        ["🏷 <i>Username</i>", uname_str],
+        ["🤖 <i>Blocked Bot</i>", f"{_esc(bot_title)} (@{_esc(bot_uname)})"],
+        ["🕒 <i>Timestamp</i>", f"<code>{datetime.datetime.now(IST).strftime('%d-%m-%Y | %I:%M:%S %p IST')}</code>"],
+    ]
+    text = "🚫 <b>Bot Blocked by User</b>\n\n" + _table(["Field", "Details"], rows)
     try:
         await app.bot.send_message(chat_id=int(log_gid), message_thread_id=int(topic), text=text, parse_mode="HTML")
     except Exception:

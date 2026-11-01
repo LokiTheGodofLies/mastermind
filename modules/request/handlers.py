@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 REQUEST_GUIDE_TEXT = (
     "📖 <b>How to Request Books &amp; Audiobooks</b>\n\n"
+    "<table striped>"
+    "<tr><th>Option</th><th>Syntax / Fields</th></tr>"
+    "<tr><td>⚡ <b>Quick Request</b></td><td><code>/request The Striker Ana Huang</code></td></tr>"
+    "<tr><td>📗 <b>Single Book</b></td><td>Title, Author, Format (EPUB / Audio)</td></tr>"
+    "<tr><td>📚 <b>Book Series</b></td><td>Title 1..N, Series, Author, Format</td></tr>"
+    "</table>\n\n"
     "<b>Option 1: Standalone Book</b>\n"
     "<code>/request\n"
     "Title: The Striker\n"
@@ -28,9 +34,7 @@ REQUEST_GUIDE_TEXT = (
     "Title 3: King of Greed\n"
     "Series: Kings of Sin\n"
     "Author: Ana Huang\n"
-    "Format: EPUB / PDF</code>\n\n"
-    "💡 <i>Or quickly request by title or author:</i>\n"
-    "<code>/request The Striker Ana Huang</code>"
+    "Format: EPUB / PDF</code>"
 )
 
 
@@ -76,7 +80,7 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
-                    styled_button("📊 Check Quota", callback_data="quota", style="primary"),
+                    styled_button("📊 Check Quota", callback_data="quota", style="danger"),
                     styled_button("🎁 Refer & Earn", callback_data="refer_more_callback", style="success"),
                 ]
             ]),
@@ -100,21 +104,30 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = search_files_db(query, limit=5)
     if rows:
-        header = (
-            f"📁 <b>Local Library Matches Found!</b>\n\n"
-            f"Maybe <mark>{q_esc}</mark> is already in our library:\n"
-        )
-        lines = [header]
-        for row in rows:
-            lines.append(f"• <code>{html.escape(row['file_name'] or 'Unknown')}</code>")
+        tr_list = []
+        for idx, row in enumerate(rows, 1):
+            fname = html.escape(str(row["file_name"] or "Unknown")[:36])
+            ext = html.escape(str(row.get("extension") or ""))
+            if ext and not ext.startswith("."):
+                ext = f".{ext}"
+            tr_list.append(f"<tr><td>{idx}</td><td><code>{fname}</code></td><td><code>{ext or '-'}</code></td></tr>")
 
-        lines.append("\n<b>Would you like to search our library first or submit a new request?</b>")
-        text = "\n".join(lines)
+        table_html = (
+            "<table striped><tr><th>#</th><th>File Name</th><th>Ext</th></tr>"
+            + "".join(tr_list)
+            + "</table>"
+        )
+        text = (
+            f"📁 <b>Local Library Matches Found!</b>\n"
+            f"Query: <mark>{q_esc}</mark>\n\n"
+            f"{table_html}\n\n"
+            "<b>Would you like to search our library first or submit a new request?</b>"
+        )
 
         safe_q = query[:30]
         keyboard = [
             [styled_button("🔍 Search in Library", callback_data=f"search_direct_{safe_q}", style="success")],
-            [styled_button("📤 Request Anyway", callback_data=f"req_sub_orig_{query[:40]}", style="primary")],
+            [styled_button("📤 Request Anyway", callback_data=f"req_sub_orig_{query[:40]}", style="success")],
             [styled_button("❌ Cancel", callback_data="req_join_no", style="danger")],
         ]
         await status_msg.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -137,31 +150,44 @@ async def process_goodreads_or_request(status_msg, query, context):
         context.bot_data["goodreads_last_matches"] = matches
         context.bot_data["goodreads_last_query"] = query
 
-        header = f"📖 <b>Goodreads Matches Found for:</b> <mark>{q_esc}</mark>"
-        lines = [header, "", "Tap a button below any book to select and request it:\n"]
+        tr_rows = []
+        btn_rows = []
         for idx, book in enumerate(matches):
-            title = html.escape(book["title"])
-            author = html.escape(book["author"])
+            title = html.escape(str(book["title"])[:32])
+            author = html.escape(str(book["author"])[:24])
             url = book["url"]
-            rating = html.escape(book.get("rating", ""))
+            rating = html.escape(str(book.get("rating", "") or "—")[:18])
             cmd_link = f"https://t.me/{bot_username}?start=req_pick_{idx}"
-            lines.append(f"<b>{idx + 1}. 📚 {title}</b> — <code>{author}</code>")
-            if rating:
-                lines.append(f"⭐ <i>{rating}</i>")
-            lines.append(
+            tr_rows.append(
+                f"<tr><td>{idx + 1}</td><td><b>{title}</b></td><td><code>{author}</code></td><td>{rating}</td></tr>"
+            )
+            btn_rows.append(
                 tg_button_row_html(
                     [
                         tg_button_html(f"📥 Select #{idx + 1}", url=cmd_link, style="success"),
-                        tg_button_html("📖 Goodreads", url=url, style="primary"),
+                        tg_button_html(f"📖 Goodreads #{idx + 1}", url=url, style="danger"),
                     ],
                     align="left",
                 )
             )
-            lines.append("")
+
+        table_html = (
+            "<table striped><tr><th>#</th><th>Title</th><th>Author</th><th>Rating</th></tr>"
+            + "".join(tr_rows)
+            + "</table>"
+        )
+        lines = [
+            f"📖 <b>Goodreads Matches Found for:</b> <mark>{q_esc}</mark>",
+            "",
+            table_html,
+            "",
+            "Tap a button below to select and request your book:",
+            *btn_rows,
+        ]
 
         manual_link = f"https://t.me/{bot_username}?start=req_manual"
         kb = InlineKeyboardMarkup([
-            [styled_button(f"✍️ Request Manually (\"{query[:28]}\")", url=manual_link, style="primary")],
+            [styled_button(f"✍️ Request Manually (\"{query[:28]}\")", url=manual_link, style="success")],
             [styled_button("❌ Cancel", callback_data="req_join_no", style="danger")],
         ])
         text = "\n".join(lines).strip()
@@ -169,7 +195,12 @@ async def process_goodreads_or_request(status_msg, query, context):
     else:
         text = (
             f"📖 <b>Book Request:</b> <mark>{q_esc}</mark>\n\n"
-            "No Goodreads matches found. Would you like to submit this request directly to the Request Channel?"
+            "<table striped>"
+            "<tr><th>Field</th><th>Details</th></tr>"
+            f"<tr><td>📖 <b>Query</b></td><td><code>{q_esc[:36]}</code></td></tr>"
+            "<tr><td>🌐 <b>Goodreads</b></td><td>No direct match found</td></tr>"
+            "</table>\n\n"
+            "Would you like to submit this request directly to the Request Channel?"
         )
         keyboard = [
             [
@@ -207,12 +238,17 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
 
         req_text = (
             f"📥 <b>New Book Request</b>\n\n"
-            f"👤 <b>Requested By:</b> {user_mention}\n"
-            f"📖 <b>Book / Query:</b> <mark>{bq_esc}</mark>"
+            f"<table striped>"
+            f"<tr><th>Field</th><th>Details</th></tr>"
+            f"<tr><td>👤 <b>Requested By</b></td><td>{user_mention}</td></tr>"
+            f"<tr><td>🆔 <b>User ID</b></td><td><code>{user.id}</code></td></tr>"
+            f"<tr><td>📖 <b>Book / Query</b></td><td><code>{bq_esc}</code></td></tr>"
+            f"</table>\n\n"
+            f"<b>Status:</b> <mark>⏳ Pending Review</mark>"
         )
         status_markup = InlineKeyboardMarkup([
             [
-                styled_button("⏳ In Progress", callback_data=f"req_stat_prog_{user.id}", style="primary"),
+                styled_button("⏳ In Progress", callback_data=f"req_stat_prog_{user.id}", style="success"),
                 styled_button("✅ Completed", callback_data=f"req_stat_done_{user.id}", style="success"),
                 styled_button("❌ Rejected", callback_data=f"req_stat_rej_{user.id}", style="danger"),
             ]
@@ -229,6 +265,7 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
             logger_group = config.logger_group_id()
             req_topic = config.log_topic("REQUEST")
             if logger_group and int(logger_group) != int(request_channel_id):
+                log_kwargs = {"chat_id": int(logger_group), "text": req_text, "parse_mode=":"HTML", "reply_markup": status_markup}
                 log_kwargs = {"chat_id": int(logger_group), "text": req_text, "parse_mode": "HTML", "reply_markup": status_markup}
                 if req_topic:
                     log_kwargs["message_thread_id"] = int(req_topic)
@@ -238,7 +275,13 @@ async def request_callback_handler(update: Update, context: ContextTypes.DEFAULT
                     pass
 
             await query.edit_message_text(
-                f"✅ <b>Request Submitted Successfully!</b>\n\nYour request for <mark>{bq_esc}</mark> has been forwarded to the Request Channel.",
+                f"✅ <b>Request Submitted Successfully!</b>\n\n"
+                f"<table striped>"
+                f"<tr><th>Field</th><th>Details</th></tr>"
+                f"<tr><td>📖 <b>Requested Book</b></td><td><code>{bq_esc}</code></td></tr>"
+                f"<tr><td>📢 <b>Destination</b></td><td>Request Channel</td></tr>"
+                f"<tr><td>📌 <b>Status</b></td><td>⏳ Pending Review</td></tr>"
+                f"</table>",
                 parse_mode="HTML",
             )
         except Exception as e:
@@ -298,19 +341,22 @@ async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT
             book_data = matches[idx]
             title = html.escape(book_data["title"])
             author = html.escape(book_data["author"])
-            rating = html.escape(book_data.get("rating", "No rating"))
+            rating = html.escape(book_data.get("rating", "No rating") or "No rating")
             url = book_data["url"]
             text = (
                 f"📖 <b>Goodreads Book Selected</b>\n\n"
-                f"📌 <b>Title:</b> <mark>{title}</mark>\n"
-                f"✍️ <b>Author:</b> <code>{author}</code>\n"
-                f"⭐ <b>Rating:</b> {rating}\n\n"
+                f"<table striped>"
+                f"<tr><th>Field</th><th>Details</th></tr>"
+                f"<tr><td>📌 <b>Title</b></td><td><b>{title}</b></td></tr>"
+                f"<tr><td>✍️ <b>Author</b></td><td><code>{author}</code></td></tr>"
+                f"<tr><td>⭐ <b>Rating</b></td><td>{rating}</td></tr>"
+                f"</table>\n\n"
                 f"Is this the book you are looking for?"
             )
             encoded_title = book_data["title"][:40]
             fallback_q = (orig_query or book_data["title"])[:40]
             keyboard = [
-                [styled_button("📖 Open on Goodreads", url=url, style="primary")],
+                [styled_button("📖 Open on Goodreads", url=url, style="success")],
                 [styled_button("✅ Yes (Submit Goodreads)", callback_data=f"req_sub_gb_{encoded_title}", style="success")],
                 [styled_button("❌ No (Submit Original)", callback_data=f"req_sub_orig_{fallback_q}", style="danger")],
             ]
@@ -324,7 +370,15 @@ async def request_deeplink_handler(update: Update, context: ContextTypes.DEFAULT
     elif payload == "req_manual":
         orig_query = context.bot_data.get("goodreads_last_query", "Book Request")
         oq_esc = html.escape(orig_query)
-        text = f"📖 <b>Book Request:</b> <mark>{oq_esc}</mark>\n\nWould you like to submit this request directly to the Request Channel?"
+        text = (
+            f"📖 <b>Book Request:</b> <mark>{oq_esc}</mark>\n\n"
+            f"<table striped>"
+            f"<tr><th>Field</th><th>Details</th></tr>"
+            f"<tr><td>📖 <b>Query</b></td><td><code>{oq_esc}</code></td></tr>"
+            f"<tr><td>📌 <b>Mode</b></td><td>Manual Request</td></tr>"
+            f"</table>\n\n"
+            "Would you like to submit this request directly to the Request Channel?"
+        )
         keyboard = [
             [
                 styled_button("📤 Submit Request", callback_data=f"req_sub_orig_{orig_query[:40]}", style="success"),

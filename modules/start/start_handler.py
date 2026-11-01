@@ -84,11 +84,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
-            styled_button("📖 Help Menu", callback_data="help_button", style="primary"),
+            styled_button("📖 Help Menu", callback_data="help_button", style="danger"),
         ],
         [
-            styled_button("📊 My Quota", callback_data="quota", style="primary"),
-            styled_button("👑 Creator", callback_data="bot_owner", style="primary"),
+            styled_button("📊 My Quota", callback_data="quota", style="danger"),
+            styled_button("👑 Creator", callback_data="bot_owner", style="success"),
         ],
         [
             styled_button("📤 Refer & Earn Bonus", url=share_url, style="success"),
@@ -122,12 +122,15 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         rows = []
         if dm_url:
             rows.append([styled_button(f"💬 Message {_label}", url=dm_url, style="success")])
-        rows.append([styled_button("📋 Copy Creator ID", copy_text=str(oid), style="primary")])
-        rows.append([styled_button("« Back to Start", callback_data="start_menu", style="primary")])
+        rows.append([styled_button("📋 Copy Creator ID", copy_text=str(oid), style="success")])
+        rows.append([styled_button("« Back to Start", callback_data="start_menu", style="danger")])
         await query.message.edit_text(
             f"👑 <b>Bot Creator</b>\n\n"
-            f"• <b>Creator:</b> <mark>{_label}</mark>\n"
-            f"• <b>Creator ID:</b> <code>{oid}</code>\n\n"
+            f"<table striped>"
+            f"<tr><th>Field</th><th>Details</th></tr>"
+            f"<tr><td>👑 <b>Creator</b></td><td><code>{_label}</code></td></tr>"
+            f"<tr><td>🆔 <b>Creator ID</b></td><td><code>{oid}</code></td></tr>"
+            f"</table>\n\n"
             f"For support, inquiries, or partnership, tap the button below to contact the Creator directly.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(rows),

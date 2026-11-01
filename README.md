@@ -1,3 +1,14 @@
+## ⚙️ Ongoing `/index` Process Persistence, Transparent Colorful `/help` Buttons & Universal `<table striped>` Data Views (Build `20261101-1735`)
+
+- **Ongoing `/index` Process (`modules/indexing/index_command.py`, `main.py`)**:
+  - **Immediate `<table striped>` Progress Card**: Shows the live `<table striped>` ongoing progress card (`Chat`, `Range`, `Mode`, `Phase`, `Progress`, `Fetched`, `Indexed / Healed`, `Duplicates`, `Skipped`, `Filtered`, `Deleted`, `Errors`) with `⏸ Pause` / `▶️ Resume` and `⛔ Cancel Indexing` buttons immediately at message #1 and updates every 5 messages (or every ≥4s) and on batch sleeps.
+  - **SQLite Job Persistence & Auto-Resume Across Restarts (`active_index_jobs`)**: Running and paused `/index` jobs are no longer deleted in `_begin()`; `current_mid`, `skipped_range`, and `stats_json` are persisted continuously and automatically resumed by `resume_active_index_jobs(app)` in `post_init` after a restart or Render redeploy.
+- **Transparent Colorful Buttons & Tables in `/help` (`modules/help/handlers.py`)**:
+  - Alternates transparent `success` (green) and `danger` (coral/red) button styles across the Main Help Menu, Paginated Category Menus, and Command Detail Cards so no opaque solid-blue (`primary`) blocks appear.
+  - Every Help Menu page and all 37 `COMMAND_DETAILS` cards render structured data inside `<table striped>`.
+- **Universal `<table striped>` Data Views**:
+  - Added `<table striped>` across `/stats`, `/request` (guide, local library matches, Goodreads matches, book confirmation, and Request Channel / Request Log Topic cards), `/id`, `/quota`, `/refer`, `/admins` / `/moderators` / `/volunteers` / `/promoters`, `/checkhelpers`, `/ping`, `/ban`, `/broadcast`, `/start` (`👑 Creator` card), and all Group/Channel/User/Error logs.
+
 # 🤖 Mastermind Telegram Bot (Bot API 10.3 Rich UI Edition)
 
 A high-performance, modular Telegram bot built using Python and `python-telegram-bot` (v21+), upgraded with **Telegram Bot API 10.3 Rich Messages (`sendRichMessage`) & Colorful In-Text Buttons (`<tg-button>`, `<tg-button-row>`, `primary` / `success` / `danger` / `disabled`)**, 3-Stage Self-Healing Indexing across 8 book & audiobook catalogs, dual Index Channel + Logger Group logging, and timestamped zero-unpin SQLite persistence.

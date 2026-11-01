@@ -1,3 +1,4 @@
+import html
 from config import bot_name
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -20,9 +21,19 @@ from modules.database.user_db import get_user_role_db, is_admin_or_creator, is_c
 from modules.utility.rich_ui import styled_button, tg_button_html, tg_button_row_html
 
 
+def _help_card(header: str, rows: list[tuple[str, str]], footer: str = "") -> str:
+    """Formats a command documentation card with a structured <table striped>."""
+    tr_html = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows)
+    out = f"{header}\n\n<table striped><tr><th>Field</th><th>Details</th></tr>{tr_html}</table>"
+    if footer:
+        out += f"\n\n{footer}"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Individual Command & Feature Documentation Cards (Bot API 10.3 Rich UI)
 # Touch-to-copy format applied ONLY to command names, not arguments/queries.
+# Every card uses <table striped> for structured data.
 # ---------------------------------------------------------------------------
 COMMAND_DETAILS = {
     # =======================================================================
@@ -30,163 +41,180 @@ COMMAND_DETAILS = {
     # =======================================================================
     "start": {
         "title": "🚀 start",
+        "summary": "Launch bot & main menu",
         "category": "user",
-        "text": (
-            "🚀 <b>Command:</b> <code>/start</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Launches the bot, initializes your daily search and request allowances, "
-            "displays the interactive Bot API 10.3 rich main menu with colorful buttons, and handles one-tap book download links.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/start</code>\n"
-            "• <code>/start</code> dl_&lt;file_id&gt;\n\n"
-            "📌 <b>Examples:</b>\n"
-            "• Send <code>/start</code> in private chat to open the main menu.\n"
-            "• Tap any colorful <mark>📥 Download</mark> button in search results to receive files instantly."
+        "text": _help_card(
+            "🚀 <b>Command Documentation —</b> <code>/start</code>",
+            [
+                ("🚀 <b>Command</b>", "<code>/start</code>"),
+                ("🔓 <b>Access</b>", "All Members"),
+                ("📝 <b>Purpose</b>", "Opens main menu &amp; initializes daily quota"),
+                ("🔗 <b>Deep Links</b>", "Handles book downloads &amp; referrals"),
+                ("💡 <b>Syntax 1</b>", "<code>/start</code>"),
+                ("💡 <b>Syntax 2</b>", "<code>/start</code> dl_&lt;file_id&gt;"),
+            ],
+            "✨ <i>Tap any green Download button in search results to receive files instantly!</i>",
         ),
     },
     "search": {
         "title": "🔍 search",
+        "summary": "Search ebooks & audiobooks",
         "category": "user",
-        "text": (
-            "🔍 <b>Command:</b> <code>/search</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Searches our community library across book titles, authors, series, and descriptions using Bot API 10.3 Rich Messages and colorful in-text download buttons.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/search</code> &lt;book title or author&gt;\n\n"
-            "📌 <b>Examples:</b>\n"
-            "• <code>/search</code> Percy Jackson\n"
-            "• <code>/search</code> Fifty-Fifty\n"
-            "• <code>/search</code> Colleen Hoover\n\n"
-            "✨ <i>Tip: Search results come as one wide table (swipe sideways): tap the green Download button in the first column, use the format filters (📚 Ebooks / 🎧 Audio) and the green <mark>📨 Send All</mark> button!</i>"
+        "text": _help_card(
+            "🔍 <b>Command Documentation —</b> <code>/search</code>",
+            [
+                ("🔍 <b>Command</b>", "<code>/search</code>"),
+                ("🔓 <b>Access</b>", "All Members (Uses 1 Search Quota)"),
+                ("📝 <b>Purpose</b>", "Searches titles, authors &amp; series"),
+                ("💡 <b>Syntax</b>", "<code>/search</code> &lt;title or author&gt;"),
+                ("📌 <b>Example 1</b>", "<code>/search</code> Percy Jackson"),
+                ("📌 <b>Example 2</b>", "<code>/search</code> Colleen Hoover"),
+                ("🎛 <b>Filters</b>", "📚 Ebooks | 🎧 Audio | 📨 Send All"),
+            ],
+            "✨ <i>Search results are displayed in a structured table with one-tap Download buttons!</i>",
         ),
     },
     "request": {
         "title": "📥 request",
+        "summary": "Request missing books",
         "category": "user",
-        "text": (
-            "📥 <b>Command:</b> <code>/request</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Submits a request for any missing book or audiobook directly to our community Request Channel with live Goodreads lookup and colorful in-text selection buttons.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/request</code> &lt;book title and author&gt;\n\n"
-            "📌 <b>Examples:</b>\n"
-            "• <code>/request</code> Fourth Wing by Rebecca Yarros\n"
-            "• <code>/request</code> A Court of Thorns and Roses by Sarah J. Maas\n\n"
-            "✨ <i>Tip: Moderators review requests and update colorful status buttons live!</i>"
+        "text": _help_card(
+            "📥 <b>Command Documentation —</b> <code>/request</code>",
+            [
+                ("📥 <b>Command</b>", "<code>/request</code> (alias: <code>/req</code>)"),
+                ("🔓 <b>Access</b>", "All Members (Uses 1 Request Quota)"),
+                ("📝 <b>Purpose</b>", "Requests missing books via Goodreads"),
+                ("💡 <b>Syntax</b>", "<code>/request</code> &lt;title and author&gt;"),
+                ("📌 <b>Example 1</b>", "<code>/request</code> Fourth Wing Rebecca Yarros"),
+                ("📌 <b>Example 2</b>", "<code>/request</code> King of Wrath Ana Huang"),
+            ],
+            "✨ <i>Moderators review requests in the Request Channel and update live status buttons!</i>",
         ),
     },
     "quota": {
         "title": "📊 quota",
+        "summary": "Check daily search/request balance",
         "category": "user",
-        "text": (
-            "📊 <b>Command:</b> <code>/quota</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Displays your live daily search and request balance, your account tier badge, and automatic midnight IST reset status.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/quota</code>\n\n"
-            "🏆 <b>Daily Allowances by Tier:</b>\n"
-            "• 👤 User: <mark>10 searches &amp; 10 requests</mark>\n"
-            "• 📣 Promoter: <mark>20 searches &amp; 20 requests</mark>\n"
-            "• 🤝 Volunteer: <mark>30 searches &amp; 30 requests</mark>\n"
-            "• 🛡️ Moderator: <mark>40 searches &amp; 40 requests</mark>\n"
-            "• ⚔️ Administrator / 👑 Creator: <mark>Unlimited</mark>"
+        "text": _help_card(
+            "📊 <b>Command Documentation —</b> <code>/quota</code>",
+            [
+                ("📊 <b>Command</b>", "<code>/quota</code>"),
+                ("🕒 <b>Reset Time</b>", "Daily at Midnight IST"),
+                ("👤 <b>Normal User</b>", "<code>10 searches &amp; 10 requests</code>"),
+                ("📣 <b>Promoter</b>", "<code>20 searches &amp; 20 requests</code>"),
+                ("🤝 <b>Volunteer</b>", "<code>30 searches &amp; 30 requests</code>"),
+                ("🛡️ <b>Moderator</b>", "<code>40 searches &amp; 40 requests</code>"),
+                ("⚔️ <b>Admin / Creator</b>", "<code>Unlimited</code>"),
+            ],
+            "✨ <i>Use <code>/refer</code> to invite friends and earn permanent bonus quota!</i>",
         ),
     },
     "refer": {
         "title": "🔗 refer",
+        "summary": "Invite friends & earn bonus quota",
         "category": "user",
-        "text": (
-            "🔗 <b>Commands:</b> <code>/refer</code> &amp; <code>/myreferrals</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Generates your personal invite link with one-tap <mark>📋 Copy Invite Link</mark> and <mark>📤 Share Link</mark> buttons. Invite friends and earn bonus searches &amp; requests!\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/refer</code> (generates your unique invite link)\n"
-            "• <code>/myreferrals</code> (invite stats + a table of everyone you invited: user, username, ID, joined)\n\n"
-            "🎁 <b>Reward:</b> <mark>+10 searches &amp; +10 requests</mark> per successful invite!"
+        "text": _help_card(
+            "🔗 <b>Command Documentation —</b> <code>/refer</code> &amp; <code>/myreferrals</code>",
+            [
+                ("🔗 <b>Invite Link</b>", "<code>/refer</code> (or <code>/ref</code>)"),
+                ("📋 <b>Invite Table</b>", "<code>/myreferrals</code>"),
+                ("🎁 <b>Reward</b>", "<code>+10 searches &amp; +10 requests</code>"),
+                ("👥 <b>Who Earns</b>", "Both you and your invited friend"),
+                ("📤 <b>Actions</b>", "Copy Invite Link &amp; Share Link"),
+            ],
+            "✨ <i><code>/myreferrals</code> displays a paginated table of everyone you invited!</i>",
         ),
     },
     "support": {
         "title": "💬 support",
+        "summary": "Join community support group",
         "category": "user",
-        "text": (
-            "💬 <b>Command:</b> <code>/support</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Launches our 10-question screening quiz with colorful Yes/No buttons and generates a single-use invite link to our official community support group.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/support</code>"
+        "text": _help_card(
+            "💬 <b>Command Documentation —</b> <code>/support</code>",
+            [
+                ("💬 <b>Command</b>", "<code>/support</code>"),
+                ("🔓 <b>Access</b>", "All Members"),
+                ("📝 <b>Purpose</b>", "10-question screening quiz for support"),
+                ("🎟 <b>Output</b>", "Single-use Support Group invite link"),
+                ("💡 <b>Syntax</b>", "<code>/support</code>"),
+            ],
         ),
     },
     "stats": {
         "title": "📈 stats",
+        "summary": "Live library & user statistics",
         "category": "user",
-        "text": (
-            "📈 <b>Command:</b> <code>/stats</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Displays live library metrics, including total indexed files, separate ebook and audiobook counts, active users, and system diagnostics.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/stats</code>"
+        "text": _help_card(
+            "📈 <b>Command Documentation —</b> <code>/stats</code>",
+            [
+                ("📈 <b>Command</b>", "<code>/stats</code>"),
+                ("📚 <b>Library Table</b>", "Total Files, Ebooks &amp; Audiobooks"),
+                ("👥 <b>Community Table</b>", "Users, Groups &amp; Channels"),
+                ("🖥 <b>Admin Table</b>", "Role, DB Size, RAM &amp; API Ping"),
+                ("💡 <b>Syntax</b>", "<code>/stats</code>"),
+            ],
         ),
     },
     "id": {
         "title": "🆔 id",
+        "summary": "Lookup User, Chat & Topic IDs",
         "category": "user",
-        "text": (
-            "🆔 <b>Command:</b> <code>/id</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Retrieves unique Telegram IDs for users, groups, channels, or forum topics with one-tap <mark>📋 Copy ID</mark> buttons.\n"
-            "When run inside a channel where the sender is anonymous, user fields are automatically omitted for a clean channel card.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/id</code>\n"
-            "• <code>/id</code> @username\n"
-            "• Reply to any message with <code>/id</code>"
+        "text": _help_card(
+            "🆔 <b>Command Documentation —</b> <code>/id</code>",
+            [
+                ("🆔 <b>Command</b>", "<code>/id</code>"),
+                ("📝 <b>Purpose</b>", "Displays User, Chat &amp; Topic IDs in table"),
+                ("💡 <b>Syntax 1</b>", "<code>/id</code> (current chat &amp; user)"),
+                ("💡 <b>Syntax 2</b>", "<code>/id</code> @username"),
+                ("💡 <b>Syntax 3</b>", "Reply to any message with <code>/id</code>"),
+                ("📢 <b>Channel Mode</b>", "Omits user fields when anonymous"),
+            ],
         ),
     },
     "rosters": {
         "title": "👥 rosters",
+        "summary": "View Admin, Mod, Vol & Promo lists",
         "category": "user",
-        "text": (
-            "👥 <b>Community Roster Commands</b>\n\n"
-            "View official lists of community team members with colorful in-text profile and <mark>📋 Copy ID</mark> buttons:\n\n"
-            "💡 <b>Commands:</b>\n"
-            "• <code>/admins</code> — Lists all Administrators and the Creator.\n"
-            "• <code>/moderators</code> (or <code>/mods</code>) — Lists all active Moderators.\n"
-            "• <code>/volunteers</code> (or <code>/vols</code>) — Lists all active Volunteers.\n"
-            "• <code>/promoters</code> (or <code>/promos</code>) — Lists all active Promoters."
+        "text": _help_card(
+            "👥 <b>Community Roster Commands</b>",
+            [
+                ("⚔️ <b>Admins</b>", "<code>/admins</code> — Creators &amp; Admins"),
+                ("🛡️ <b>Moderators</b>", "<code>/moderators</code> (or <code>/mods</code>)"),
+                ("🤝 <b>Volunteers</b>", "<code>/volunteers</code> (or <code>/vols</code>)"),
+                ("📣 <b>Promoters</b>", "<code>/promoters</code> (or <code>/promos</code>)"),
+                ("📊 <b>Format</b>", "Structured table + Profile/Copy buttons"),
+            ],
         ),
     },
     "delivery": {
         "title": "📦 delivery",
+        "summary": "Dual PM & Channel file delivery",
         "category": "user",
-        "text": (
-            "📦 <b>Dual File Delivery System</b>\n\n"
-            "When you download a file from search results, the bot delivers via two parallel routes:\n\n"
-            "1. <b>🤖 Fast PM Delivery:</b> Sent directly to your private chat via helper bots (with 5-minute auto-delete).\n"
-            "2. <b>📢 Posting Channel:</b> A temporary copy is posted in the channel (with 5-minute auto-delete).\n\n"
-            "📨 <b>Details card:</b> The bot sends it to your PM (not the group) and it deletes itself too. <mark>📨 Send All</mark> sends one combined table for the whole page.\n\n"
-            "⚠️ <b>Important Tip:</b>\n"
-            "Forward your received files to your <mark>Saved Messages</mark> before the 5-minute timer expires!"
+        "text": _help_card(
+            "📦 <b>Dual File Delivery System</b>",
+            [
+                ("🤖 <b>Route 1: PM</b>", "Direct delivery via Helper Bots"),
+                ("📢 <b>Route 2: Channel</b>", "Mirror copy in Posting Channel"),
+                ("⏱ <b>Auto-Delete</b>", "5 minutes (300 seconds)"),
+                ("📨 <b>Send All</b>", "Delivers page + 1 combined PM table"),
+                ("💾 <b>Tip</b>", "Forward files to Saved Messages!"),
+            ],
         ),
     },
     "roles": {
         "title": "👥 roles",
+        "summary": "6-tier role hierarchy & quotas",
         "category": "user",
         "text": (
             "👥 <b>Community User Roles &amp; Privileges</b>\n\n"
-            "Our community has 6 structured tiers to organize library contributions and governance:\n\n"
             "<table striped>"
-            "<tr><th>Tier</th><th>Daily Quota</th><th>What they can do</th></tr>"
-            "<tr><td>👤 <b>Normal User</b></td><td>10 searches &amp; 10 requests</td>"
-            "<td>/start, /search, /request, /quota, /refer, /support, /stats, /id, rosters</td></tr>"
-            "<tr><td>📣 <b>Promoter</b></td><td>20 searches &amp; 20 requests</td>"
-            "<td>Appointed by Admins to share and promote the library</td></tr>"
-            "<tr><td>🤝 <b>Volunteer</b></td><td>30 searches &amp; 30 requests</td>"
-            "<td>Pre-approved direct book, audiobook and archive indexing via Helper Bot DMs</td></tr>"
-            "<tr><td>🛡️ <b>Moderator</b></td><td>40 searches &amp; 40 requests</td>"
-            "<td>Direct indexing + Request Channel status management (In Progress, Completed, Rejected)</td></tr>"
-            "<tr><td>⚔️ <b>Administrator</b></td><td>Unlimited</td>"
-            "<td>Batch /index, /broadcast, /checkhelpers, /ban, /gift and team promotions</td></tr>"
-            "<tr><td>👑 <b>Creator</b></td><td>Unlimited</td>"
-            "<td>Supreme governance: /addadmin, /update, /publish and timestamped SQLite backups</td></tr>"
+            "<tr><th>Tier</th><th>Daily Quota</th><th>Privileges</th></tr>"
+            "<tr><td>👤 <b>Normal User</b></td><td>10 / 10</td><td>Search, Request, Quota, Refer</td></tr>"
+            "<tr><td>📣 <b>Promoter</b></td><td>20 / 20</td><td>Community promotion tier</td></tr>"
+            "<tr><td>🤝 <b>Volunteer</b></td><td>30 / 30</td><td>Direct Helper Bot DM indexing</td></tr>"
+            "<tr><td>🛡️ <b>Moderator</b></td><td>40 / 40</td><td>Direct indexing + Request status</td></tr>"
+            "<tr><td>⚔️ <b>Administrator</b></td><td>Unlimited</td><td>Batch /index, /broadcast, /ban</td></tr>"
+            "<tr><td>👑 <b>Creator</b></td><td>Unlimited</td><td>/addadmin, /update, /publish, DB</td></tr>"
             "</table>"
         ),
     },
@@ -196,31 +224,46 @@ COMMAND_DETAILS = {
     # =======================================================================
     "vol_privileges": {
         "title": "🤝 vol_privileges",
+        "summary": "Volunteer quota & direct indexing",
         "category": "volunteer",
-        "text": (
-            "🤝 <b>Volunteer Operational Privileges</b>\n\n"
-            "• <b>Daily Quota:</b> <mark>30 searches and 30 requests</mark> per day.\n"
-            "• <b>Direct Indexing:</b> Send or forward supported ebooks, audiobooks, or archives (.zip, .rar, .7z) directly to any Helper Bot in private chat.\n"
-            "• <b>Automatic Approval &amp; Dual Logging:</b> Files uploaded by Volunteers are verified through the 3-Stage Self-Healing Pipeline. The Index Logs Topic gets the full audit; the Index Logs Channel gets a clean card only after the caption is enriched."
+        "text": _help_card(
+            "🤝 <b>Volunteer Operational Privileges</b>",
+            [
+                ("📊 <b>Daily Quota</b>", "<code>30 searches &amp; 30 requests</code>"),
+                ("📥 <b>Direct Indexing</b>", "Send files to Helper Bot DMs"),
+                ("📚 <b>Supported Types</b>", "Ebooks, Audiobooks &amp; Archives"),
+                ("✅ <b>Verification</b>", "3-Stage Self-Healing Pipeline"),
+                ("🪵 <b>Audit Logging</b>", "Table cards to Topic &amp; Channel"),
+            ],
         ),
     },
     "vol_indexing": {
         "title": "📚 vol_indexing",
+        "summary": "How to index via Helper Bot DMs",
         "category": "volunteer",
-        "text": (
-            "📚 <b>Volunteer Helper Bot Indexing Guide</b>\n\n"
-            "1. Start a private chat with any official Helper Bot (e.g. @Heyuqtbot or @RickRiordanBot).\n"
-            "2. Send or forward supported ebook (<code>.epub, .pdf, .mobi, .azw3, .cbz, .cbr, .djvu, .fb2, .txt, .rtf</code>), audiobook (<code>.mp3, .m4b, .m4a, .aax, .flac, .wav, .ogg, .opus</code>), or archive (<code>.zip, .rar, .7z</code>) files.\n"
-            "3. The bot strips spam captions, enriches metadata across our 8-site book/audiobook waterfall, stores the file in the Storage Group, and posts the 3-Tick Index Log automatically!"
+        "text": _help_card(
+            "📚 <b>Volunteer Helper Bot Indexing Guide</b>",
+            [
+                ("1️⃣ <b>Step 1</b>", "Open DM with any Helper Bot"),
+                ("2️⃣ <b>Step 2</b>", "Send or forward book/audio/archive"),
+                ("📖 <b>Ebook Formats</b>", "<code>.epub .pdf .mobi .azw3 .cbz .fb2</code>"),
+                ("🎧 <b>Audio Formats</b>", "<code>.m4b .mp3 .m4a .flac .ogg .opus</code>"),
+                ("📦 <b>Archives</b>", "<code>.zip .rar .7z</code>"),
+                ("3️⃣ <b>Step 3</b>", "Auto-enriched &amp; stored with table log"),
+            ],
         ),
     },
     "vol_notice": {
         "title": "⚠️ vol_notice",
+        "summary": "Batch /index access notice",
         "category": "volunteer",
-        "text": (
-            "⚠️ <b>Index Command Notice for Volunteers</b>\n\n"
-            "The batch range command <code>/index</code> is exclusive to Administrators and the Creator.\n"
-            "Volunteers contribute files directly and cleanly via Helper Bot DMs."
+        "text": _help_card(
+            "⚠️ <b>Index Command Notice for Volunteers</b>",
+            [
+                ("🔒 <b>Batch /index</b>", "Reserved for Admins &amp; Creator"),
+                ("🤝 <b>Volunteer Route</b>", "Upload directly in Helper Bot DMs"),
+                ("⚡ <b>Approval</b>", "Pre-approved (no admin wait)"),
+            ],
         ),
     },
 
@@ -229,42 +272,55 @@ COMMAND_DETAILS = {
     # =======================================================================
     "mod_privileges": {
         "title": "⚖️ mod_privileges",
+        "summary": "Moderator quota & permissions",
         "category": "moderator",
-        "text": (
-            "🛡️ <b>Moderator Operational Privileges</b>\n\n"
-            "• <b>Daily Quota:</b> <mark>40 searches and 40 requests</mark> per day.\n"
-            "• <b>Request Channel Control:</b> Update colorful status buttons on incoming book requests.\n"
-            "• <b>Direct Library Indexing:</b> Pre-approved direct indexing via Helper Bot DMs."
+        "text": _help_card(
+            "🛡️ <b>Moderator Operational Privileges</b>",
+            [
+                ("📊 <b>Daily Quota</b>", "<code>40 searches &amp; 40 requests</code>"),
+                ("📋 <b>Request Control</b>", "Update Request Channel status"),
+                ("🤖 <b>Direct Indexing</b>", "Pre-approved via Helper Bot DMs"),
+            ],
         ),
     },
     "mod_requests": {
         "title": "📋 mod_requests",
+        "summary": "Manage Request Channel statuses",
         "category": "moderator",
-        "text": (
-            "📋 <b>Request Status Management</b>\n\n"
-            "When users submit book requests via <code>/request</code>, they appear in the Request Channel.\n"
-            "Moderators use colorful Bot API 10.3 buttons to update the status:\n"
-            "• ⏳ <mark>In Progress</mark> (Blue): Request is actively being sourced.\n"
-            "• ✅ <mark>Completed</mark> (Green): File was found and indexed into the library.\n"
-            "• ❌ <mark>Rejected</mark> (Red): Book cannot be fulfilled."
+        "text": _help_card(
+            "📋 <b>Request Status Management</b>",
+            [
+                ("⏳ <b>In Progress</b>", "Request is actively being sourced"),
+                ("✅ <b>Completed</b>", "Book indexed into the library"),
+                ("❌ <b>Rejected</b>", "Request cannot be fulfilled"),
+                ("📍 <b>Where</b>", "Request Channel &amp; Request Log Topic"),
+            ],
         ),
     },
     "mod_indexing": {
         "title": "🤖 mod_indexing",
+        "summary": "Direct Helper Bot DM indexing",
         "category": "moderator",
-        "text": (
-            "🤖 <b>Moderator Direct Indexing Guide</b>\n\n"
-            "Send or forward supported ebook, audiobook, and archive files directly to any Helper Bot in private chat.\n"
-            "Metadata is enriched automatically across 8 book &amp; audiobook databases and logged: audit card to the Index Logs Topic, a clean card to the Index Logs Channel once the caption is enriched."
+        "text": _help_card(
+            "🤖 <b>Moderator Direct Indexing Guide</b>",
+            [
+                ("📥 <b>Upload Route</b>", "Send files to any Helper Bot DM"),
+                ("🌐 <b>Enrichment</b>", "8-site book/audiobook waterfall"),
+                ("🪵 <b>Topic Log</b>", "Full 3-Stage Table Audit Card"),
+                ("📢 <b>Channel Log</b>", "Clean Table Library Card"),
+            ],
         ),
     },
     "mod_notice": {
         "title": "⚠️ mod_notice",
+        "summary": "Batch /index access notice",
         "category": "moderator",
-        "text": (
-            "⚠️ <b>Batch /index Command Access Notice</b>\n\n"
-            "The <code>/index</code> batch range command is reserved for Administrators and the Creator.\n"
-            "Moderators index files cleanly through Helper Bot private chats."
+        "text": _help_card(
+            "⚠️ <b>Batch /index Command Access Notice</b>",
+            [
+                ("🔒 <b>Batch /index</b>", "Exclusive to Admins &amp; Creator"),
+                ("🛡️ <b>Moderator Route</b>", "Direct indexing via Helper Bot DMs"),
+            ],
         ),
     },
 
@@ -273,168 +329,178 @@ COMMAND_DETAILS = {
     # =======================================================================
     "checkhelpers": {
         "title": "🤖 checkhelpers",
+        "summary": "Audit Main & Helper Bot permissions",
         "category": "admin",
-        "text": (
-            "🤖 <b>Command:</b> <code>/checkhelpers</code> (alias: <code>/helpers</code>)\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Audits <b>both the Main Bot and all configured Helper Bots</b> across all required channels and groups:\n"
-            "• 📦 <b>Storage Group:</b> Verifies membership &amp; file access.\n"
-            "• 📢 <b>Posting Channel:</b> Verifies Admin status with Post &amp; Delete Messages rights.\n"
-            "• 📥 <b>Index Logs Channel:</b> Verifies Admin status with Post Messages rights so whichever bot indexes files can post the library cards.\n"
-            "• 🪵 <b>Logger Group:</b> Verifies membership for Index &amp; Error log topics.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/checkhelpers</code>\n"
-            "• <code>/helpers</code>"
+        "text": _help_card(
+            "🤖 <b>Command Documentation —</b> <code>/checkhelpers</code>",
+            [
+                ("🤖 <b>Command</b>", "<code>/checkhelpers</code> (or <code>/helpers</code>)"),
+                ("📦 <b>Storage Group</b>", "Verifies membership &amp; file access"),
+                ("📢 <b>Posting Channel</b>", "Verifies Admin + Post &amp; Delete"),
+                ("📥 <b>Index Channel</b>", "Verifies Admin + Post Messages"),
+                ("🪵 <b>Logger Group</b>", "Verifies membership for log topics"),
+            ],
         ),
     },
     "index": {
         "title": "📚 index",
+        "summary": "Batch channel/group indexing",
         "category": "admin",
-        "text": (
-            "📚 <b>Command:</b> <code>/index</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Batch indexes ebooks, audiobooks, and archives (<code>.zip, .rar, .7z</code>) from channels or groups into the Storage Group with 3-Stage Ordered Self-Healing and 8-site metadata enrichment.\n"
-            "• Works in channels where either the <b>Main Bot</b> or a <b>Helper Bot</b> is Admin!\n"
-            "• Automatically deletes the <code>/index</code> command post in channels and auto-cleans the progress card after completion.\n"
-            "• Sends the file audit card (and task started/cancelled/completed logs) to <code>INDEX_LOG_TOPIC_ID</code>, and the &quot;New file added to library&quot; card to <code>INDEX_CHANNEL_ID</code> only when caption enrichment succeeded, from whichever bot is indexing.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/index</code> (directly inside a source channel)\n"
-            "• <code>/index</code> &lt;first_link&gt; &lt;last_link&gt;\n"
-            "• <code>/index</code> (in private chat for interactive wizard)"
+        "text": _help_card(
+            "📚 <b>Command Documentation —</b> <code>/index</code>",
+            [
+                ("📚 <b>Command</b>", "<code>/index</code>"),
+                ("🔒 <b>Access</b>", "Administrators &amp; Creator"),
+                ("⚙️ <b>Live Controls</b>", "Table progress + Pause/Resume/Cancel"),
+                ("♻️ <b>Persistence</b>", "Auto-resumes unfinished jobs on restart"),
+                ("💡 <b>Syntax 1</b>", "<code>/index</code> (inside source channel)"),
+                ("💡 <b>Syntax 2</b>", "<code>/index</code> &lt;first_link&gt; &lt;last_link&gt;"),
+                ("💡 <b>Syntax 3</b>", "<code>/index</code> (in PM for setup wizard)"),
+            ],
         ),
     },
     "editcaption": {
         "title": "✏️ editcaption",
+        "summary": "Edit file captions in Storage Group",
         "category": "admin",
-        "text": (
-            "✏️ <b>Command:</b> <code>/editcaption</code> (aliases: <code>/setcaption</code>, <code>/caption</code>)\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Updates the caption of any file inside the <b>Storage Group</b> (since Telegram does not let human admins directly edit messages sent by Helper/Main bots).\n"
-            "• Every stored file in the Storage Group also includes a one-tap <mark>✏️ Edit Caption</mark> button.\n"
-            "• Works <b>only inside the Storage Group</b>: asks you to reply to the bot's prompt with the new caption, updates the Storage Group message in place, updates <code>files.db</code>, and sends the Table Audit Card to the Index Logs Topic + the Table Library Card to the Index Logs Channel.\n\n"
-            "💡 <b>Syntax (Storage Group Only):</b>\n"
-            "• Tap <mark>✏️ Edit Caption</mark> below any file in the Storage Group\n"
-            "• Reply to a file in the Storage Group with <code>/editcaption</code>\n"
-            "• <code>/editcaption</code> &lt;storage_message_id&gt;"
+        "text": _help_card(
+            "✏️ <b>Command Documentation —</b> <code>/editcaption</code>",
+            [
+                ("✏️ <b>Command</b>", "<code>/editcaption</code> (<code>/setcaption</code>)"),
+                ("📍 <b>Scope</b>", "Storage Group Only"),
+                ("🔘 <b>Button</b>", "Tap <code>✏️ Edit Caption</code> on any file"),
+                ("💡 <b>Syntax 1</b>", "Reply to a Storage file with <code>/editcaption</code>"),
+                ("💡 <b>Syntax 2</b>", "<code>/editcaption</code> &lt;storage_msg_id&gt;"),
+                ("🔄 <b>Sync</b>", "Updates Storage + files.db + Table Logs"),
+            ],
         ),
     },
     "broadcast": {
         "title": "📢 broadcast",
+        "summary": "Broadcast with audience toggles",
         "category": "admin",
-        "text": (
-            "📢 <b>Command:</b> <code>/broadcast</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Dispatches announcements with colorful Bot API 10.3 audience toggles (🌐 All, 👥 Users, 🤖 Helper Bots, 👥 Groups, 📢 Channels), "
-            "auto-pinning, expandable quote preview, and live Pause/Resume/Cancel controls.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/broadcast</code> &lt;announcement text&gt;\n"
-            "• Reply to any message with <code>/broadcast</code>\n"
-            "• <code>/cancelbroadcast</code> — Stops the active broadcast"
+        "text": _help_card(
+            "📢 <b>Command Documentation —</b> <code>/broadcast</code>",
+            [
+                ("📢 <b>Command</b>", "<code>/broadcast</code> (or <code>/pinbroadcast</code>)"),
+                ("🛑 <b>Stop Command</b>", "<code>/cancelbroadcast</code>"),
+                ("🎯 <b>Targets</b>", "All, Users, Helpers, Groups, Channels"),
+                ("📌 <b>Auto-Pin</b>", "Toggle ON/OFF in control panel"),
+                ("⚙️ <b>Live Controls</b>", "Pause, Resume &amp; Cancel buttons"),
+            ],
         ),
     },
     "ban": {
         "title": "🚫 ban",
+        "summary": "Ban/unban users or chats",
         "category": "admin",
-        "text": (
-            "🚫 <b>Commands:</b> <code>/ban</code>, <code>/ban_pm</code>, <code>/ban_support</code>, <code>/unban</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Applies or lifts granular restrictions on users or chats:\n"
-            "• Global Ban: Restricts user from both DMs and community groups.\n"
-            "• PM Ban: Restricts user from bot private chat only.\n"
-            "• Support Ban: Restricts user from community support chat only.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/ban</code> &lt;user_id or @username&gt; [reason]\n"
-            "• <code>/ban_pm</code> &lt;user_id or @username&gt;\n"
-            "• <code>/ban_support</code> &lt;user_id or @username&gt;\n"
-            "• <code>/unban</code> &lt;user_id or @username&gt;"
+        "text": _help_card(
+            "🚫 <b>Moderation &amp; Ban Commands</b>",
+            [
+                ("🌐 <b>Global Ban</b>", "<code>/ban</code> &lt;id|@user&gt; [reason]"),
+                ("💬 <b>PM Ban</b>", "<code>/ban_pm</code> &lt;id|@user&gt; [reason]"),
+                ("👥 <b>Support Ban</b>", "<code>/ban_support</code> &lt;id|@user&gt; [reason]"),
+                ("✅ <b>Unban</b>", "<code>/unban</code> &lt;id|@user&gt;"),
+            ],
         ),
     },
     "gift": {
         "title": "🎁 gift",
+        "summary": "Grant bonus searches & requests",
         "category": "admin",
-        "text": (
-            "🎁 <b>Command:</b> <code>/gift</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Grants bonus daily search and request allowances to any user.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/gift</code> &lt;user_id&gt; &lt;searches&gt; &lt;requests&gt;\n\n"
-            "📌 <b>Examples:</b>\n"
-            "• <code>/gift</code> 123456789 25 25"
+        "text": _help_card(
+            "🎁 <b>Command Documentation —</b> <code>/gift</code>",
+            [
+                ("🎁 <b>Command</b>", "<code>/gift</code>"),
+                ("📝 <b>Purpose</b>", "Adds bonus search &amp; request limits"),
+                ("💡 <b>Syntax</b>", "<code>/gift</code> &lt;uid&gt; &lt;searches&gt; &lt;requests&gt;"),
+                ("📌 <b>Example</b>", "<code>/gift</code> 123456789 25 25"),
+            ],
         ),
     },
     "editscript": {
         "title": "🛠️ editscript",
+        "summary": "Live template & config editor",
         "category": "admin",
-        "text": (
-            "🛠️ <b>Command:</b> <code>/editscript</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Opens the dynamic configuration hub with colorful buttons to modify banners, welcome messages, caption templates, "
-            "and channel links live without restarting the bot.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/editscript</code>"
+        "text": _help_card(
+            "🛠️ <b>Command Documentation —</b> <code>/editscript</code>",
+            [
+                ("🛠️ <b>Command</b>", "<code>/editscript</code>"),
+                ("📝 <b>Purpose</b>", "Live config &amp; template editor"),
+                ("🎛 <b>Options</b>", "Headers, media banners &amp; toggles"),
+                ("💡 <b>Syntax</b>", "<code>/editscript</code>"),
+            ],
         ),
     },
     "log": {
         "title": "📋 log",
+        "summary": "Export in-memory system logs",
         "category": "admin",
-        "text": (
-            "📋 <b>Command:</b> <code>/log</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Exports in-memory system logs as a downloadable document directly in Telegram.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/log</code> (recent logs)\n"
-            "• <code>/log</code> &lt;number of lines&gt;\n"
-            "• <code>/log</code> &lt;duration, e.g. 1h, 30m&gt;"
+        "text": _help_card(
+            "📋 <b>Command Documentation —</b> <code>/log</code>",
+            [
+                ("📋 <b>Command</b>", "<code>/log</code>"),
+                ("📝 <b>Purpose</b>", "Exports system logs as a .txt file"),
+                ("💡 <b>Syntax 1</b>", "<code>/log</code> (last 10 lines)"),
+                ("💡 <b>Syntax 2</b>", "<code>/log</code> 100 (last N lines)"),
+                ("💡 <b>Syntax 3</b>", "<code>/log</code> 30m (last N minutes)"),
+            ],
         ),
     },
     "ping": {
         "title": "🏓 ping",
+        "summary": "Latency & network usage table",
         "category": "admin",
-        "text": (
-            "🏓 <b>Command:</b> <code>/ping</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Tests bot responsiveness, round-trip API latency, and server uptime.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/ping</code>"
+        "text": _help_card(
+            "🏓 <b>Command Documentation —</b> <code>/ping</code>",
+            [
+                ("🏓 <b>Command</b>", "<code>/ping</code>"),
+                ("⏱ <b>Latency</b>", "Round-trip Telegram API ping (ms)"),
+                ("📊 <b>Network</b>", "Server TX / RX bandwidth table"),
+                ("💡 <b>Syntax</b>", "<code>/ping</code>"),
+            ],
         ),
     },
     "addmoderator": {
         "title": "🛡️ addmoderator",
+        "summary": "Promote/demote Moderators",
         "category": "admin",
-        "text": (
-            "🛡️ <b>Commands:</b> <code>/addmoderator</code> &amp; <code>/removemoderator</code>\n"
-            "<i>(Aliases: /addmod, /removemod, /delmod)</i>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Promotes or demotes a Moderator (40 daily quota, request management buttons).\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/addmoderator</code> &lt;user_id or @username&gt;\n"
-            "• <code>/removemoderator</code> &lt;user_id or @username&gt;"
+        "text": _help_card(
+            "🛡️ <b>Moderator Role Management</b>",
+            [
+                ("⬆️ <b>Promote</b>", "<code>/addmoderator</code> &lt;id|@user&gt;"),
+                ("⬇️ <b>Demote</b>", "<code>/removemoderator</code> &lt;id|@user&gt;"),
+                ("🏷 <b>Aliases</b>", "<code>/addmod</code>, <code>/removemod</code>, <code>/delmod</code>"),
+                ("📊 <b>Tier Quota</b>", "40 searches &amp; 40 requests/day"),
+            ],
         ),
     },
     "addvolunteer": {
         "title": "🤝 addvolunteer",
+        "summary": "Promote/demote Volunteers",
         "category": "admin",
-        "text": (
-            "🤝 <b>Commands:</b> <code>/addvolunteer</code> &amp; <code>/removevolunteer</code>\n"
-            "<i>(Aliases: /addvol, /removevol, /delvol)</i>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Promotes or demotes a Volunteer (30 daily quota, pre-approved helper indexing).\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/addvolunteer</code> &lt;user_id or @username&gt;\n"
-            "• <code>/removevolunteer</code> &lt;user_id or @username&gt;"
+        "text": _help_card(
+            "🤝 <b>Volunteer Role Management</b>",
+            [
+                ("⬆️ <b>Promote</b>", "<code>/addvolunteer</code> &lt;id|@user&gt;"),
+                ("⬇️ <b>Demote</b>", "<code>/removevolunteer</code> &lt;id|@user&gt;"),
+                ("🏷 <b>Aliases</b>", "<code>/addvol</code>, <code>/removevol</code>, <code>/delvol</code>"),
+                ("📊 <b>Tier Quota</b>", "30 searches &amp; 30 requests/day"),
+            ],
         ),
     },
     "addpromoter": {
         "title": "📣 addpromoter",
+        "summary": "Promote/demote Promoters",
         "category": "admin",
-        "text": (
-            "📣 <b>Commands:</b> <code>/addpromoter</code> &amp; <code>/removepromoter</code>\n"
-            "<i>(Aliases: /addpromo, /removepromo, /delpromo)</i>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Promotes or demotes a Promoter (20 daily quota).\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/addpromoter</code> &lt;user_id or @username&gt;\n"
-            "• <code>/removepromoter</code> &lt;user_id or @username&gt;"
+        "text": _help_card(
+            "📣 <b>Promoter Role Management</b>",
+            [
+                ("⬆️ <b>Promote</b>", "<code>/addpromoter</code> &lt;id|@user&gt;"),
+                ("⬇️ <b>Demote</b>", "<code>/removepromoter</code> &lt;id|@user&gt;"),
+                ("🏷 <b>Aliases</b>", "<code>/addpromo</code>, <code>/removepromo</code>"),
+                ("📊 <b>Tier Quota</b>", "20 searches &amp; 20 requests/day"),
+            ],
         ),
     },
 
@@ -443,95 +509,111 @@ COMMAND_DETAILS = {
     # =======================================================================
     "publish": {
         "title": "🚀 publish",
+        "summary": "Merge test -> main & deploy",
         "category": "creator",
-        "text": (
-            "🚀 <b>Command:</b> <code>/publish</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Merges the tested &amp; verified <mark>test</mark> branch into <mark>main</mark> and pushes to "
-            "both <code>loki main</code> and <code>origin main</code> using authenticated refspecs.\n"
-            "Triggers live deployment on Render Public Books Bot with a single tap right from Telegram!\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/publish</code>\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "🚀 <b>Command Documentation —</b> <code>/publish</code>",
+            [
+                ("🚀 <b>Command</b>", "<code>/publish</code>"),
+                ("🔒 <b>Access</b>", "Creator Only 👑"),
+                ("🔀 <b>Git Flow</b>", "Merges <code>test</code> into <code>main</code>"),
+                ("🌐 <b>Remotes</b>", "Pushes to <code>loki</code> &amp; <code>origin</code>"),
+                ("💡 <b>Syntax</b>", "<code>/publish</code>"),
+            ],
         ),
     },
     "update": {
         "title": "📦 update",
+        "summary": "In-chat .zip code deployment",
         "category": "creator",
-        "text": (
-            "📦 <b>Command:</b> <code>/update</code>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Updates bot code directly in-chat without Termux. Send or reply to an updated <code>.zip</code> file with <code>/update</code>.\n"
-            "The bot unpacks the code, verifies with <code>compileall</code>, commits, and pushes to GitHub automatically!\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/update</code> (as caption or reply to a .zip archive)\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "📦 <b>Command Documentation —</b> <code>/update</code>",
+            [
+                ("📦 <b>Command</b>", "<code>/update</code>"),
+                ("🔒 <b>Access</b>", "Creator Only 👑"),
+                ("📝 <b>Purpose</b>", "Unpacks .zip, runs compileall &amp; pushes"),
+                ("💡 <b>Syntax</b>", "Reply to or caption a <code>.zip</code> with <code>/update</code>"),
+            ],
         ),
     },
     "sh": {
         "title": "💻 sh",
+        "summary": "Execute host shell commands",
         "category": "creator",
-        "text": (
-            "💻 <b>Command:</b> <code>/sh</code> (alias: <code>/term</code>)\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Executes bash shell commands directly on the host server and returns output live in Telegram.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/sh</code> &lt;shell command&gt;\n"
-            "• <code>/term</code> &lt;shell command&gt;\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "💻 <b>Command Documentation —</b> <code>/sh</code>",
+            [
+                ("💻 <b>Command</b>", "<code>/sh</code> (alias: <code>/term</code>)"),
+                ("🔒 <b>Access</b>", "Creator Only 👑"),
+                ("📝 <b>Purpose</b>", "Runs bash commands on host server"),
+                ("💡 <b>Syntax</b>", "<code>/sh</code> &lt;command&gt;"),
+            ],
         ),
     },
     "addadmin": {
         "title": "👑 addadmin",
+        "summary": "Appoint/remove Administrators",
         "category": "creator",
-        "text": (
-            "👑 <b>Commands:</b> <code>/addadmin</code> &amp; <code>/removeadmin</code>\n"
-            "<i>(Alias: /deladmin)</i>\n\n"
-            "📝 <b>Purpose:</b>\n"
-            "Appoints or removes an Administrator. Exclusive to the Creator.\n\n"
-            "💡 <b>Syntax:</b>\n"
-            "• <code>/addadmin</code> &lt;user_id or @username&gt;\n"
-            "• <code>/removeadmin</code> &lt;user_id or @username&gt;\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "👑 <b>Administrator Appointment</b>",
+            [
+                ("⬆️ <b>Appoint</b>", "<code>/addadmin</code> &lt;id|@user&gt;"),
+                ("⬇️ <b>Remove</b>", "<code>/removeadmin</code> (<code>/deladmin</code>)"),
+                ("🔒 <b>Access</b>", "Creator Only 👑"),
+                ("📊 <b>Admin Quota</b>", "Unlimited searches &amp; requests"),
+            ],
         ),
     },
     "creator_privileges": {
         "title": "♾️ creator_privileges",
+        "summary": "Supreme governance overview",
         "category": "creator",
-        "text": (
-            "👑 <b>Creator Supreme Authority</b>\n\n"
-            "The Creator has absolute governance across all bot operations, helper pools, "
-            "database persistence, and administrative appointments.\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "👑 <b>Creator Supreme Authority</b>",
+            [
+                ("👑 <b>Role</b>", "Creator / Owner"),
+                ("📊 <b>Allowances</b>", "Unlimited searches &amp; requests"),
+                ("⚔️ <b>Governance</b>", "Appoints Admins, Mods, Vols, Promos"),
+                ("🚀 <b>Deployment</b>", "In-chat <code>/update</code> &amp; <code>/publish</code>"),
+            ],
         ),
     },
     "backup": {
         "title": "💾 backup",
+        "summary": "Timestamped SQLite backups",
         "category": "creator",
-        "text": (
-            "💾 <b>Timestamped SQLite Backups &amp; Zero-Unpin Restore</b>\n\n"
-            "Snapshots of <code>files.db</code>, <code>mastermind_users.db</code>, and <code>config.db</code> are zipped with an IST timestamp "
-            "(<code>test_backup_YYYYMMDD-HHMM.zip</code> on Testing, <code>public_backup_YYYYMMDD-HHMM.zip</code> on Public), uploaded to the "
-            "designated Backup Topic, and tracked via the Logger Group description tag <code>[MM_BACKUP:msg_id=&lt;id&gt;:file=&lt;fname&gt;]</code>.\n"
-            "• Never requires unpinning other messages in the Logger Group!\n"
-            "• If a previous backup is deleted before deployment, the bot starts fresh with auto-backup active.\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "💾 <b>Timestamped SQLite Backups</b>",
+            [
+                ("🗄 <b>Databases</b>", "<code>files.db, mastermind_users.db, config.db</code>"),
+                ("🧪 <b>Testing Zip</b>", "<code>test_backup_YYYYMMDD-HHMM.zip</code>"),
+                ("🌐 <b>Public Zip</b>", "<code>public_backup_YYYYMMDD-HHMM.zip</code>"),
+                ("🏷 <b>Tracker</b>", "Logger Group description tag (no unpin)"),
+            ],
         ),
     },
     "governance": {
         "title": "⚙️ governance",
+        "summary": "Environment & fleet architecture",
         "category": "creator",
-        "text": (
-            "⚙️ <b>Global Architecture &amp; Identity Governance</b>\n\n"
-            "Environment configuration, isolated Public/Testing credentials, Bot API 10.3 Rich UI, and Render deployment monitoring.\n\n"
-            "🔒 <b>Access:</b> <mark>Creator Only 👑</mark>"
+        "text": _help_card(
+            "⚙️ <b>Global Architecture &amp; Governance</b>",
+            [
+                ("🔀 <b>Branches</b>", "<code>test</code> (Testing) / <code>main</code> (Public)"),
+                ("🤖 <b>Bot Fleet</b>", "Main Bot + Round-Robin Helper Bots"),
+                ("🎨 <b>UI Engine</b>", "Tables + Transparent Colorful Buttons"),
+            ],
         ),
     },
 }
 
 
 # ---------------------------------------------------------------------------
-# Menu Builders with Pagination (Max 6 buttons per page, Colorful Bot API 10.3 Styles)
+# Menu Builders with Pagination (Max 6 buttons per page, Transparent Colorful Styles)
+# Note: On Telegram Android/Web, `success` (green) and `danger` (red/coral) render
+# as transparent tinted buttons, whereas `primary` renders as solid opaque blue.
+# We alternate `success` and `danger` across the help menu so every button is
+# transparent and colorful!
 # ---------------------------------------------------------------------------
 PAGE_SIZE = 6
 
@@ -565,19 +647,18 @@ def build_paginated_category_menu(category: str, page: int = 1):
     }
     cat_title = titles.get(category, "Documentation")
 
-    text = (
-        f"<b>{cat_title}</b> (<mark>Page {page}/{total_pages}</mark>)\n\n"
-        "Tap any colorful command button below to inspect its purpose, syntax, and examples:"
-    )
-
-    # Alternate vibrant styles across command cards
-    cat_style = "success" if category in ("volunteer", "creator") else "primary"
+    table_rows = []
     buttons = []
     row = []
-    for key in page_keys:
+    for idx, key in enumerate(page_keys):
         item = COMMAND_DETAILS.get(key, {})
         label = item.get("title", key)
-        btn_style = "success" if key in ("start", "search", "request", "refer", "publish", "update", "index") else cat_style
+        summary = item.get("summary", "Command guide")
+        table_rows.append(f"<tr><td>{html.escape(label)}</td><td>{html.escape(summary)}</td></tr>")
+        # Checkerboard alternation of transparent colorful styles (success = green, danger = coral/red)
+        row_num = idx // 2
+        col_num = idx % 2
+        btn_style = "success" if (row_num + col_num) % 2 == 0 else "danger"
         row.append(styled_button(label, callback_data=f"help_cmd_{key}", style=btn_style))
         if len(row) == 2:
             buttons.append(row)
@@ -585,24 +666,31 @@ def build_paginated_category_menu(category: str, page: int = 1):
     if row:
         buttons.append(row)
 
-    # Navigation Row with Bot API 10.3 DisabledButton indicator
+    text = (
+        f"<b>{cat_title}</b> (<mark>Page {page}/{total_pages}</mark>)\n\n"
+        f"<table striped><tr><th>Command</th><th>Summary</th></tr>{''.join(table_rows)}</table>\n\n"
+        "Tap any transparent colorful button below to open full details:"
+    )
+
+    # Navigation Row with transparent colorful buttons
     nav_row = []
     if page > 1:
-        nav_row.append(styled_button("◀️ Prev", callback_data=f"help_cat_{category}_p{page - 1}", style="primary"))
-    nav_row.append(styled_button(f"📄 {page}/{total_pages}", callback_data="noop", disabled=True))
+        nav_row.append(styled_button("◀️ Prev", callback_data=f"help_cat_{category}_p{page - 1}", style="danger"))
+    nav_row.append(styled_button(f"📄 {page}/{total_pages}", callback_data="noop", style="success", disabled=True))
     if page < total_pages:
-        nav_row.append(styled_button("Next ▶️", callback_data=f"help_cat_{category}_p{page + 1}", style="primary"))
+        nav_row.append(styled_button("Next ▶️", callback_data=f"help_cat_{category}_p{page + 1}", style="success"))
     buttons.append(nav_row)
 
-    buttons.append([styled_button("« Back to Categories", callback_data="help_main", style="primary")])
+    buttons.append([styled_button("« Back to Categories", callback_data="help_main", style="danger")])
     return text, InlineKeyboardMarkup(buttons)
 
 
 def build_main_help_menu(user_id: int):
     """
-    Builds the main help menu page using Bot API 10.3 Rich Formatting & Colorful Buttons:
+    Builds the main help menu page using Bot API 10.3 Rich Tables & Transparent Colorful Buttons:
     1. Only displays categories accessible to the user's role level.
-    2. Includes a dedicated '👥 roles' button directly on the main page.
+    2. Includes a structured <table striped> overview of available sections.
+    3. Alternates transparent `success` (green) and `danger` (red/coral) buttons across rows.
     """
     role = get_user_role_db(user_id)
     is_creator_user = is_creator(user_id)
@@ -610,41 +698,54 @@ def build_main_help_menu(user_id: int):
     is_mod = (role in ("Moderator", "Admin", "Creator", "Owner"))
     is_vol = (role in ("Volunteer", "Moderator", "Admin", "Creator", "Owner"))
 
+    sec_rows = [
+        "<tr><td>👤 <b>Your Role</b></td><td><code>" + html.escape(str(role)) + "</code></td></tr>",
+        "<tr><td>👤 <b>User Hub</b></td><td>11 Commands &amp; Guides</td></tr>",
+        "<tr><td>👥 <b>User Roles</b></td><td>6 Community Tiers</td></tr>",
+    ]
+    if is_vol:
+        sec_rows.append("<tr><td>🤝 <b>Volunteer</b></td><td>Direct Helper DM Indexing</td></tr>")
+    if is_mod:
+        sec_rows.append("<tr><td>🛡️ <b>Moderator</b></td><td>Request Status &amp; Indexing</td></tr>")
+    if is_admin:
+        sec_rows.append("<tr><td>⚔️ <b>Admin Hub</b></td><td>12 Admin &amp; Batch Tools</td></tr>")
+    if is_creator_user:
+        sec_rows.append("<tr><td>👑 <b>Creator</b></td><td>7 Governance &amp; Deploy Tools</td></tr>")
+
     text = (
         f"📖 <b>{bot_name()} Bot — Help &amp; Documentation Hub</b>\n\n"
-        "Welcome! Browse our official interactive documentation below:\n\n"
-        f"👤 <b>Your Access Level:</b> <mark>{role}</mark>\n\n"
-        "Select a colorful section below to view available functions and guides:"
+        f"<table striped><tr><th>Section</th><th>Overview</th></tr>{''.join(sec_rows)}</table>\n\n"
+        "Select a transparent colorful section below to browse commands:"
     )
 
     buttons = [
         [
-            styled_button("👤 User Commands", callback_data="help_cat_user_p1", style="primary"),
-            styled_button("👥 User Roles", callback_data="help_cmd_roles", style="success"),
+            styled_button("👤 User Commands", callback_data="help_cat_user_p1", style="success"),
+            styled_button("👥 User Roles", callback_data="help_cmd_roles", style="danger"),
         ],
     ]
 
     second_row = []
     if is_vol:
-        second_row.append(styled_button("🤝 Volunteer", callback_data="help_cat_volunteer_p1", style="success"))
+        second_row.append(styled_button("🤝 Volunteer", callback_data="help_cat_volunteer_p1", style="danger"))
     if is_mod:
-        second_row.append(styled_button("🛡️ Moderator", callback_data="help_cat_moderator_p1", style="primary"))
+        second_row.append(styled_button("🛡️ Moderator", callback_data="help_cat_moderator_p1", style="success"))
     if second_row:
         buttons.append(second_row)
 
     admin_row = []
     if is_admin:
-        admin_row.append(styled_button("⚔️ Admin Hub", callback_data="help_cat_admin_p1", style="primary"))
+        admin_row.append(styled_button("⚔️ Admin Hub", callback_data="help_cat_admin_p1", style="success"))
     if is_creator_user:
-        admin_row.append(styled_button("👑 Creator", callback_data="help_cat_creator_p1", style="success"))
+        admin_row.append(styled_button("👑 Creator", callback_data="help_cat_creator_p1", style="danger"))
     if admin_row:
         buttons.append(admin_row)
 
     buttons.append([
         styled_button("🔍 Search Library", callback_data="search_menu", style="success"),
-        styled_button("📊 My Quota", callback_data="quota", style="primary"),
+        styled_button("📊 My Quota", callback_data="quota", style="danger"),
     ])
-    buttons.append([styled_button("« Back to Start", callback_data="start_menu", style="primary")])
+    buttons.append([styled_button("« Back to Start", callback_data="start_menu", style="danger")])
 
     return text, InlineKeyboardMarkup(buttons)
 
@@ -726,7 +827,7 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
         text = item["text"]
         markup = InlineKeyboardMarkup([
-            [styled_button(f"« Back to {category.capitalize()} Menu", callback_data=f"help_cat_{category}_p1", style="primary")],
+            [styled_button(f"« Back to {category.capitalize()} Menu", callback_data=f"help_cat_{category}_p1", style="danger")],
             [styled_button("« Main Help Hub", callback_data="help_main", style="success")],
         ])
         await q.edit_message_text(text, parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
