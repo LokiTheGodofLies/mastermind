@@ -311,5 +311,79 @@ check("broadcast control panel has <table striped>", "<table striped>" in bc_txt
 ro_txt = ro_h._build_roster_view("🛡️ <b>Admins</b>", [{"user_id": 1, "full_name": "Loki", "username": "loki", "role": "Creator"}], "None", "Footer")
 check("roster view has <table striped>", "<table striped>" in ro_txt)
 
+
+# 4) Build 1805: Live Progress Card fields (Screenshot 4), Ongoing Tasks Fleet Dashboard (Screenshots 1 & 3), and DM-only routing
+check(
+    "progress card has Screenshot 4 fields & Granular Breakdown",
+    all(
+        k in st_card
+        for k in (
+            "INDEXING IN PROGRESS",
+            "Assigned Worker",
+            "Scanning Range",
+            "Excluded Range",
+            "Messages Scanned",
+            "Total Files Found",
+            "Saved to Database",
+            "Stored in Storage",
+            "Enriched Captions",
+            "Total Files Indexed",
+            "Pending in Batch",
+            "Granular Breakdown",
+            "Already in Database",
+            "Already in Storage",
+            "Caption Already Valid",
+            "Enrichment Failed (No Match)",
+            "Time Elapsed",
+            "Estimated ETA",
+        )
+    ),
+    st_card,
+)
+check(
+    "running markup includes Ongoing Tasks button",
+    any(
+        b.callback_data == "idx_ongoing_menu"
+        for row in rm_run.inline_keyboard
+        for b in row
+    ),
+)
+
+# Ongoing Tasks Fleet Dashboard test with 1 running and 1 queued task
+ic._persist_job(running_job)
+queued_job = dict(
+    running_job,
+    rid="ef56ab78",
+    title="History Group Library",
+    state="queued",
+    assigned_worker="⏳ Waiting for a bot to be free",
+)
+ic._persist_job(queued_job)
+dash_txt, dash_kb = ic.build_ongoing_tasks_dashboard()
+dash_cbs = [b.callback_data for r in dash_kb.inline_keyboard for b in r]
+check(
+    "Ongoing Tasks Fleet Dashboard renders active + queued tasks in <table striped>",
+    "FLEET INDEXING TASKS" in dash_txt
+    and "[Task #1]" in dash_txt
+    and "[Task #2]" in dash_txt
+    and "Queued (Position #1)" in dash_txt
+    and "<table striped>" in dash_txt,
+    dash_txt,
+)
+check(
+    "Ongoing Tasks Fleet Dashboard buttons include Pause #1, Run Queued #2, Refresh Menu",
+    f"idx_fl_pause_{rid2}" in dash_cbs
+    and "idx_fl_prio_ef56ab78" in dash_cbs
+    and "idx_ongoing_menu" in dash_cbs,
+    dash_cbs,
+)
+ic._forget_job(rid2)
+ic._forget_job("ef56ab78")
+
+# DM-only routing when /index is triggered in a channel (negative chat_id)
+dm_resolved = ic._resolve_admin_dm_id(SimpleNamespace(id=8853305382))
+anon_resolved = ic._resolve_admin_dm_id(None)
+check("channel /index resolves positive Admin DM ID (never negative channel ID)", dm_resolved == 8853305382 and anon_resolved > 0)
+
 print(f"\nFAILS: {fails}")
 sys.exit(1 if fails else 0)

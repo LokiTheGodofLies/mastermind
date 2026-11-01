@@ -359,6 +359,21 @@ COMMAND_DETAILS = {
             ],
         ),
     },
+    "ongoing": {
+        "title": "📋 ongoing",
+        "summary": "Fleet indexing tasks dashboard",
+        "category": "admin",
+        "text": _help_card(
+            "📋 <b>Command Documentation —</b> <code>/ongoing</code>",
+            [
+                ("📋 <b>Command</b>", "<code>/ongoing</code> (<code>/tasks</code>)"),
+                ("🔒 <b>Access</b>", "Administrators &amp; Creator"),
+                ("🤖 <b>Fleet View</b>", "Active, Paused &amp; Queued Helper Tasks"),
+                ("🎛 <b>Controls</b>", "Pause, Resume, Prioritize &amp; Cancel"),
+                ("🔄 <b>Refresh</b>", "Static Fleet Dashboard (saves API calls)"),
+            ],
+        ),
+    },
     "editcaption": {
         "title": "✏️ editcaption",
         "summary": "Edit file captions in Storage Group",
@@ -622,7 +637,7 @@ CATEGORY_COMMANDS = {
     "volunteer": ["vol_privileges", "vol_indexing", "vol_notice"],
     "moderator": ["mod_privileges", "mod_requests", "mod_indexing", "mod_notice"],
     "admin": [
-        "checkhelpers", "index", "editcaption", "broadcast", "ban", "gift", "editscript",
+        "checkhelpers", "index", "ongoing", "editcaption", "broadcast", "ban", "gift", "editscript",
         "log", "ping", "addmoderator", "addvolunteer", "addpromoter"
     ],
     "creator": ["publish", "update", "sh", "addadmin", "creator_privileges", "backup", "governance"],
@@ -740,6 +755,8 @@ def build_main_help_menu(user_id: int):
         admin_row.append(styled_button("👑 Creator", callback_data="help_cat_creator_p1", style="danger"))
     if admin_row:
         buttons.append(admin_row)
+    if is_admin:
+        buttons.append([styled_button("📋 Ongoing Tasks", callback_data="idx_ongoing_menu", style="success")])
 
     buttons.append([
         styled_button("🔍 Search Library", callback_data="search_menu", style="success"),

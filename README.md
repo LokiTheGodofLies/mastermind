@@ -1,3 +1,16 @@
+## 🤖 Helper Bot DM Indexing Progress, `📋 Ongoing Tasks` Fleet Dashboard & Multi-Helper Concurrency (`20261101-1805`)
+
+- **Never Post Index Progress Inside Source Channels (`modules/indexing/index_command.py`)**:
+  - When `/index` is sent inside a source channel or group, the command post in the channel is deleted immediately and the setup menu + live `📚 INDEXING IN PROGRESS` card are sent exclusively in the **Admin's DM via the assigned Helper Bot** performing the index task (with fallback to Main Bot DM / Creator DM).
+- **Full Granular Live Progress Card in Admin's DM (`_status_text`)**:
+  - Displays `Target`, `Assigned Worker`, `Scanning Range`, `Excluded Range (N msgs skipped)`, `Progress` bar & `%`, `Messages Scanned`, `Total Files Found`, `Saved to Database`, `Stored in Storage`, `Enriched Captions`, `Total Files Indexed`, `Pending in Batch`, plus `⏭ Granular Breakdown & Timing` (`Already in Database`, `Already in Storage`, `Caption Already Valid`, `Enrichment Failed (No Match)`, `Duplicates`, `Skipped`, `Filtered`, `Deleted`, `Errors`, `Time Elapsed`, `Estimated ETA`) inside `<table striped>` with `[ ⏸ Pause / ▶️ Resume ]`, `[ ⛔ Cancel Indexing ]`, and `[ 📋 Ongoing Tasks ]` buttons.
+- **`📋 Ongoing Tasks` Button & `📋 FLEET INDEXING TASKS` Dashboard (`build_ongoing_tasks_dashboard`, `/ongoing`, `/tasks`)**:
+  - Accessible via the `[ 📋 Ongoing Tasks ]` button on `/start` (Main Bot & Helper Bots), `/index` wizard/menus/progress cards, `/help` Admin Hub, or the `/ongoing` (`/tasks`, `/indextasks`) command.
+  - Shows all active (`🟢 Active (Running)`), paused (`🟡 Paused` / `🟡 Paused (User DM upload in progress)`), and queued (`⏳ Queued (Position #N)`) tasks across the Helper Bot Fleet in `<table striped>` with per-task `[ ⏸ Pause #N ]`, `[ ▶️ Resume #N ]`, `[ ▶️ Run Queued #N ]`, `[ ⛔ Cancel #N ]`, `[ 🔄 Refresh Menu ]`, and `[ ➕ New Index Task ]` buttons.
+- **Multi-Helper Bot Fleet Concurrency, Dynamic Queueing & User DM Upload Priority**:
+  - Enforces 1 active batch job per Helper Bot; if all Helper Bots are busy, additional batch tasks enter the `Pending Index Queue` (`⏳ Waiting for a bot to be free`) and start automatically when a Helper Bot finishes.
+  - Direct file uploads in a Helper Bot's DM temporarily pause that Helper Bot's channel batch loop (`pause_worker_for_dm_upload`), process the user's file immediately, and automatically resume the channel loop (`resume_worker_after_dm_upload`).
+
 ## ⚙️ Ongoing `/index` Process Persistence, Transparent Colorful `/help` Buttons & Universal `<table striped>` Data Views (Build `20261101-1735`)
 
 - **Ongoing `/index` Process (`modules/indexing/index_command.py`, `main.py`)**:

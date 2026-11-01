@@ -81,6 +81,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     share_text = "try this amazing bot and let's earn bonus searches and requests !"
     share_url = f"https://t.me/share/url?url={my_referral_link}&text={share_text}"
 
+    from modules.database.user_db import is_admin_or_creator
     keyboard = [
         [
             styled_button("🔍 Search Books", callback_data="search_menu", style="success"),
@@ -94,6 +95,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             styled_button("📤 Refer & Earn Bonus", url=share_url, style="success"),
         ],
     ]
+    if is_admin_or_creator(user.id):
+        keyboard.insert(
+            2,
+            [styled_button("📋 Ongoing Tasks", callback_data="idx_ongoing_menu", style="success")],
+        )
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:

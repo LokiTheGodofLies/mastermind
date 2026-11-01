@@ -2106,6 +2106,10 @@ async def verify_and_heal_indexed_file(
         "db_ok": db_ok,
         "category": category,
         "caption_html": caption_html,
+        "was_in_db": was_in_db,
+        "was_in_storage": was_in_storage,
+        "already_enriched": already_enriched,
+        "was_caption_healed": was_caption_healed,
     }
 
 

@@ -96,7 +96,15 @@ from modules.indexing.book_index import (
     handle_storage_caption_edit,
     storage_caption_reply_handler,
 )  # noqa: E402
-from modules.indexing.index_command import index_command, index_callback, index_flow_handler, resume_active_index_jobs  # noqa: E402
+from modules.indexing.index_command import (
+    index_command,
+    index_callback,
+    index_flow_handler,
+    ongoing_tasks_command,
+    pause_worker_for_dm_upload,
+    resume_active_index_jobs,
+    resume_worker_after_dm_upload,
+)  # noqa: E402
 from modules.broadcast.handlers import broadcast_command, cancelbroadcast_command, broadcast_callback_handler  # noqa: E402
 from modules.roster.handlers import admins_command, moderators_command, volunteers_command, promoters_command  # noqa: E402
 from modules.message.message_handler import handle_normal_text  # noqa: E402
@@ -145,11 +153,23 @@ async def _helper_start_command(update, context):
         return
     u_name = html.escape(user.first_name or "Friend")
     b_name = html.escape(bot_name())
+    from telegram import InlineKeyboardMarkup
+    from modules.utility.rich_ui import styled_button
+    from modules.database.user_db import is_admin_or_creator
+    h_kb = None
+    if is_admin_or_creator(user.id):
+        h_kb = InlineKeyboardMarkup([
+            [
+                styled_button("📋 Ongoing Tasks", callback_data="idx_ongoing_menu", style="success"),
+                styled_button("➕ New Index Task", callback_data="idx_new_wizard", style="danger"),
+            ]
+        ])
     await msg.reply_text(
         f"👋 Hi <b>{u_name}</b>! I am a <mark>{b_name}</mark> helper delivery &amp; indexing bot.\n\n"
-        "✅ <b>Ready for Instant Delivery:</b> Whenever you tap a book in the main bot, "
+        "✅ <b>Ready for Instant Delivery &amp; Indexing:</b> Whenever you tap a book in the main bot, "
         "I will deliver the files directly to your PM as well as the posting channel!",
         parse_mode="HTML",
+        reply_markup=h_kb,
     )
 
 
@@ -167,7 +187,11 @@ async def _helper_file_indexing_handler(update: Update, context: ContextTypes.DE
             parse_mode="HTML",
         )
         return
-    await handle_book_indexing(update, context)
+    paused_rids = pause_worker_for_dm_upload(getattr(context.bot, "username", None) or getattr(context.bot, "id", None))
+    try:
+        await handle_book_indexing(update, context)
+    finally:
+        resume_worker_after_dm_upload(paused_rids)
 
 
 async def handle_main_bot_file_rejection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -248,6 +272,7 @@ async def _start_helper_apps() -> list:
             happ = ApplicationBuilder().token(tok).build()
             happ.add_handler(CommandHandler("start", _helper_start_command))
             happ.add_handler(CommandHandler("index", index_command))
+            happ.add_handler(CommandHandler(["ongoing", "tasks", "indextasks"], ongoing_tasks_command))
             happ.add_handler(CommandHandler(["editcaption", "setcaption", "caption"], editcaption_command))
             happ.add_handler(CommandHandler("id", id_command))
             happ.add_handler(
@@ -403,6 +428,7 @@ def main():
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler(["request", "req"], request_command))
     application.add_handler(CommandHandler("index", index_command))
+    application.add_handler(CommandHandler(["ongoing", "tasks", "indextasks"], ongoing_tasks_command))
     application.add_handler(CommandHandler(["editcaption", "setcaption", "caption"], editcaption_command))
     application.add_handler(CommandHandler(["broadcast", "bc", "pinbroadcast", "pinbc"], broadcast_command))
     application.add_handler(CommandHandler(["cancelbroadcast", "stopbroadcast"], cancelbroadcast_command))
