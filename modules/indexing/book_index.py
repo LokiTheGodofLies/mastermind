@@ -2867,3 +2867,23 @@ async def storage_caption_reply_handler(update: Update, context: ContextTypes.DE
             await context.bot.delete_message(chat_id=int(storage_id), message_id=prompt_mid)
         except Exception:
             pass
+
+
+async def handle_storage_group_media_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Automatically syncs `storage_message_id` and `file_id` in `files.db` whenever a media message
+    is observed in the Storage Group, matching by `file_unique_id` and `file_id`."""
+    msg = update.effective_message
+    chat = update.effective_chat
+    storage_id = storage_group_id()
+    if not msg or not chat or not storage_id or str(chat.id) != str(storage_id):
+        return
+    info = extract_media_info(msg)
+    if not info or not info.get("file_unique_id"):
+        return
+    from modules.database.file_db import sync_unique_file_storage_db
+    sync_unique_file_storage_db(
+        row_id=None,
+        file_unique_id=info["file_unique_id"],
+        file_id=info.get("file_id"),
+        storage_message_id=int(msg.message_id),
+    )

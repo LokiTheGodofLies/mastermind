@@ -385,5 +385,82 @@ dm_resolved = ic._resolve_admin_dm_id(SimpleNamespace(id=8853305382))
 anon_resolved = ic._resolve_admin_dm_id(None)
 check("channel /index resolves positive Admin DM ID (never negative channel ID)", dm_resolved == 8853305382 and anon_resolved > 0)
 
+
+# 5) Build 20261105-1628: Strict 1-to-1 (file_unique_id, file_id, storage_message_id) uniqueness & Storage Group lookup on missing message ID
+from modules.database import file_db as fdb
+os.environ["FILES_DB_PATH"] = os.path.join(_TMP, "files_uniq_test.db")
+fdb.init_file_db()
+
+# Insert a file with storage_message_id = 8285
+fdb.save_indexed_file_db(
+    file_unique_id="AgAD_uniq_1",
+    file_id="BQAC_fid_old",
+    storage_message_id=8285,
+    file_name="Rebel of Raleigh High.epub",
+    file_size=3_210_000,
+    duration=0,
+    user_id=8853305382,
+    user_title="Loki",
+    caption="📚 <b>Book:</b> Rebel",
+    extension=".epub",
+    file_type="document",
+    category="ebook",
+    is_enriched=1,
+)
+# Saving the same file with a new storage_message_id (1120) and file_id updates the SINGLE row (no duplicate row)
+fdb.save_indexed_file_db(
+    file_unique_id="AgAD_uniq_1",
+    file_id="BQAC_fid_new",
+    storage_message_id=1120,
+    file_name="Rebel of Raleigh High.epub",
+    file_size=3_210_000,
+    duration=0,
+    user_id=8853305382,
+    user_title="Loki",
+    caption="📚 <b>Book:</b> Rebel",
+    extension=".epub",
+    file_type="document",
+    category="ebook",
+    is_enriched=1,
+)
+cands = fdb.find_file_candidates_by_ids_db("AgAD_uniq_1", "BQAC_fid_new")
+check(
+    "each file has strictly ONE row with unique file_unique_id, file_id, and storage_message_id",
+    len(cands) == 1 and cands[0]["storage_message_id"] == 1120 and cands[0]["file_id"] == "BQAC_fid_new",
+    cands,
+)
+
+# When storage_message_id (8285) is not found, _resolve_or_heal_storage_message_id checks Storage Group / file_id & file_unique_id and updates DB
+class ProbeAndHealBot:
+    id = 8580921678
+    username = "HDCarltonbot"
+    async def forward_message(self, chat_id, from_chat_id, message_id, **kw):
+        if int(message_id) == 1120:
+            return SimpleNamespace(
+                message_id=9001,
+                document=SimpleNamespace(
+                    file_id="BQAC_fid_new",
+                    file_unique_id="AgAD_uniq_1",
+                    file_name="Rebel of Raleigh High.epub",
+                    file_size=3_210_000,
+                    mime_type="application/epub+zip",
+                ),
+                audio=None,
+                caption="",
+            )
+        raise BadRequest("Message to forward not found")
+    async def delete_message(self, **kw):
+        return True
+
+stale_row = dict(cands[0])
+stale_row["storage_message_id"] = 8285
+resolved_mid = run(dv._resolve_or_heal_storage_message_id(ProbeAndHealBot(), stale_row, -1004351628501, stale_msg_id=8285))
+updated_row = fdb.get_file_by_unique_id_db("AgAD_uniq_1")
+check(
+    "missing storage_message_id (8285) resolved in Storage Group via file_unique_id/file_id -> 1120 & synced in DB",
+    resolved_mid == 1120 and updated_row["storage_message_id"] == 1120,
+    (resolved_mid, dict(updated_row) if updated_row else None),
+)
+
 print(f"\nFAILS: {fails}")
 sys.exit(1 if fails else 0)

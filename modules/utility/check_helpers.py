@@ -564,7 +564,7 @@ async def _process_update_zip(update: Update, context: ContextTypes.DEFAULT_TYPE
                 subprocess.run('git config user.email "bot@mastermind.local"', shell=True, cwd=repo_path, capture_output=True)
                 subprocess.run("git checkout -B test", shell=True, cwd=repo_path, capture_output=True)
                 # Untrack virtual environment directories if previously committed
-                subprocess.run("git rm -r --cached .venv venv env ENV 2>/dev/null", shell=True, cwd=repo_path, capture_output=True)
+                subprocess.run("git rm -r --cached --ignore-unmatch .venv venv env ENV *.bak modules/search/handlers.py.bak 2>/dev/null", shell=True, cwd=repo_path, capture_output=True)
 
                 subprocess.run("git add -A", shell=True, capture_output=True, cwd=repo_path)
                 commit_res = subprocess.run(

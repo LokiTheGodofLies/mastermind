@@ -16,7 +16,13 @@ from config import (
     posting_channel_id,
     storage_group_id,
 )
-from modules.database.file_db import get_file_by_id_db, update_storage_message_id_db
+from modules.database.file_db import (
+    find_file_candidates_by_ids_db,
+    get_file_by_id_db,
+    get_storage_message_id_bounds_db,
+    sync_unique_file_storage_db,
+    update_storage_message_id_db,
+)
 from modules.log.startup_log import report_error
 from modules.utility.rich_ui import styled_button
 
@@ -173,34 +179,246 @@ def _fmt_size(n) -> str:
     return _format_size(n)
 
 
+def _is_missing_storage_msg_error(exc: Exception) -> bool:
+    """Returns True when Telegram reports that the storage_message_id in the Storage Group does not exist."""
+    msg = str(exc or "").lower()
+    return any(
+        p in msg
+        for p in (
+            "message to copy not found",
+            "message_id_invalid",
+            "message not found",
+            "message to forward not found",
+        )
+    )
+
+
+def _row_val(row, key: str, default=None):
+    try:
+        if hasattr(row, "keys") and key in row.keys():
+            return row[key]
+        if isinstance(row, dict):
+            return row.get(key, default)
+    except Exception:
+        pass
+    return default
+
+
+def _build_backfill_caption(row) -> str:
+    """Builds a clean Mira-style storage caption when syncing/restoring a file in the Storage Group."""
+    from modules.indexing.book_index import _parse_caption_meta, format_index_channel_caption
+    raw_cap = _row_val(row, "caption") or ""
+    parsed = _parse_caption_meta(raw_cap) if raw_cap else {}
+    fname = _row_val(row, "file_name") or "File"
+    fsize_str = _fmt_size(_row_val(row, "file_size") or 0)
+    ext = (_row_val(row, "extension") or "").lstrip(".")
+    cat = _row_val(row, "category") or "ebook"
+    if parsed.get("book_title") and parsed.get("book_author"):
+        meta = {
+            "is_matched": True,
+            "title": parsed.get("book_title"),
+            "author": parsed.get("book_author"),
+            "series": parsed.get("book_series") or "Standalone",
+            "narrator": parsed.get("narrator") or "",
+            "length": parsed.get("length") or "",
+            "published": parsed.get("book_published") or "",
+        }
+        return format_index_channel_caption(fname, fsize_str, ext, cat, meta, cat)
+    return (
+        f"📁 <b>File:</b> <code>{html.escape(fname)}</code>\n"
+        f"📦 <b>Size:</b> <code>{html.escape(fsize_str)}</code> | "
+        f"<b>Type:</b> <code>.{html.escape(ext)}</code>"
+    )
+
+
+async def _probe_storage_group_for_file(
+    bot_inst,
+    storage_id: int,
+    target_unique_id: str | None,
+    target_file_id: str | None,
+    candidate_mids: list[int],
+) -> tuple[int | None, str | None]:
+    """
+    Checks candidate message IDs in the Storage Group (`storage_id`) by temporarily forwarding/inspecting
+    within `storage_id` to see if any message matches `target_unique_id` or `target_file_id`.
+    Returns `(found_storage_message_id, found_file_id)` or `(None, None)`.
+    """
+    from modules.indexing.book_index import extract_media_info
+    if not bot_inst or not hasattr(bot_inst, "forward_message"):
+        return None, None
+
+    for mid in candidate_mids:
+        if not mid or mid <= 0:
+            continue
+        fwd = None
+        try:
+            fwd = await bot_inst.forward_message(
+                chat_id=int(storage_id),
+                from_chat_id=int(storage_id),
+                message_id=int(mid),
+                disable_notification=True,
+            )
+            info = extract_media_info(fwd) if fwd else None
+            if fwd and hasattr(bot_inst, "delete_message"):
+                try:
+                    await bot_inst.delete_message(chat_id=int(storage_id), message_id=int(fwd.message_id))
+                except Exception:
+                    pass
+            if info:
+                # Sync any discovered Storage Group media message into files.db on the fly
+                if info.get("file_unique_id"):
+                    sync_unique_file_storage_db(
+                        row_id=None,
+                        file_unique_id=info["file_unique_id"],
+                        file_id=info.get("file_id"),
+                        storage_message_id=int(mid),
+                    )
+                if (target_unique_id and info.get("file_unique_id") == target_unique_id) or (
+                    target_file_id and info.get("file_id") == target_file_id
+                ):
+                    return int(mid), info.get("file_id")
+        except Exception:
+            if fwd and hasattr(bot_inst, "delete_message"):
+                try:
+                    await bot_inst.delete_message(chat_id=int(storage_id), message_id=int(fwd.message_id))
+                except Exception:
+                    pass
+            continue
+    return None, None
+
+
+async def _resolve_or_heal_storage_message_id(main_bot, row, storage_id: int, stale_msg_id: int | None = None) -> int | None:
+    """
+    Whenever a file's `storage_message_id` is not found in the Storage Group:
+      1. Checks all records in `files.db` matching `file_unique_id`, `file_id`, or `file_name`
+         (`find_file_candidates_by_ids_db`) to collect all candidate `storage_message_id`s and `file_id`s.
+      2. Checks/probes the Storage Group for a valid message matching `file_unique_id` / `file_id`.
+      3. Uses all known `file_id`s across the Main Bot and all Helper Bots to restore the file in
+         the Storage Group if needed, verifying `file_unique_id`.
+      4. Calls `sync_unique_file_storage_db()` so the file has strictly ONE unique `file_unique_id`,
+         ONE `file_id`, and ONE `storage_message_id` in `files.db`.
+    """
+    if not storage_id:
+        return None
+
+    row_id = _row_val(row, "id")
+    fuid = (_row_val(row, "file_unique_id") or "").strip() or None
+    primary_fid = (_row_val(row, "file_id") or "").strip() or None
+    fname = (_row_val(row, "file_name") or "").strip() or None
+
+    # 1. Gather all candidate file_ids and storage_message_ids from files.db
+    db_candidates = find_file_candidates_by_ids_db(fuid, primary_fid, fname)
+    candidate_fids: list[str] = []
+    if primary_fid:
+        candidate_fids.append(primary_fid)
+    candidate_mids: list[int] = []
+
+    for c_row in db_candidates:
+        cfid = (_row_val(c_row, "file_id") or "").strip()
+        if cfid and cfid not in candidate_fids:
+            candidate_fids.append(cfid)
+        cmid = int(_row_val(c_row, "storage_message_id") or 0)
+        if cmid > 0 and cmid != (stale_msg_id or 0) and cmid not in candidate_mids:
+            candidate_mids.append(cmid)
+        if not fuid and _row_val(c_row, "file_unique_id"):
+            fuid = str(_row_val(c_row, "file_unique_id")).strip()
+
+    # 2. Check candidate message IDs (and recent Storage Group messages) in the Storage Group
+    probe_mids = list(candidate_mids)
+    _, max_mid = get_storage_message_id_bounds_db()
+    if max_mid > 0:
+        for m in range(max_mid + 5, max(0, max_mid - 15), -1):
+            if m != (stale_msg_id or 0) and m not in probe_mids:
+                probe_mids.append(m)
+
+    if probe_mids and (fuid or primary_fid):
+        found_mid, found_fid = await _probe_storage_group_for_file(
+            main_bot, int(storage_id), fuid, primary_fid, probe_mids[:20]
+        )
+        if found_mid:
+            sync_unique_file_storage_db(row_id, fuid, found_fid or primary_fid, found_mid)
+            return found_mid
+
+    # 3. Restore/sync the file in the Storage Group using all candidate file_ids across Main Bot + Helper Bots
+    if not candidate_fids:
+        return None
+
+    from modules.indexing.book_index import extract_media_info, storage_caption_markup
+    cap = _build_backfill_caption(row)
+    cat = _row_val(row, "category") or "ebook"
+    is_audio = cat == "audiobook"
+
+    async def _try_upload_with(bot_inst, fid_to_try: str) -> int | None:
+        markup = storage_caption_markup()
+        sent = None
+        if is_audio and hasattr(bot_inst, "send_audio"):
+            try:
+                sent = await bot_inst.send_audio(
+                    chat_id=int(storage_id),
+                    audio=fid_to_try,
+                    caption=cap,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
+            except Exception:
+                sent = None
+        if sent is None and hasattr(bot_inst, "send_document"):
+            sent = await bot_inst.send_document(
+                chat_id=int(storage_id),
+                document=fid_to_try,
+                caption=cap,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        mid = getattr(sent, "message_id", None)
+        if mid:
+            if hasattr(bot_inst, "edit_message_reply_markup"):
+                try:
+                    await bot_inst.edit_message_reply_markup(
+                        chat_id=int(storage_id),
+                        message_id=int(mid),
+                        reply_markup=storage_caption_markup(int(mid)),
+                    )
+                except Exception:
+                    pass
+            s_info = extract_media_info(sent) if sent else None
+            actual_fuid = (s_info or {}).get("file_unique_id") or fuid
+            actual_fid = (s_info or {}).get("file_id") or fid_to_try
+            sync_unique_file_storage_db(row_id, actual_fuid, actual_fid, int(mid))
+            update_storage_message_id_db(row_id, int(mid))
+            return int(mid)
+        return None
+
+    for fid_cand in candidate_fids:
+        if main_bot is not None:
+            try:
+                new_mid = await _try_upload_with(main_bot, fid_cand)
+                if new_mid:
+                    return new_mid
+            except Exception:
+                pass
+        for tok in helper_bot_tokens():
+            try:
+                async with Bot(tok) as hb:
+                    new_mid = await _try_upload_with(hb, fid_cand)
+                    if new_mid:
+                        return new_mid
+            except Exception:
+                continue
+
+    logger.warning("Could not resolve or heal storage_message_id for row %s (fuid=%s).", row_id, fuid)
+    return None
+
+
 async def _ensure_storage_message_id(main_bot, row) -> int | None:
     """Ensures the file has a valid message inside PUBLIC_/TESTING_STORAGE_GROUP_ID so helper bots can copy_message it."""
     storage_id = storage_group_id()
-    storage_msg_id = row["storage_message_id"]
+    storage_msg_id = _row_val(row, "storage_message_id")
     if storage_msg_id and storage_id:
         return int(storage_msg_id)
-
-    file_id = row["file_id"]
-    if not file_id or not storage_id:
+    if not storage_id:
         return None
-
-    try:
-        cap = (
-            f"📁 <b>File:</b> <code>{html.escape(row['file_name'] or 'File')}</code>\n"
-            f"📦 <b>Size:</b> <code>{html.escape(_fmt_size(row['file_size']))}</code> | "
-            f"<b>Type:</b> <code>.{html.escape((row['extension'] or '').lstrip('.'))}</code>"
-        )
-        sent = await main_bot.send_document(
-            chat_id=int(storage_id),
-            document=file_id,
-            caption=cap,
-            parse_mode="HTML",
-        )
-        update_storage_message_id_db(row["id"], sent.message_id)
-        return sent.message_id
-    except Exception as exc:
-        logger.warning("Could not backfill storage_message_id for row %s: %s", row["id"], exc)
-        return None
+    return await _resolve_or_heal_storage_message_id(main_bot, row, int(storage_id))
 
 
 async def _copy_with_bot(token: str | None, target_chat_id: int, from_chat_id: int, message_id: int):
@@ -341,6 +559,8 @@ async def _deliver_core(update: Update, context: ContextTypes.DEFAULT_TYPE, row_
 
     await _audit_helper_access(context, helper_token, helper_id, helper_username, storage_id, post_chan_id)
 
+    storage_msg_missing = False
+
     # 1. Posting Channel copy (auto-deleted) through the selected helper bot
     if post_chan_id:
         try:
@@ -349,42 +569,112 @@ async def _deliver_core(update: Update, context: ContextTypes.DEFAULT_TYPE, row_
             res["posting_link"] = build_channel_message_link(int(post_chan_id), posted_msg.message_id, chan_uname)
             _spawn(_auto_delete_message(helper_token, context.bot, int(post_chan_id), posted_msg.message_id, delete_secs))
         except Exception as exc:
-            logger.error("Helper bot posting channel delivery failed: %s", exc)
-            err_details = (
-                f"🚨 <b>Posting Channel Delivery Error</b>\n\n"
-                f"• Target Channel: <code>{post_chan_id}</code>\n"
-                f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
-                f"• Helper Bot: @{helper_username or 'unknown'}\n"
-                f"• Error: <code>{html.escape(str(exc))}</code>\n\n"
-                f"<i>Ensure @{helper_username or 'helper_bot'} is added as an Administrator in both the Storage Group and Posting Channel with Post &amp; Delete rights!</i>"
-            )
-            try:
-                await report_error(context.application, err_details, title="Posting Channel Delivery Error")
-            except Exception as report_err:
-                logger.error("Failed to report delivery error to logger group: %s", report_err)
+            if _is_missing_storage_msg_error(exc):
+                healed_mid = await _resolve_or_heal_storage_message_id(
+                    context.bot, row, int(storage_id), stale_msg_id=int(storage_msg_id)
+                )
+                if healed_mid:
+                    storage_msg_id = healed_mid
+                    try:
+                        posted_msg = await _copy_with_bot(helper_token, int(post_chan_id), int(storage_id), int(storage_msg_id))
+                        chan_uname = await _get_posting_channel_username(context.bot, int(post_chan_id))
+                        res["posting_link"] = build_channel_message_link(int(post_chan_id), posted_msg.message_id, chan_uname)
+                        _spawn(_auto_delete_message(helper_token, context.bot, int(post_chan_id), posted_msg.message_id, delete_secs))
+                    except Exception as retry_exc:
+                        exc = retry_exc
+                else:
+                    storage_msg_missing = True
 
-    # 2. PM copy (auto-deleted) through the SAME helper bot
-    if helper_token:
+            if not res["posting_link"]:
+                if storage_msg_missing:
+                    fname_esc = html.escape(str(_row_val(row, "file_name") or "Unknown"))
+                    fuid_esc = html.escape(str(_row_val(row, "file_unique_id") or "—"))
+                    err_details = (
+                        f"🚨 <b>Storage Group Message Not Found</b>\n\n"
+                        f"<table striped>"
+                        f"<tr><th>Field</th><th>Details</th></tr>"
+                        f"<tr><td>📁 <b>File Name</b></td><td><code>{fname_esc}</code></td></tr>"
+                        f"<tr><td>🔑 <b>File Unique ID</b></td><td><code>{fuid_esc}</code></td></tr>"
+                        f"<tr><td>📦 <b>Storage Group</b></td><td><code>{storage_id}</code></td></tr>"
+                        f"<tr><td>🔢 <b>Missing Msg ID</b></td><td><code>{storage_msg_id}</code></td></tr>"
+                        f"<tr><td>🤖 <b>Helper Bot</b></td><td>@{html.escape(helper_username or 'unknown')}</td></tr>"
+                        f"</table>\n\n"
+                        f"<i>Message #{storage_msg_id} was deleted from the Storage Group and its old file_id could not be resolved. Re-index the source channel to restore it.</i>"
+                    )
+                    try:
+                        await report_error(context.application, err_details, title="Storage Group Message Not Found")
+                    except Exception:
+                        pass
+                else:
+                    logger.error("Helper bot posting channel delivery failed: %s", exc)
+                    err_details = (
+                        f"🚨 <b>Posting Channel Delivery Error</b>\n\n"
+                        f"<table striped>"
+                        f"<tr><th>Field</th><th>Details</th></tr>"
+                        f"<tr><td>📢 <b>Target Channel</b></td><td><code>{post_chan_id}</code></td></tr>"
+                        f"<tr><td>📦 <b>Storage Group</b></td><td><code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)</td></tr>"
+                        f"<tr><td>🤖 <b>Helper Bot</b></td><td>@{html.escape(helper_username or 'unknown')}</td></tr>"
+                        f"<tr><td>⚠️ <b>Error</b></td><td><code>{html.escape(str(exc))}</code></td></tr>"
+                        f"</table>\n\n"
+                        f"<i>Ensure @{html.escape(helper_username or 'helper_bot')} is added as an Administrator in both the Storage Group and Posting Channel with Post &amp; Delete rights!</i>"
+                    )
+                    try:
+                        await report_error(context.application, err_details, title="Posting Channel Delivery Error")
+                    except Exception as report_err:
+                        logger.error("Failed to report delivery error to logger group: %s", report_err)
+
+    # 2. PM copy (auto-deleted) through the SAME helper bot (skip if Storage Group message is confirmed missing)
+    if helper_token and not storage_msg_missing:
         try:
             pm_copy = await _copy_with_bot(helper_token, int(user.id), int(storage_id), int(storage_msg_id))
             res["pm_delivered"] = True
             if pm_copy and delete_secs > 0:
                 _spawn(_auto_delete_message(helper_token, context.bot, int(user.id), pm_copy.message_id, delete_secs))
         except Exception as exc:
-            exc_str = str(exc)
-            logger.info("Helper bot PM delivery pending user /start for %s: %s", user.id, exc_str)
-            if "bot can't initiate conversation with a user" not in exc_str.lower() and "bot was blocked by the user" not in exc_str.lower():
-                err_details = (
-                    f"🚨 <b>Helper Bot Direct PM Delivery Error</b>\n\n"
-                    f"• Helper Bot: @{helper_username or 'unknown'}\n"
-                    f"• User ID: <code>{user.id}</code>\n"
-                    f"• Storage Group: <code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)\n"
-                    f"• Error: <code>{html.escape(exc_str)}</code>"
+            if _is_missing_storage_msg_error(exc):
+                healed_mid = await _resolve_or_heal_storage_message_id(
+                    context.bot, row, int(storage_id), stale_msg_id=int(storage_msg_id)
                 )
-                try:
-                    await report_error(context.application, err_details, title="Helper Bot Direct PM Delivery Error")
-                except Exception:
-                    pass
+                if healed_mid:
+                    storage_msg_id = healed_mid
+                    try:
+                        pm_copy = await _copy_with_bot(helper_token, int(user.id), int(storage_id), int(storage_msg_id))
+                        res["pm_delivered"] = True
+                        if pm_copy and delete_secs > 0:
+                            _spawn(_auto_delete_message(helper_token, context.bot, int(user.id), pm_copy.message_id, delete_secs))
+                    except Exception as retry_exc:
+                        exc = retry_exc
+                else:
+                    storage_msg_missing = True
+
+            if not res["pm_delivered"] and not storage_msg_missing:
+                exc_str = str(exc)
+                logger.info("Helper bot PM delivery pending user /start for %s: %s", user.id, exc_str)
+                if "bot can't initiate conversation with a user" not in exc_str.lower() and "bot was blocked by the user" not in exc_str.lower():
+                    err_details = (
+                        f"🚨 <b>Helper Bot Direct PM Delivery Error</b>\n\n"
+                        f"<table striped>"
+                        f"<tr><th>Field</th><th>Details</th></tr>"
+                        f"<tr><td>🤖 <b>Helper Bot</b></td><td>@{html.escape(helper_username or 'unknown')}</td></tr>"
+                        f"<tr><td>👤 <b>User ID</b></td><td><code>{user.id}</code></td></tr>"
+                        f"<tr><td>📦 <b>Storage Group</b></td><td><code>{storage_id}</code> (Msg: <code>{storage_msg_id}</code>)</td></tr>"
+                        f"<tr><td>⚠️ <b>Error</b></td><td><code>{html.escape(exc_str)}</code></td></tr>"
+                        f"</table>"
+                    )
+                    try:
+                        await report_error(context.application, err_details, title="Helper Bot Direct PM Delivery Error")
+                    except Exception:
+                        pass
+
+    if storage_msg_missing and not res["ok"]:
+        res["helper_username"] = ""
+        res["helper_start_url"] = None
+        res["error"] = (
+            f"⚠️ <b>File Storage Record Needs Re-Indexing</b>\n\n"
+            f"Storage message <code>#{storage_msg_id}</code> for <code>{html.escape(str(_row_val(row, 'file_name') or 'this book'))}</code> "
+            f"was not found in the Storage Group. Our admins have been notified!"
+        )
+        return res
 
     res["ok"] = bool(res["pm_delivered"] or res["posting_link"])
     if not res["ok"]:

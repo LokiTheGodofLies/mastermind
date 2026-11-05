@@ -1,3 +1,13 @@
+## 🔑 Strict 1-to-1 `(file_unique_id, file_id, storage_message_id)` Uniqueness, Storage Group Lookup on Missing Message ID & `.venv` Git Cleanup (`20261105-1628`)
+
+- **Strict 1-to-1 File & Storage Message Uniqueness (`modules/database/file_db.py`)**:
+  - Every file in `files.db` (`indexed_files`) is guaranteed to have **only one unique `file_unique_id`, one unique `file_id`, and one unique `storage_message_id`** (`deduplicate_indexed_files_db()`, unique partial indexes on `file_unique_id`, `file_id`, and `storage_message_id`, and `sync_unique_file_storage_db()`).
+- **Storage Group Lookup & Sync When `storage_message_id` Is Not Found (`modules/search/delivery.py`, `modules/indexing/book_index.py`, `main.py`)**:
+  - Whenever a file's `storage_message_id` is not found in the Storage Group (`Message to copy not found`), `_resolve_or_heal_storage_message_id()` checks all `file_id` and `file_unique_id` candidates in `files.db` (`find_file_candidates_by_ids_db()`), probes the Storage Group (`_probe_storage_group_for_file()`) for a new `storage_message_id` matching `file_unique_id` / `file_id`, or restores the file via its `file_id` across the Main Bot + Helper Bots, and syncs the single canonical record in `files.db` (`sync_unique_file_storage_db()`).
+  - Added `handle_storage_group_media_sync()` so any media message posted or edited in the Storage Group automatically syncs its `storage_message_id` and `file_id` in `files.db` by `file_unique_id` — with **zero changes to `/index` logic or process**.
+- **Fixed GitHub Zip Size (`8.4 MB` -> `~195 KB`) (`.gitignore`, `modules/utility/check_helpers.py`)**:
+  - Added `.venv/`, `venv/`, `env/`, `ENV/`, and `*.bak` to `.gitignore` and added `--ignore-unmatch` to `git rm -r --cached` in `/update` so the 29 MB Python `.venv/` folder is removed from GitHub and never re-added by `git add -A`.
+
 ## 🤖 Helper Bot DM Indexing Progress, `📋 Ongoing Tasks` Fleet Dashboard & Multi-Helper Concurrency (`20261101-1805`)
 
 - **Never Post Index Progress Inside Source Channels (`modules/indexing/index_command.py`)**:

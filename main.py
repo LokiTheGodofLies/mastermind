@@ -94,6 +94,7 @@ from modules.indexing.book_index import (
     editcaption_command,
     handle_book_indexing,
     handle_storage_caption_edit,
+    handle_storage_group_media_sync,
     storage_caption_reply_handler,
 )  # noqa: E402
 from modules.indexing.index_command import (
@@ -463,6 +464,13 @@ def main():
         MessageHandler(
             filters.UpdateType.EDITED_MESSAGE & (filters.Document.ALL | filters.AUDIO),
             handle_storage_caption_edit,
+        ),
+        group=0,
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.ChatType.GROUPS & (filters.Document.ALL | filters.AUDIO),
+            handle_storage_group_media_sync,
         ),
         group=0,
     )

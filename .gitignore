@@ -1,8 +1,17 @@
 env.txt
+.venv/
+venv/
+env/
+ENV/
 __pycache__/
 *.pyc
+*.pyo
+*.bak
 /database/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.zip
 Render_Variables*.txt
 *.env
